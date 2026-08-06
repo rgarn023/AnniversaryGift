@@ -3,12 +3,11 @@
 *.translation
 export_credentials.cfg
 
-# Build outputs
-build/*.apk
+# Build outputs (keep the debug APK committed for download)
 build/*.aab
 build/*.idsig
-*.apk
 *.aab
+*.idsig
 
 # Android Gradle build template (reinstall with tools/install_android_template.sh)
 android/build/
