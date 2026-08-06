@@ -1,0 +1,47 @@
+; Engine configuration for Chest of Love Notes.
+; Godot 4.7.1 — independent from Anniversary Gift.
+
+config_version=5
+
+[application]
+
+config/name="Chest of Love Notes"
+config/description="Send animated scroll love notes to friends with scheduled unlock times."
+config/version="0.1.0"
+run/main_scene="res://scenes/Main.tscn"
+config/features=PackedStringArray("4.7", "Mobile")
+boot_splash/bg_color=Color(0.05, 0.03, 0.12, 1)
+boot_splash/image="res://assets/art/boot_splash.png"
+boot_splash/fullsize=true
+boot_splash/use_filter=true
+config/icon="res://assets/icons/app_icon_1024.png"
+
+[display]
+
+window/size/viewport_width=1080
+window/size/viewport_height=2400
+window/size/mode=0
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+window/handheld/orientation=1
+
+[input_devices]
+
+pointing/emulate_touch_from_mouse=true
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+textures/canvas_textures/default_texture_filter=1
+textures/vram_compression/import_etc2_astc=true
+environment/defaults/default_clear_color=Color(0.05, 0.03, 0.12, 1)
+
+[gui]
+
+theme/default_font_antialiasing=1
+theme/default_font_subpixel_positioning=1
+
+[android]
+
+modules=""

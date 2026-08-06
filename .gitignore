@@ -19,6 +19,7 @@ build/*.idsig
 !build/AnniversaryGift-pdf-preview-fixed-debug.apk
 !build/AnniversaryGift-preview-layout-fixed-debug.apk
 !build/AnniversaryGift-chest-preview-visibility-fixed-debug.apk
+!side_projects/ChestOfLoveNotes/build/ChestOfLoveNotes-debug.apk
 
 # Android Gradle build template (reinstall with tools/install_android_template.sh)
 android/build/

@@ -1,0 +1,34 @@
+# Godot
+.godot/
+*.translation
+export_credentials.cfg
+
+# Secrets / local backend config
+config/backend_config.json
+supabase/.env
+secrets/
+*.pem
+key.properties
+*.keystore
+*.jks
+
+# Build
+build/*.aab
+build/*.idsig
+*.aab
+*.apk
+!build/ChestOfLoveNotes-debug.apk
+
+# Android Gradle template
+android/build/
+android/build/.gradle/
+android/build/build/
+android/build/local.properties
+android/build/.cxx/
+
+# OS / editor
+.DS_Store
+*.swp
+*~
+.idea/
+.vscode/
