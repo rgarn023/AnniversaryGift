@@ -9,8 +9,10 @@ build/*.idsig
 *.aab
 # Keep the distributable debug APK in-repo for easy download
 !build/AnniversaryGift-debug.apk
+!build/AnniversaryGift-fixed-debug.apk
 *.apk
 !build/AnniversaryGift-debug.apk
+!build/AnniversaryGift-fixed-debug.apk
 
 # Android Gradle build template (reinstall with tools/install_android_template.sh)
 android/build/
