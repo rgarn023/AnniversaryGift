@@ -216,45 +216,38 @@ func _build_ui() -> void:
 	_test_btn.pressed.connect(func() -> void: _developer.prompt_pin())
 	add_child(_test_btn)
 
-	# On-screen date simulator shown while developer mode is active.
+	# Compact simulated-date strip while a developer date is active.
 	_date_bar = HBoxContainer.new()
 	_date_bar.visible = false
 	_date_bar.z_index = 27
 	_date_bar.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	_date_bar.position = Vector2(-420, 96)
-	_date_bar.size = Vector2(840, 72)
+	_date_bar.position = Vector2(-460, 96)
+	_date_bar.size = Vector2(920, 72)
 	_date_bar.add_theme_constant_override("separation", 12)
 	_date_bar.alignment = BoxContainer.ALIGNMENT_CENTER
 	add_child(_date_bar)
 
-	var prev_btn := Button.new()
-	prev_btn.text = "◀ Prev Day"
-	prev_btn.custom_minimum_size = Vector2(180, 64)
-	prev_btn.focus_mode = Control.FOCUS_NONE
-	prev_btn.pressed.connect(_on_prev_day)
-	_date_bar.add_child(prev_btn)
-
 	_date_label = Label.new()
 	_date_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_date_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_date_label.custom_minimum_size = Vector2(260, 64)
+	_date_label.custom_minimum_size = Vector2(420, 64)
 	_date_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.45))
 	_date_label.add_theme_font_size_override("font_size", 26)
 	_date_bar.add_child(_date_label)
 
-	var next_btn := Button.new()
-	next_btn.text = "Next Day ▶"
-	next_btn.custom_minimum_size = Vector2(180, 64)
-	next_btn.focus_mode = Control.FOCUS_NONE
-	next_btn.pressed.connect(_on_next_day)
-	_date_bar.add_child(next_btn)
+	var change_btn := Button.new()
+	change_btn.text = "Change date"
+	change_btn.custom_minimum_size = Vector2(180, 64)
+	change_btn.focus_mode = Control.FOCUS_NONE
+	change_btn.pressed.connect(func() -> void: _developer.open_panel())
+	_date_bar.add_child(change_btn)
 
-	var more_btn := Button.new()
-	more_btn.text = "More…"
-	more_btn.custom_minimum_size = Vector2(120, 64)
-	more_btn.focus_mode = Control.FOCUS_NONE
-	more_btn.pressed.connect(func() -> void: _developer.open_panel())
-	_date_bar.add_child(more_btn)
+	var exit_btn := Button.new()
+	exit_btn.text = "Exit"
+	exit_btn.custom_minimum_size = Vector2(120, 64)
+	exit_btn.focus_mode = Control.FOCUS_NONE
+	exit_btn.pressed.connect(func() -> void: _developer.exit_simulation())
+	_date_bar.add_child(exit_btn)
 
 
 func _build_modals() -> void:
@@ -271,11 +264,7 @@ func _build_modals() -> void:
 	_developer = DeveloperPanel.new()
 	_developer.manager = manager
 	_developer.closed.connect(_on_developer_closed)
-	_developer.request_test_final_message.connect(_dev_test_final_message)
-	_developer.request_test_final_gift.connect(_dev_test_final_gift)
-	_developer.request_test_pdf_viewer.connect(func() -> void: _gift_viewer.open_viewer())
-	_developer.request_test_pdf_plugin.connect(_dev_test_pdf_plugin)
-	_developer.request_simulate_restart.connect(_simulate_restart)
+	_developer.date_applied.connect(_on_developer_date_applied)
 	add_child(_developer)
 
 
@@ -340,7 +329,8 @@ func _refresh_presentation() -> void:
 	_date_bar.visible = manager.developer_mode
 	_test_btn.visible = not manager.developer_mode
 	if manager.developer_mode:
-		_date_label.text = manager.get_effective_date()
+		_date_label.text = "Simulated: %s" % DateService.format_display_date(manager.get_effective_date())
+		_dev_banner.text = "SIMULATED DATE — %s" % manager.get_effective_date()
 	_chest.reduced_motion = manager.is_reduced_motion()
 	_archive.refresh()
 
@@ -477,61 +467,13 @@ func _register_title_tap() -> void:
 		_developer.prompt_pin()
 
 
-func _on_prev_day() -> void:
-	if not manager.developer_mode:
-		return
-	var next: String = DateService.add_days(manager.get_effective_date(), -1)
-	if next < "2026-08-05":
-		next = "2026-08-05"
-	manager.developer_set_date(next)
-	_refresh_presentation()
-	_toast("Simulated date: %s" % manager.get_effective_date())
-
-
-func _on_next_day() -> void:
-	if not manager.developer_mode:
-		return
-	var next: String = DateService.add_days(manager.get_effective_date(), 1)
-	if next > "2026-08-14":
-		next = "2026-08-14"
-	manager.developer_set_date(next)
-	_refresh_presentation()
-	_toast("Simulated date: %s" % manager.get_effective_date())
-
-
 func _on_developer_closed() -> void:
 	_refresh_presentation()
 
 
-func _simulate_restart() -> void:
-	manager.reload_progress()
+func _on_developer_date_applied(iso_date: String) -> void:
 	_refresh_presentation()
-	_toast("Simulated app restart")
-
-
-func _dev_test_final_message() -> void:
-	manager.developer_set_date("2026-08-13")
-	manager.developer_mark_chest_unopened("2026-08-13")
-	manager.developer_mark_scroll_unread("2026-08-13")
-	_refresh_presentation()
-	_on_chest_tapped()
-
-
-func _dev_test_final_gift() -> void:
-	manager.developer_set_date("2026-08-13")
-	if not manager.is_chest_opened("2026-08-13"):
-		manager.mark_chest_opened("2026-08-13")
-	if not manager.is_scroll_viewed("2026-08-13"):
-		manager.mark_scroll_viewed("2026-08-13")
-	_refresh_presentation()
-	_on_chest_tapped()
-
-
-func _dev_test_pdf_plugin() -> void:
-	var helper := PdfHelper.new()
-	var open_result: Dictionary = helper.open_original_pdf()
-	var share_result: Dictionary = helper.share_original_pdf()
-	_toast("%s | %s" % [open_result.get("message", ""), share_result.get("message", "")])
+	_toast("Simulating open on %s" % DateService.format_display_date(iso_date))
 
 
 func _toast(text: String) -> void:
