@@ -25,6 +25,10 @@ var _title_taps: Array[float] = []
 var _poll_timer: float = 0.0
 var _sparkle_trail: CPUParticles2D
 var _status_toast: Label
+var _date_bar: HBoxContainer
+var _date_label: Label
+var _test_btn: Button
+var _title_press_time: float = -1.0
 
 
 func _ready() -> void:
@@ -191,6 +195,59 @@ func _build_ui() -> void:
 	_status_toast.modulate.a = 0.0
 	add_child(_status_toast)
 
+	# Small always-available entry to date testing (PIN protected).
+	_test_btn = Button.new()
+	_test_btn.text = "Test Dates"
+	_test_btn.tooltip_text = "Open date simulator (PIN required)"
+	_test_btn.focus_mode = Control.FOCUS_NONE
+	_test_btn.custom_minimum_size = Vector2(160, 56)
+	_test_btn.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	_test_btn.position = Vector2(-180, 56)
+	_test_btn.size = Vector2(160, 56)
+	_test_btn.z_index = 26
+	_test_btn.pressed.connect(func() -> void: _developer.prompt_pin())
+	add_child(_test_btn)
+
+	# On-screen date simulator shown while developer mode is active.
+	_date_bar = HBoxContainer.new()
+	_date_bar.visible = false
+	_date_bar.z_index = 27
+	_date_bar.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	_date_bar.position = Vector2(-420, 96)
+	_date_bar.size = Vector2(840, 72)
+	_date_bar.add_theme_constant_override("separation", 12)
+	_date_bar.alignment = BoxContainer.ALIGNMENT_CENTER
+	add_child(_date_bar)
+
+	var prev_btn := Button.new()
+	prev_btn.text = "◀ Prev Day"
+	prev_btn.custom_minimum_size = Vector2(180, 64)
+	prev_btn.focus_mode = Control.FOCUS_NONE
+	prev_btn.pressed.connect(_on_prev_day)
+	_date_bar.add_child(prev_btn)
+
+	_date_label = Label.new()
+	_date_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_date_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_date_label.custom_minimum_size = Vector2(260, 64)
+	_date_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.45))
+	_date_label.add_theme_font_size_override("font_size", 26)
+	_date_bar.add_child(_date_label)
+
+	var next_btn := Button.new()
+	next_btn.text = "Next Day ▶"
+	next_btn.custom_minimum_size = Vector2(180, 64)
+	next_btn.focus_mode = Control.FOCUS_NONE
+	next_btn.pressed.connect(_on_next_day)
+	_date_bar.add_child(next_btn)
+
+	var more_btn := Button.new()
+	more_btn.text = "More…"
+	more_btn.custom_minimum_size = Vector2(120, 64)
+	more_btn.focus_mode = Control.FOCUS_NONE
+	more_btn.pressed.connect(func() -> void: _developer.open_panel())
+	_date_bar.add_child(more_btn)
+
 
 func _build_modals() -> void:
 	_scroll_viewer = ScrollViewer.new()
@@ -239,6 +296,12 @@ func _process(delta: float) -> void:
 	if _poll_timer >= DATE_POLL_SECONDS:
 		_poll_timer = 0.0
 		manager.refresh_unlocks()
+	# Long-press title (~1s) also opens test PIN dialog.
+	if _title_press_time >= 0.0:
+		var held: float = Time.get_ticks_msec() / 1000.0 - _title_press_time
+		if held >= 1.0:
+			_title_press_time = -1.0
+			_developer.prompt_pin()
 	# Gentle parallax drift
 	if _bg and _bg.material is ShaderMaterial and not manager.is_reduced_motion():
 		var sm := _bg.material as ShaderMaterial
@@ -262,6 +325,10 @@ func _notification(what: int) -> void:
 
 func _refresh_presentation() -> void:
 	_dev_banner.visible = manager.developer_mode
+	_date_bar.visible = manager.developer_mode
+	_test_btn.visible = not manager.developer_mode
+	if manager.developer_mode:
+		_date_label.text = manager.get_effective_date()
 	_chest.reduced_motion = manager.is_reduced_motion()
 	_archive.refresh()
 
@@ -368,10 +435,18 @@ func _quad_bezier(a: Vector2, b: Vector2, c: Vector2, t: float) -> Vector2:
 
 
 func _on_title_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		_register_title_tap()
-	elif event is InputEventScreenTouch and event.pressed:
-		_register_title_tap()
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed:
+			_register_title_tap()
+			_title_press_time = Time.get_ticks_msec() / 1000.0
+		else:
+			_title_press_time = -1.0
+	elif event is InputEventScreenTouch:
+		if event.pressed:
+			_register_title_tap()
+			_title_press_time = Time.get_ticks_msec() / 1000.0
+		else:
+			_title_press_time = -1.0
 
 
 func _register_title_tap() -> void:
@@ -382,6 +457,28 @@ func _register_title_tap() -> void:
 	if _title_taps.size() >= TITLE_TAP_TARGET:
 		_title_taps.clear()
 		_developer.prompt_pin()
+
+
+func _on_prev_day() -> void:
+	if not manager.developer_mode:
+		return
+	var next: String = DateService.add_days(manager.get_effective_date(), -1)
+	if next < "2026-08-05":
+		next = "2026-08-05"
+	manager.developer_set_date(next)
+	_refresh_presentation()
+	_toast("Simulated date: %s" % manager.get_effective_date())
+
+
+func _on_next_day() -> void:
+	if not manager.developer_mode:
+		return
+	var next: String = DateService.add_days(manager.get_effective_date(), 1)
+	if next > "2026-08-14":
+		next = "2026-08-14"
+	manager.developer_set_date(next)
+	_refresh_presentation()
+	_toast("Simulated date: %s" % manager.get_effective_date())
 
 
 func _on_developer_closed() -> void:

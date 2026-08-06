@@ -9,20 +9,21 @@ signal archive_flight_requested(date_iso: String, screen_pos: Vector2)
 const MIN_SCALE := 0.8
 const MAX_SCALE := 2.2
 const DESIGN_SIZE := Vector2(920, 1500)
+const TEXT_WIDTH := 680.0
 
 var manager: AnniversaryManager
 var current_date: String = ""
 var _zoom: GestureZoomController
 var _dim: ColorRect
 var _panel: Control
+var _content_clip: Control
 var _top_roller: TextureRect
 var _bottom_roller: TextureRect
 var _parchment: TextureRect
 var _heading: Label
 var _date_label: Label
-var _message: Label
+var _message: RichTextLabel
 var _scroll: ScrollContainer
-var _message_box: VBoxContainer
 var _hint: Label
 var _btn_close: Button
 var _btn_plus: Button
@@ -58,13 +59,13 @@ func _build_ui() -> void:
 
 	_panel = Control.new()
 	_panel.mouse_filter = Control.MOUSE_FILTER_STOP
-	_panel.clip_contents = false
+	_panel.clip_contents = true
 	add_child(_panel)
 
 	var shadow := ColorRect.new()
 	shadow.color = Color(0, 0, 0, 0.35)
-	shadow.position = Vector2(24, 36)
-	shadow.size = Vector2(880, 1420)
+	shadow.position = Vector2(28, 40)
+	shadow.size = Vector2(870, 1410)
 	shadow.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_panel.add_child(shadow)
 
@@ -73,17 +74,10 @@ func _build_ui() -> void:
 	_parchment.size = Vector2(840, 1360)
 	_parchment.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	_parchment.stretch_mode = TextureRect.STRETCH_SCALE
+	_parchment.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	_parchment.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	if ResourceLoader.exists("res://assets/art/scroll/scroll_parchment.png"):
 		_parchment.texture = load("res://assets/art/scroll/scroll_parchment.png")
-	else:
-		# Fallback tint if texture missing.
-		var fallback := ColorRect.new()
-		fallback.color = Color(0.92, 0.84, 0.65, 1.0)
-		fallback.position = _parchment.position
-		fallback.size = _parchment.size
-		fallback.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		_panel.add_child(fallback)
 	_panel.add_child(_parchment)
 
 	_top_roller = _make_roller(true)
@@ -91,60 +85,69 @@ func _build_ui() -> void:
 	_panel.add_child(_top_roller)
 	_panel.add_child(_bottom_roller)
 
+	# Clipped content region inside the parchment so text cannot spill out.
+	_content_clip = Control.new()
+	_content_clip.position = Vector2(100, 145)
+	_content_clip.size = Vector2(720, 1120)
+	_content_clip.clip_contents = true
+	_content_clip.mouse_filter = Control.MOUSE_FILTER_PASS
+	_panel.add_child(_content_clip)
+
 	_date_label = Label.new()
 	_date_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_date_label.position = Vector2(80, 150)
-	_date_label.size = Vector2(760, 40)
+	_date_label.position = Vector2(20, 8)
+	_date_label.size = Vector2(680, 36)
 	_date_label.add_theme_color_override("font_color", Color(0.45, 0.2, 0.28))
 	_date_label.add_theme_font_size_override("font_size", 24)
-	_panel.add_child(_date_label)
+	_content_clip.add_child(_date_label)
 
 	_heading = Label.new()
 	_heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_heading.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_heading.position = Vector2(80, 200)
-	_heading.size = Vector2(760, 80)
+	_heading.position = Vector2(20, 48)
+	_heading.size = Vector2(680, 90)
+	_heading.clip_text = false
 	_heading.add_theme_color_override("font_color", Color(0.35, 0.16, 0.12))
-	_heading.add_theme_font_size_override("font_size", 40)
-	_panel.add_child(_heading)
+	_heading.add_theme_font_size_override("font_size", 36)
+	_content_clip.add_child(_heading)
 
-	# Subtle gold divider (no red ornament).
 	var divider := ColorRect.new()
 	divider.color = Color(0.72, 0.52, 0.18, 0.55)
-	divider.position = Vector2(260, 285)
+	divider.position = Vector2(160, 145)
 	divider.size = Vector2(400, 2)
 	divider.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_panel.add_child(divider)
+	_content_clip.add_child(divider)
 
 	_scroll = ScrollContainer.new()
-	_scroll.position = Vector2(90, 300)
-	_scroll.size = Vector2(740, 980)
+	_scroll.position = Vector2(20, 165)
+	_scroll.size = Vector2(680, 860)
 	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	_panel.add_child(_scroll)
+	_scroll.clip_contents = true
+	_content_clip.add_child(_scroll)
 
-	_message_box = VBoxContainer.new()
-	_message_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_scroll.add_child(_message_box)
-
-	_message = Label.new()
+	_message = RichTextLabel.new()
+	_message.bbcode_enabled = false
+	_message.fit_content = true
+	_message.scroll_active = false
 	_message.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_message.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_message.add_theme_color_override("font_color", Color(0.22, 0.12, 0.1))
-	_message.add_theme_font_size_override("font_size", _base_font_size)
-	_message_box.add_child(_message)
+	_message.custom_minimum_size = Vector2(TEXT_WIDTH, 0)
+	_message.add_theme_color_override("default_color", Color(0.22, 0.12, 0.1))
+	_message.add_theme_font_size_override("normal_font_size", _base_font_size)
+	_scroll.add_child(_message)
 
 	_hint = Label.new()
 	_hint.text = "Pinch or use + and – to resize"
 	_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_hint.position = Vector2(80, 1290)
-	_hint.size = Vector2(760, 36)
+	_hint.position = Vector2(20, 1040)
+	_hint.size = Vector2(680, 32)
 	_hint.add_theme_color_override("font_color", Color(0.4, 0.25, 0.18, 0.85))
 	_hint.add_theme_font_size_override("font_size", 20)
-	_panel.add_child(_hint)
+	_content_clip.add_child(_hint)
 
 	var toolbar := HBoxContainer.new()
-	toolbar.position = Vector2(80, 1340)
-	toolbar.size = Vector2(760, 72)
+	toolbar.position = Vector2(100, 1345)
+	toolbar.size = Vector2(720, 72)
 	toolbar.add_theme_constant_override("separation", 16)
 	_panel.add_child(toolbar)
 
@@ -170,6 +173,7 @@ func _make_roller(top: bool) -> TextureRect:
 		tr.texture = load(path)
 	tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	tr.stretch_mode = TextureRect.STRETCH_SCALE
+	tr.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	tr.position = Vector2(20, 40 if top else 1400)
 	tr.size = Vector2(880, 70)
 	tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -188,11 +192,10 @@ func _make_tool_button(text: String, tip: String) -> Button:
 
 func _apply_fonts() -> void:
 	if ResourceLoader.exists("res://assets/fonts/Cinzel-Bold.ttf"):
-		var title_font: FontFile = load("res://assets/fonts/Cinzel-Bold.ttf")
-		_heading.add_theme_font_override("font", title_font)
+		_heading.add_theme_font_override("font", load("res://assets/fonts/Cinzel-Bold.ttf"))
 	if ResourceLoader.exists("res://assets/fonts/CormorantGaramond-Regular.ttf"):
 		var body: FontFile = load("res://assets/fonts/CormorantGaramond-Regular.ttf")
-		_message.add_theme_font_override("font", body)
+		_message.add_theme_font_override("normal_font", body)
 		_date_label.add_theme_font_override("font", body)
 		_hint.add_theme_font_override("font", body)
 
@@ -207,9 +210,14 @@ func _layout_panel() -> void:
 	_panel.scale = Vector2(_fit_scale, _fit_scale)
 	_panel.rotation = 0.0
 	_panel.modulate = Color.WHITE
-	# Top-left positioning so the scaled panel is truly centered in the viewport.
 	_panel.position = (vp - DESIGN_SIZE * _fit_scale) * 0.5
 	_panel.pivot_offset = Vector2.ZERO
+	_constrain_message_width()
+
+
+func _constrain_message_width() -> void:
+	_message.custom_minimum_size = Vector2(TEXT_WIDTH, 0)
+	_message.size = Vector2(TEXT_WIDTH, _message.size.y)
 
 
 func _on_viewport_resized() -> void:
@@ -250,10 +258,10 @@ func _play_open_animation(full_text: String) -> void:
 		_bottom_roller.position.y = 1400
 		_parchment.size.y = 1360
 		_message.text = full_text
+		_constrain_message_width()
 		_animating = false
 		return
 
-	# Start slightly smaller and faded, then settle into centered layout.
 	var target_pos: Vector2 = _panel.position
 	var target_scale: Vector2 = _panel.scale
 	_panel.scale = target_scale * Vector2(0.42, 0.28)
@@ -290,28 +298,20 @@ func _play_open_animation(full_text: String) -> void:
 func _reveal_text(full_text: String) -> void:
 	if manager != null and manager.is_reduced_motion():
 		_message.text = full_text
+		_constrain_message_width()
 		return
 	var chunks: PackedStringArray = _chunk_text(full_text)
 	_message.text = ""
 	for chunk in chunks:
 		if _skip_text or not _visible_modal:
 			_message.text = full_text
+			_constrain_message_width()
 			return
 		_message.text += chunk
-		await get_tree().create_timer(0.04).timeout
+		_constrain_message_width()
+		await get_tree().create_timer(0.035).timeout
 	_message.text = full_text
-	var spark := ColorRect.new()
-	spark.color = Color(1, 0.9, 0.5, 0.0)
-	spark.size = Vector2(36, 900)
-	spark.position = Vector2(90, 300)
-	spark.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_panel.add_child(spark)
-	var tw := create_tween()
-	tw.tween_property(spark, "color:a", 0.28, 0.1)
-	tw.tween_property(spark, "position:x", 820.0, 0.5)
-	tw.tween_property(spark, "color:a", 0.0, 0.18)
-	await tw.finished
-	spark.queue_free()
+	_constrain_message_width()
 
 
 func _chunk_text(text: String) -> PackedStringArray:
@@ -330,7 +330,8 @@ func _chunk_text(text: String) -> PackedStringArray:
 
 func _on_zoom_changed(scale: float) -> void:
 	var size_px: int = int(round(float(_base_font_size) * scale))
-	_message.add_theme_font_size_override("font_size", size_px)
+	_message.add_theme_font_size_override("normal_font_size", size_px)
+	_constrain_message_width()
 	if manager:
 		manager.set_text_scale(scale)
 
@@ -376,7 +377,6 @@ func close_viewer() -> void:
 func _input(event: InputEvent) -> void:
 	if not visible:
 		return
-	# Use _input (not unhandled) so pinch works above ScrollContainer controls.
 	if _zoom.handle_input(event):
 		get_viewport().set_input_as_handled()
 		return

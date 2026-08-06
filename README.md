@@ -28,13 +28,21 @@ Progress is saved to:
 
 After a message is closed, a miniature scroll lands in the bottom **Scroll Archive**. Archived messages can be reopened anytime (shorter animation). Read/unread styling differs. Archive state persists across restarts.
 
-## Developer test mode
+## Developer test mode / date simulation
 
-1. Tap the title **Anniversary Gift** seven times within about five seconds.
-2. Enter PIN: `0813`
-3. A **DEVELOPER TEST MODE** banner and panel appear.
+Ways to open it:
 
-Controls include date selection (Aug 5–14), previous/next day, real device date, simulate restart, reset developer progress, mark chest/scroll unread, unlock all, test final message/gift/PDF/plugin, and reduced-motion toggle.
+1. Tap the on-screen **Test Dates** button (top-right), or
+2. Long-press the title for about one second, or
+3. Tap the title **Anniversary Gift** seven times within about five seconds
+
+Then enter PIN: `0813`
+
+While active you get:
+
+- A red **DEVELOPER TEST MODE** banner
+- On-screen **◀ Prev Day / date / Next Day ▶** controls to jump through August 5–14
+- A **More…** button for the full developer panel (unlock all, reset progress, PDF tests, etc.)
 
 Developer mode uses a separate save file and **never** modifies normal progress or the normal-mode latest legitimate date. Closing developer mode restores the real device date and normal save state.
 
