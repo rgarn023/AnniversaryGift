@@ -1,0 +1,32 @@
+# Godot
+.godot/
+*.translation
+export_credentials.cfg
+
+# Build outputs
+build/*.apk
+build/*.aab
+build/*.idsig
+*.apk
+*.aab
+
+# Android Gradle build template (reinstall with tools/install_android_template.sh)
+android/build/
+android/build/.gradle/
+android/build/build/
+android/build/local.properties
+android/build/.cxx/
+*.keystore
+*.jks
+
+# OS / editor
+.DS_Store
+*.swp
+*~
+.idea/
+.vscode/
+
+# Secrets — never commit keystores or passwords
+secrets/
+*.pem
+key.properties
