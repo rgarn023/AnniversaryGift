@@ -18,16 +18,16 @@ import bcrypt from "npm:bcryptjs@2.4.3";
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-function parseEncryptionKey(): Uint8Array {
+function parseEncryptionKey(): Uint8Array<ArrayBuffer> {
   const raw = Deno.env.get("MESSAGE_ENCRYPTION_KEY");
   if (!raw) {
     throw new Error("MESSAGE_ENCRYPTION_KEY is not set");
   }
 
   // Prefer base64 (44 chars for 32 bytes) else hex (64 chars).
-  let key: Uint8Array;
+  let key: Uint8Array<ArrayBuffer>;
   if (/^[0-9a-fA-F]{64}$/.test(raw)) {
-    key = new Uint8Array(raw.match(/.{1,2}/g)!.map((b) => parseInt(b, 16)));
+    key = Uint8Array.from(raw.match(/.{1,2}/g)!.map((b) => parseInt(b, 16)));
   } else {
     const bin = atob(raw);
     key = new Uint8Array(bin.length);
@@ -46,11 +46,15 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(s);
 }
 
-function base64ToBytes(b64: string): Uint8Array {
+function base64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
   const bin = atob(b64);
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
+}
+
+function asBufferSource(bytes: Uint8Array): BufferSource {
+  return bytes as unknown as BufferSource;
 }
 
 export interface EncryptedPayload {
@@ -63,14 +67,14 @@ export async function encryptMessage(plaintext: string): Promise<EncryptedPayloa
   const keyBytes = parseEncryptionKey();
   const key = await crypto.subtle.importKey(
     "raw",
-    keyBytes,
+    asBufferSource(keyBytes),
     { name: "AES-GCM" },
     false,
     ["encrypt"],
   );
   const nonce = crypto.getRandomValues(new Uint8Array(12));
   const cipherBuf = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv: nonce },
+    { name: "AES-GCM", iv: asBufferSource(nonce) },
     key,
     encoder.encode(plaintext),
   );
@@ -88,15 +92,15 @@ export async function decryptMessage(
   const keyBytes = parseEncryptionKey();
   const key = await crypto.subtle.importKey(
     "raw",
-    keyBytes,
+    asBufferSource(keyBytes),
     { name: "AES-GCM" },
     false,
     ["decrypt"],
   );
   const plainBuf = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv: base64ToBytes(nonceB64) },
+    { name: "AES-GCM", iv: asBufferSource(base64ToBytes(nonceB64)) },
     key,
-    base64ToBytes(ciphertextB64),
+    asBufferSource(base64ToBytes(ciphertextB64)),
   );
   return decoder.decode(plainBuf);
 }

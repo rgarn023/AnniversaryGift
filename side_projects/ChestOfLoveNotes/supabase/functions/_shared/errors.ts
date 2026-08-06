@@ -31,16 +31,17 @@ export function errorResponse(err: unknown): Response {
   );
 }
 
-export function requireFields<T extends Record<string, unknown>>(
-  body: T,
-  fields: (keyof T)[],
+export function requireFields(
+  body: object,
+  fields: string[],
 ): void {
+  const record = body as Record<string, unknown>;
   for (const field of fields) {
-    const value = body[field];
+    const value = record[field];
     if (value === undefined || value === null || value === "") {
       throw new AppError(
         "missing_field",
-        `Missing required field: ${String(field)}`,
+        `Missing required field: ${field}`,
         400,
       );
     }
