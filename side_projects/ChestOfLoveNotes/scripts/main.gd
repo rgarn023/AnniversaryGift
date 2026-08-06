@@ -42,9 +42,15 @@ func _build_chrome() -> void:
 		add_child(stars)
 
 	_banner = Label.new()
-	_banner.text = "LOCAL DEMO MODE"
+	if state.is_demo():
+		_banner.text = "LOCAL DEMO MODE"
+		_banner.visible = true
+	elif state.is_private_onboarding_build():
+		_banner.text = "Private Onboarding Build"
+		_banner.visible = true
+	else:
+		_banner.visible = false
 	_banner.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_banner.visible = state.is_demo()
 	_banner.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	_banner.offset_top = 8
 	_banner.offset_bottom = 44
@@ -55,7 +61,7 @@ func _build_chrome() -> void:
 
 	_screen_host = Control.new()
 	_screen_host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_screen_host.offset_top = 48 if state.is_demo() else 0
+	_screen_host.offset_top = 48 if _banner.visible else 0
 	add_child(_screen_host)
 
 	_toast = Label.new()
@@ -165,7 +171,15 @@ func _show_welcome() -> void:
 		box.add_child(note)
 	elif state.is_online():
 		box.add_child(_make_button("Sign In", func() -> void: _show_auth(false)))
-		box.add_child(_make_button("Create Account", func() -> void: _show_auth(true)))
+		if state.show_sign_up():
+			box.add_child(_make_button("Sign Up", func() -> void: _show_auth(true)))
+		var private_note := Label.new()
+		private_note.text = "This is a private app. Only approved accounts can enter the chest."
+		private_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		private_note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		private_note.add_theme_font_size_override("font_size", 22)
+		private_note.add_theme_color_override("font_color", Color(0.9, 0.82, 0.7))
+		box.add_child(private_note)
 	else:
 		var err := Label.new()
 		err.text = "Backend is not configured.\nAdd config/backend_config.json (see example)."
@@ -177,20 +191,27 @@ func _show_welcome() -> void:
 
 
 func _enter_demo() -> void:
+	if state.is_private_onboarding_build() and not state.is_demo():
+		_show_toast("Local Demo Mode is disabled in this build.")
+		return
 	_show_main_chest()
 
 
 func _show_auth(sign_up: bool) -> void:
-	_current_screen = "auth"
+	if sign_up and not state.show_sign_up():
+		_show_toast("Sign Up is unavailable in this build.")
+		_show_auth(false)
+		return
+	_current_screen = "auth_signup" if sign_up else "auth_signin"
 	_clear_screen()
 	var box := VBoxContainer.new()
 	box.set_anchors_preset(Control.PRESET_CENTER)
-	box.position = Vector2(-400, -480)
-	box.size = Vector2(800, 960)
+	box.position = Vector2(-400, -520)
+	box.size = Vector2(800, 1040)
 	box.add_theme_constant_override("separation", 16)
 	_screen_host.add_child(box)
 	var title := Label.new()
-	title.text = "Create Account" if sign_up else "Sign In"
+	title.text = "Sign Up" if sign_up else "Sign In"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.add_theme_font_size_override("font_size", 44)
 	title.add_theme_color_override("font_color", Color(0.98, 0.86, 0.45))
@@ -204,28 +225,201 @@ func _show_auth(sign_up: bool) -> void:
 	password.secret = true
 	password.custom_minimum_size = Vector2(0, 64)
 	box.add_child(password)
+	var confirm: LineEdit = null
 	if sign_up:
-		var confirm := LineEdit.new()
+		confirm = LineEdit.new()
 		confirm.placeholder_text = "Confirm password"
 		confirm.secret = true
 		confirm.custom_minimum_size = Vector2(0, 64)
 		box.add_child(confirm)
-		var agree := CheckBox.new()
-		agree.text = "I agree to the terms and privacy notice"
-		box.add_child(agree)
-	var info := Label.new()
-	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	info.text = (
-		"Online auth requires a configured Supabase project. "
-		+ "This build cannot complete cloud signup without your credentials."
-	)
-	info.add_theme_font_size_override("font_size", 22)
-	info.add_theme_color_override("font_color", Color(0.9, 0.82, 0.7))
-	box.add_child(info)
+	var status := Label.new()
+	status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	status.add_theme_font_size_override("font_size", 22)
+	status.add_theme_color_override("font_color", Color(1.0, 0.7, 0.55))
+	box.add_child(status)
+	var submit_label := "Create Account" if sign_up else "Sign In"
+	box.add_child(_make_button(submit_label, func() -> void:
+		status.text = "Working…"
+		status.add_theme_color_override("font_color", Color(0.9, 0.85, 0.7))
+		# Never log password values.
+		if sign_up:
+			var result: Dictionary = await state.auth.sign_up(
+				email.text, password.text, confirm.text if confirm else ""
+			)
+			password.text = ""
+			if confirm:
+				confirm.text = ""
+			if not bool(result.get("ok", false)):
+				status.add_theme_color_override("font_color", Color(1.0, 0.55, 0.45))
+				status.text = str(result.get("error", "Sign up failed."))
+				return
+			if bool(result.get("needs_confirmation", true)):
+				state.pending_confirm_email = email.text.strip_edges().to_lower()
+				_show_check_email()
+				return
+			await _after_verified_sign_in()
+		else:
+			var result: Dictionary = await state.auth.sign_in(email.text, password.text)
+			password.text = ""
+			if not bool(result.get("ok", false)):
+				status.add_theme_color_override("font_color", Color(1.0, 0.55, 0.45))
+				status.text = str(result.get("error", "Sign in failed."))
+				if bool(result.get("needs_confirmation", false)):
+					state.pending_confirm_email = email.text.strip_edges().to_lower()
+					box.add_child(_make_button("Go to Check Your Email", _show_check_email, Vector2(360, 64)))
+				return
+			await _after_verified_sign_in()
+	))
+	if sign_up:
+		box.add_child(_make_button("Already have an account? Sign In", func() -> void: _show_auth(false)))
+	elif state.show_sign_up():
+		box.add_child(_make_button("Need an account? Sign Up", func() -> void: _show_auth(true)))
 	box.add_child(_make_button("Back", _show_welcome))
 
 
+func _show_check_email() -> void:
+	_current_screen = "check_email"
+	_clear_screen()
+	var box := VBoxContainer.new()
+	box.set_anchors_preset(Control.PRESET_CENTER)
+	box.position = Vector2(-420, -480)
+	box.size = Vector2(840, 960)
+	box.add_theme_constant_override("separation", 18)
+	_screen_host.add_child(box)
+	var title := Label.new()
+	title.text = "Check Your Email"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 44)
+	title.add_theme_color_override("font_color", Color(0.98, 0.86, 0.45))
+	box.add_child(title)
+	var body := Label.new()
+	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	body.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	body.text = (
+		"We sent a confirmation link to your email.\n\n"
+		+ "1. Open the message in your phone browser.\n"
+		+ "2. Tap the confirmation link.\n"
+		+ "3. Return here and continue to Sign In.\n\n"
+		+ "Membership is checked only after a verified sign-in."
+	)
+	body.add_theme_font_size_override("font_size", 26)
+	body.add_theme_color_override("font_color", Color(0.92, 0.88, 0.96))
+	box.add_child(body)
+	var status := Label.new()
+	status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	status.add_theme_font_size_override("font_size", 22)
+	status.add_theme_color_override("font_color", Color(0.9, 0.82, 0.7))
+	box.add_child(status)
+	box.add_child(_make_button("I’ve Confirmed My Email", func() -> void: _show_auth(false)))
+	box.add_child(_make_button("Return to Sign In", func() -> void: _show_auth(false)))
+	box.add_child(_make_button("Resend Confirmation", func() -> void:
+		var result: Dictionary = await state.auth.resend_confirmation(state.pending_confirm_email)
+		if bool(result.get("ok", false)):
+			status.text = "Confirmation email resent. Please wait before trying again."
+		else:
+			status.text = str(result.get("error", "Could not resend."))
+	))
+	box.add_child(_make_button("Back to Welcome", _show_welcome))
+
+
+func _after_verified_sign_in() -> void:
+	if not state.tokens.has_session() or not state.tokens.email_confirmed:
+		state.sign_out()
+		_show_toast("Please confirm your email, then sign in.")
+		_show_check_email()
+		return
+	var claim: Dictionary = await state.membership.claim_membership()
+	if not bool(claim.get("ok", false)):
+		var msg := str(claim.get("error", "This is a private app, and this account is not approved."))
+		if bool(claim.get("forbidden", false)):
+			msg = "This is a private app, and this account is not approved."
+		state.sign_out()
+		_show_toast(msg)
+		_show_welcome()
+		return
+	var profile_result: Dictionary = await state.profiles.fetch_own_profile()
+	if not bool(profile_result.get("ok", false)):
+		state.sign_out()
+		_show_toast(str(profile_result.get("error", "Could not load profile.")))
+		_show_welcome()
+		return
+	if not bool(profile_result.get("exists", false)):
+		_show_profile_setup()
+		return
+	_show_main_chest()
+
+
+func _show_profile_setup() -> void:
+	_current_screen = "profile_setup"
+	_clear_screen()
+	var box := VBoxContainer.new()
+	box.set_anchors_preset(Control.PRESET_CENTER)
+	box.position = Vector2(-400, -420)
+	box.size = Vector2(800, 840)
+	box.add_theme_constant_override("separation", 16)
+	_screen_host.add_child(box)
+	var title := Label.new()
+	title.text = "Create Your Profile"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 42)
+	title.add_theme_color_override("font_color", Color(0.98, 0.86, 0.45))
+	box.add_child(title)
+	var info := Label.new()
+	info.text = "Choose a username and display name. Your friend code is generated securely."
+	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	info.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	info.add_theme_font_size_override("font_size", 24)
+	info.add_theme_color_override("font_color", Color(0.9, 0.85, 0.95))
+	box.add_child(info)
+	var username := LineEdit.new()
+	username.placeholder_text = "Username (3–32 characters)"
+	username.custom_minimum_size = Vector2(0, 64)
+	box.add_child(username)
+	var display_name := LineEdit.new()
+	display_name.placeholder_text = "Display name"
+	display_name.custom_minimum_size = Vector2(0, 64)
+	box.add_child(display_name)
+	var status := Label.new()
+	status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	status.add_theme_font_size_override("font_size", 22)
+	status.add_theme_color_override("font_color", Color(1.0, 0.7, 0.55))
+	box.add_child(status)
+	box.add_child(_make_button("Save Profile", func() -> void:
+		status.text = "Saving…"
+		var result: Dictionary = await state.profiles.create_profile(username.text, display_name.text)
+		if not bool(result.get("ok", false)):
+			status.text = str(result.get("error", "Could not save profile."))
+			return
+		_show_toast("Profile ready.")
+		_show_main_chest()
+	))
+	box.add_child(_make_button("Sign Out", func() -> void:
+		state.sign_out()
+		_show_welcome()
+	))
+
+
+func _guard_private_chest() -> bool:
+	if state.is_demo():
+		return true
+	if not state.is_online():
+		_show_toast("Backend is not configured.")
+		_show_welcome()
+		return false
+	if not state.tokens.has_session() or not state.membership.is_member:
+		state.sign_out()
+		_show_toast("This is a private app, and this account is not approved.")
+		_show_welcome()
+		return false
+	return true
+
+
 func _show_main_chest() -> void:
+	if not _guard_private_chest():
+		return
 	_current_screen = "main_chest"
 	_clear_screen()
 	var root := Control.new()
@@ -244,7 +438,20 @@ func _show_main_chest() -> void:
 		title.add_theme_font_override("font", _title_font())
 	root.add_child(title)
 
-	var counts := state.demo.counts() if state.is_demo() else {"unread": 0, "locked": 0, "requests": 0}
+	var counts := {"unread": 0, "locked": 0, "requests": 0}
+	if state.is_demo():
+		counts = state.demo.counts()
+	elif state.is_online():
+		var chest_result: Dictionary = await state.scrolls.get_chest()
+		if bool(chest_result.get("ok", false)):
+			state.cached_chest = chest_result.get("data", {}) if typeof(chest_result.get("data")) == TYPE_DICTIONARY else {}
+			var chest: Dictionary = state.cached_chest.get("chest", {}) if typeof(state.cached_chest.get("chest")) == TYPE_DICTIONARY else {}
+			counts.unread = int(chest.get("unread", chest.get("unopened", 0)))
+			counts.locked = int(chest.get("locked", 0))
+			var fr: Array = chest.get("friend_requests", []) if typeof(chest.get("friend_requests")) == TYPE_ARRAY else []
+			counts.requests = fr.size()
+		else:
+			_show_toast(str(chest_result.get("error", "Could not refresh chest.")))
 	var stats := Label.new()
 	stats.text = "Unread %d   ·   Locked %d   ·   Requests %d" % [
 		counts.unread, counts.locked, counts.requests
@@ -293,16 +500,122 @@ func _show_main_chest() -> void:
 			_show_main_chest()
 		, Vector2(200, 64)))
 		demo_row.add_child(_make_button("Refresh", _show_main_chest, Vector2(180, 64)))
+	elif state.is_online():
+		var online_row := HBoxContainer.new()
+		online_row.alignment = BoxContainer.ALIGNMENT_CENTER
+		online_row.add_theme_constant_override("separation", 12)
+		online_row.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+		online_row.position = Vector2(-420, -180)
+		online_row.size = Vector2(840, 70)
+		root.add_child(online_row)
+		online_row.add_child(_make_button("Refresh", _show_main_chest, Vector2(180, 64)))
 
 
 func _on_chest_tapped() -> void:
+	if not _guard_private_chest():
+		return
 	if _chest.animating:
 		return
 	await _chest.play_open_animation(true)
 	_show_inventory()
 
 
+func _ui_state_for_online_scroll(item: Dictionary) -> String:
+	if str(item.get("kind", "")) == "friend_request":
+		return "friend_request"
+	if bool(item.get("is_read", false)) or bool(item.get("is_opened", false)):
+		return "opened"
+	if not bool(item.get("is_unlockable", true)):
+		return "locked"
+	if bool(item.get("has_password", false)) or bool(item.get("has_magic_password", false)):
+		return "password_unlocked_unread"
+	return "unlocked_unread"
+
+
+func _normalize_online_scroll_item(raw: Dictionary) -> Dictionary:
+	var sender: Dictionary = raw.get("sender", {}) if typeof(raw.get("sender")) == TYPE_DICTIONARY else {}
+	var unlock_at := str(raw.get("unlock_at", ""))
+	var unlock_unix := 0
+	if not unlock_at.is_empty():
+		unlock_unix = int(Time.get_unix_time_from_datetime_string(unlock_at))
+	var item := raw.duplicate(true)
+	item["state"] = _ui_state_for_online_scroll(raw)
+	item["has_magic_password"] = bool(raw.get("has_password", false)) or bool(raw.get("has_magic_password", false))
+	item["sender_display_name"] = str(sender.get("display_name", raw.get("sender_display_name", "Friend")))
+	item["unlock_at_unix"] = unlock_unix
+	item["kind"] = str(raw.get("kind", "love_note"))
+	return item
+
+
+func _normalize_friend_request_item(raw: Dictionary) -> Dictionary:
+	var sender: Dictionary = raw.get("sender", {}) if typeof(raw.get("sender")) == TYPE_DICTIONARY else {}
+	return {
+		"id": str(raw.get("id", "")),
+		"kind": "friend_request",
+		"state": "friend_request",
+		"title": "Friend request",
+		"sender_display_name": str(sender.get("display_name", "Someone")),
+		"sender_id": str(raw.get("sender_id", "")),
+		"has_magic_password": false,
+	}
+
+
+func _load_online_chest_items(filter: String) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	var result: Dictionary = await state.scrolls.get_chest()
+	if not bool(result.get("ok", false)):
+		_show_toast(str(result.get("error", "Could not load chest.")))
+		return out
+	var data: Dictionary = result.get("data", {}) if typeof(result.get("data")) == TYPE_DICTIONARY else {}
+	state.cached_chest = data
+	var chest: Dictionary = data.get("chest", {}) if typeof(data.get("chest")) == TYPE_DICTIONARY else {}
+	var scrolls: Array = chest.get("scrolls", []) if typeof(chest.get("scrolls")) == TYPE_ARRAY else []
+	var requests: Array = chest.get("friend_requests", []) if typeof(chest.get("friend_requests")) == TYPE_ARRAY else []
+	for s in scrolls:
+		if typeof(s) != TYPE_DICTIONARY:
+			continue
+		var item := _normalize_online_scroll_item(s)
+		var st := str(item.get("state", ""))
+		if filter == "unread" and st != "unlocked_unread" and st != "password_unlocked_unread":
+			continue
+		if filter == "locked" and st != "locked":
+			continue
+		if filter == "requests":
+			continue
+		out.append(item)
+	if filter == "all" or filter == "requests":
+		for r in requests:
+			if typeof(r) != TYPE_DICTIONARY:
+				continue
+			out.append(_normalize_friend_request_item(r))
+	return out
+
+
+func _load_online_saved_items() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	var result: Dictionary = await state.scrolls.get_saved_scrolls({})
+	if not bool(result.get("ok", false)):
+		_show_toast(str(result.get("error", "Could not load saved scrolls.")))
+		return out
+	var data: Dictionary = result.get("data", {}) if typeof(result.get("data")) == TYPE_DICTIONARY else {}
+	state.cached_saved = data
+	var items: Array = data.get("saved_scrolls", data.get("scrolls", [])) if typeof(data.get("saved_scrolls", data.get("scrolls", []))) == TYPE_ARRAY else []
+	for s in items:
+		if typeof(s) != TYPE_DICTIONARY:
+			continue
+		out.append(_normalize_online_scroll_item(s))
+	return out
+
+
+func _now_unix() -> int:
+	if state.is_demo():
+		return state.demo.now_unix()
+	return int(Time.get_unix_time_from_system())
+
+
 func _show_inventory() -> void:
+	if not _guard_private_chest():
+		return
 	_current_screen = "inventory"
 	_clear_screen()
 	var root := VBoxContainer.new()
@@ -346,6 +659,8 @@ func _show_inventory() -> void:
 	var items: Array[Dictionary] = []
 	if state.is_demo():
 		items = state.demo.get_chest_items(_inventory_filter)
+	elif state.is_online():
+		items = await _load_online_chest_items(_inventory_filter)
 	if items.is_empty():
 		var empty := Label.new()
 		empty.text = "No scrolls in this view."
@@ -394,7 +709,7 @@ func _make_chest_item_row(item: Dictionary) -> PanelContainer:
 	if bool(item.get("has_magic_password", false)):
 		meta.text += "  ·  Magic Password Required"
 	if str(item.get("state", "")) == "locked":
-		var remain := int(item.get("unlock_at_unix", 0)) - state.demo.now_unix()
+		var remain := int(item.get("unlock_at_unix", 0)) - _now_unix()
 		meta.text += "  ·  unlocks in %dm" % maxi(int(ceil(remain / 60.0)), 0)
 	meta.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	meta.add_theme_font_size_override("font_size", 22)
@@ -416,6 +731,8 @@ func _make_chest_item_row(item: Dictionary) -> PanelContainer:
 
 
 func _show_saved() -> void:
+	if not _guard_private_chest():
+		return
 	_current_screen = "saved"
 	_clear_screen()
 	var root := VBoxContainer.new()
@@ -445,6 +762,8 @@ func _show_saved() -> void:
 	var items: Array[Dictionary] = []
 	if state.is_demo():
 		items = state.demo.get_saved_scrolls()
+	elif state.is_online():
+		items = await _load_online_saved_items()
 	if items.is_empty():
 		var empty := Label.new()
 		empty.text = "No saved scrolls yet. Open a note to keep it here."
@@ -468,7 +787,18 @@ func _toggle_favorite(scroll_id: String, is_favorite: bool) -> void:
 		else:
 			_show_toast(str(result.get("error", "Could not update favorite.")))
 		return
-	_show_toast("Online favorite update is ready after Edge deploy.")
+	if state.is_online():
+		var result: Dictionary = await state.scrolls.set_scroll_favorite(scroll_id, is_favorite)
+		if bool(result.get("ok", false)):
+			_show_toast("Favorite updated")
+			if _current_screen == "saved":
+				_show_saved()
+			else:
+				_show_inventory()
+		else:
+			_show_toast(str(result.get("error", "Could not update favorite.")))
+		return
+	_show_toast("Backend is not configured.")
 
 
 func _confirm_delete_received(scroll_id: String) -> void:
@@ -517,7 +847,18 @@ func _delete_received(scroll_id: String) -> void:
 		else:
 			_show_toast(str(result.get("error", "Could not delete.")))
 		return
-	_show_toast("Online delete-received is ready after Edge deploy.")
+	if state.is_online():
+		var result: Dictionary = await state.scrolls.delete_received_scroll(scroll_id)
+		if bool(result.get("ok", false)):
+			_show_toast("Scroll hidden from your chest")
+			if _current_screen == "saved":
+				_show_saved()
+			else:
+				_show_inventory()
+		else:
+			_show_toast(str(result.get("error", "Could not delete.")))
+		return
+	_show_toast("Backend is not configured.")
 
 
 func _open_chest_item(item: Dictionary) -> void:
@@ -538,11 +879,14 @@ func _open_chest_item(item: Dictionary) -> void:
 
 
 func _show_locked_details(item: Dictionary) -> void:
+	var unlock_note := "Unlock is authorized by server time."
+	if state.is_demo():
+		unlock_note = "Unlock is authorized by server time (demo clock here)."
 	_show_modal_panel("Sealed Scroll", [
 		"From: %s" % str(item.get("sender_display_name", "")),
 		"Title: %s" % str(item.get("title", "")),
 		"This message body is not available yet.",
-		"Unlock is authorized by server time (demo clock here).",
+		unlock_note,
 		"Magic password: %s" % ("Yes" if bool(item.get("has_magic_password", false)) else "No"),
 	], "Close", func() -> void: _hide_overlay())
 
@@ -575,15 +919,32 @@ func _show_friend_request(item: Dictionary) -> void:
 	body.add_theme_color_override("font_color", Color(0.95, 0.9, 0.98))
 	box.add_child(body)
 	box.add_child(_make_button("Accept", func() -> void:
-		state.demo.respond_friend_request(str(item.id), true)
+		if state.is_demo():
+			state.demo.respond_friend_request(str(item.id), true)
+			_hide_overlay()
+			_show_toast("Friend request accepted")
+			_show_inventory()
+			return
+		var result: Dictionary = await state.friends.respond_to_friend_request(str(item.id), true)
 		_hide_overlay()
-		_show_toast("Friend request accepted")
-		_show_inventory()
+		if bool(result.get("ok", false)):
+			_show_toast("Friend request accepted")
+			_show_inventory()
+		else:
+			_show_toast(str(result.get("error", "Could not accept request.")))
 	))
 	box.add_child(_make_button("Decline", func() -> void:
-		state.demo.respond_friend_request(str(item.id), false)
+		if state.is_demo():
+			state.demo.respond_friend_request(str(item.id), false)
+			_hide_overlay()
+			_show_inventory()
+			return
+		var result: Dictionary = await state.friends.respond_to_friend_request(str(item.id), false)
 		_hide_overlay()
-		_show_inventory()
+		if bool(result.get("ok", false)):
+			_show_inventory()
+		else:
+			_show_toast(str(result.get("error", "Could not decline request.")))
 	))
 	box.add_child(_make_button("Close", _hide_overlay, Vector2(220, 64)))
 
@@ -688,6 +1049,8 @@ func _on_scroll_closed() -> void:
 
 
 func _show_compose() -> void:
+	if not _guard_private_chest():
+		return
 	_current_screen = "compose"
 	_clear_screen()
 	var root := VBoxContainer.new()
@@ -708,12 +1071,24 @@ func _show_compose() -> void:
 	header.add_child(title)
 	header.add_child(_make_button("Back", _show_main_chest, Vector2(160, 64)))
 
-	var friends := state.demo.get_friends() if state.is_demo() else []
+	var friends: Array = []
+	if state.is_demo():
+		friends = state.demo.get_friends()
+	elif state.is_online():
+		var fr: Dictionary = await state.friends.get_friends()
+		if bool(fr.get("ok", false)):
+			var data: Dictionary = fr.get("data", {}) if typeof(fr.get("data")) == TYPE_DICTIONARY else {}
+			state.cached_friends = data
+			friends = data.get("friends", []) if typeof(data.get("friends")) == TYPE_ARRAY else []
+		else:
+			_show_toast(str(fr.get("error", "Could not load friends.")))
 	var recipient := OptionButton.new()
 	recipient.custom_minimum_size = Vector2(0, 64)
 	for f in friends:
-		recipient.add_item("%s (@%s)" % [f.display_name, f.username])
-		recipient.set_item_metadata(recipient.item_count - 1, f.id)
+		if typeof(f) != TYPE_DICTIONARY:
+			continue
+		recipient.add_item("%s (@%s)" % [str(f.get("display_name", "")), str(f.get("username", ""))])
+		recipient.set_item_metadata(recipient.item_count - 1, str(f.get("id", "")))
 	root.add_child(recipient)
 
 	var title_edit := LineEdit.new()
@@ -790,8 +1165,31 @@ func _show_compose() -> void:
 			if magic != pw2.text:
 				_show_toast("Magic passwords do not match.")
 				return
-		var unlock_unix := state.demo.now_unix() + int(unlock_mins.value) * 60
-		var result: Dictionary = state.demo.send_scroll(rid, title_edit.text, body, unlock_unix, magic)
+		var result: Dictionary = {}
+		if state.is_demo():
+			var unlock_unix := state.demo.now_unix() + int(unlock_mins.value) * 60
+			result = state.demo.send_scroll(rid, title_edit.text, body, unlock_unix, magic)
+		elif state.is_online():
+			var unlock_at := Time.get_datetime_string_from_unix_time(
+				int(Time.get_unix_time_from_system()) + int(unlock_mins.value) * 60,
+				true
+			) + "Z"
+			var payload := {
+				"recipient_id": rid,
+				"title": title_edit.text.strip_edges(),
+				"message": body,
+				"unlock_at": unlock_at,
+			}
+			if not magic.is_empty():
+				payload["password"] = magic
+			result = await state.scrolls.send_scroll(payload)
+			if bool(result.get("ok", false)):
+				result = {"ok": true}
+			else:
+				result = {"ok": false, "error": str(result.get("error", "Send failed."))}
+		else:
+			_show_toast("Backend is not configured.")
+			return
 		pw.text = ""
 		pw2.text = ""
 		if bool(result.get("ok", false)):
@@ -803,6 +1201,8 @@ func _show_compose() -> void:
 
 
 func _show_friends() -> void:
+	if not _guard_private_chest():
+		return
 	_current_screen = "friends"
 	_clear_screen()
 	var root := VBoxContainer.new()
@@ -828,7 +1228,11 @@ func _show_friends() -> void:
 	search.custom_minimum_size = Vector2(0, 60)
 	root.add_child(search)
 	root.add_child(_make_button("Add Friend", func() -> void:
-		var result: Dictionary = state.demo.send_friend_request(search.text)
+		var result: Dictionary = {}
+		if state.is_demo():
+			result = state.demo.send_friend_request(search.text)
+		elif state.is_online():
+			result = await state.friends.send_friend_request_query(search.text)
 		_show_toast("Friend request sent." if bool(result.get("ok", false)) else str(result.get("error", "Failed")))
 	))
 
@@ -840,13 +1244,32 @@ func _show_friends() -> void:
 	section.add_theme_font_size_override("font_size", 28)
 	section.add_theme_color_override("font_color", Color(0.9, 0.85, 0.95))
 	list.add_child(section)
-	for f in state.demo.get_friends():
+	var friends: Array = []
+	var me: Dictionary = {}
+	if state.is_demo():
+		friends = state.demo.get_friends()
+		me = state.demo.get_profile()
+	elif state.is_online():
+		var fr: Dictionary = await state.friends.get_friends()
+		if bool(fr.get("ok", false)):
+			var data: Dictionary = fr.get("data", {}) if typeof(fr.get("data")) == TYPE_DICTIONARY else {}
+			state.cached_friends = data
+			friends = data.get("friends", []) if typeof(data.get("friends")) == TYPE_ARRAY else []
+		else:
+			_show_toast(str(fr.get("error", "Could not load friends.")))
+		me = state.profiles.profile
+	for f in friends:
+		if typeof(f) != TYPE_DICTIONARY:
+			continue
 		var row := Label.new()
-		row.text = "%s  ·  @%s  ·  %s" % [f.display_name, f.username, f.friend_code]
+		row.text = "%s  ·  @%s  ·  %s" % [
+			str(f.get("display_name", "")),
+			str(f.get("username", "")),
+			str(f.get("friend_code", "")),
+		]
 		row.add_theme_font_size_override("font_size", 24)
 		row.add_theme_color_override("font_color", Color(0.95, 0.9, 0.85))
 		list.add_child(row)
-	var me := state.demo.get_profile()
 	var code := Label.new()
 	code.text = "Your friend code: %s" % str(me.get("friend_code", ""))
 	code.add_theme_font_size_override("font_size", 24)
@@ -855,6 +1278,8 @@ func _show_friends() -> void:
 
 
 func _show_sent() -> void:
+	if not _guard_private_chest():
+		return
 	_current_screen = "sent"
 	_clear_screen()
 	var root := VBoxContainer.new()
@@ -874,9 +1299,17 @@ func _show_sent() -> void:
 	title.add_theme_color_override("font_color", Color(0.98, 0.86, 0.45))
 	header.add_child(title)
 	header.add_child(_make_button("Back", _show_main_chest, Vector2(160, 64)))
-	var sent_items: Array[Dictionary] = []
+	var sent_items: Array = []
 	if state.is_demo():
 		sent_items = state.demo.get_sent_scrolls()
+	elif state.is_online():
+		var sent_result: Dictionary = await state.scrolls.get_sent_scrolls()
+		if bool(sent_result.get("ok", false)):
+			var data: Dictionary = sent_result.get("data", {}) if typeof(sent_result.get("data")) == TYPE_DICTIONARY else {}
+			state.cached_sent = data
+			sent_items = data.get("sent_scrolls", []) if typeof(data.get("sent_scrolls")) == TYPE_ARRAY else []
+		else:
+			_show_toast(str(sent_result.get("error", "Could not load sent scrolls.")))
 	if sent_items.is_empty():
 		var empty := Label.new()
 		empty.text = "No sent scrolls."
@@ -885,6 +1318,8 @@ func _show_sent() -> void:
 		root.add_child(empty)
 		return
 	for s in sent_items:
+		if typeof(s) != TYPE_DICTIONARY:
+			continue
 		var panel := PanelContainer.new()
 		var style := StyleBoxFlat.new()
 		style.bg_color = Color(0.12, 0.08, 0.16, 0.92)
@@ -896,19 +1331,24 @@ func _show_sent() -> void:
 		panel.add_theme_stylebox_override("panel", style)
 		var col := VBoxContainer.new()
 		panel.add_child(col)
+		var recipient: Dictionary = s.get("recipient", {}) if typeof(s.get("recipient")) == TYPE_DICTIONARY else {}
+		var unlock_at := str(s.get("unlock_at", ""))
+		var unlock_unix := int(s.get("unlock_at_unix", 0))
+		if unlock_unix == 0 and not unlock_at.is_empty():
+			unlock_unix = int(Time.get_unix_time_from_datetime_string(unlock_at))
 		var row := Label.new()
 		row.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		row.text = "%s → %s · unlock_unix=%d · password=%s · opened=%d" % [
 			str(s.get("title", "")),
-			str(s.get("recipient_display_name", "")),
-			int(s.get("unlock_at_unix", 0)),
+			str(s.get("recipient_display_name", recipient.get("display_name", ""))),
+			unlock_unix,
 			"yes" if bool(s.get("has_password", false)) else "no",
 			int(s.get("opened_count", 0)),
 		]
 		row.add_theme_font_size_override("font_size", 22)
 		row.add_theme_color_override("font_color", Color(0.9, 0.85, 0.95))
 		col.add_child(row)
-		var sid := str(s.id)
+		var sid := str(s.get("id", ""))
 		col.add_child(_make_button("Hide from Sent", func() -> void:
 			if state.is_demo():
 				var result := state.demo.delete_sent_scroll(sid)
@@ -917,8 +1357,15 @@ func _show_sent() -> void:
 					_show_sent()
 				else:
 					_show_toast(str(result.get("error", "Could not hide sent scroll.")))
+			elif state.is_online():
+				var result: Dictionary = await state.scrolls.delete_sent_scroll(sid)
+				if bool(result.get("ok", false)):
+					_show_toast("Hidden from your Sent history")
+					_show_sent()
+				else:
+					_show_toast(str(result.get("error", "Could not hide sent scroll.")))
 			else:
-				_show_toast("Online delete-sent is ready after Edge deploy.")
+				_show_toast("Backend is not configured.")
 		, Vector2(240, 56)))
 		root.add_child(panel)
 
@@ -940,29 +1387,146 @@ func _show_profile() -> void:
 	title.add_theme_font_size_override("font_size", 42)
 	title.add_theme_color_override("font_color", Color(0.98, 0.86, 0.45))
 	root.add_child(title)
-	var me := state.demo.get_profile() if state.is_demo() else {}
+	var me: Dictionary = {}
+	if state.is_demo():
+		me = state.demo.get_profile()
+	elif state.is_online() and state.tokens.has_session():
+		var pref: Dictionary = await state.profiles.fetch_own_profile()
+		if bool(pref.get("ok", false)) and bool(pref.get("exists", false)):
+			me = state.profiles.profile
+	var build_label := ""
+	if state.is_private_onboarding_build():
+		build_label = "\n\nPrivate Onboarding Build"
 	var info := Label.new()
 	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	info.text = (
-		"Display name: %s\nUsername: @%s\nFriend code: %s\n\n%s\n\nMode: %s"
+		"Display name: %s\nUsername: @%s\nFriend code: %s\n\n%s\n\nMode: %s\nPrivate role: %s%s"
 		% [
 			str(me.get("display_name", "")),
 			str(me.get("username", "")),
 			str(me.get("friend_code", "")),
 			state.tokens.limitation_message,
 			"LOCAL DEMO" if state.is_demo() else ("ONLINE" if state.is_online() else "UNCONFIGURED"),
+			state.membership.role if state.membership.role != "" else "(none)",
+			build_label,
 		]
 	)
 	info.add_theme_font_size_override("font_size", 26)
 	info.add_theme_color_override("font_color", Color(0.92, 0.88, 0.96))
 	root.add_child(info)
-	root.add_child(_make_button("Sign Out / Exit Demo", func() -> void:
+	if OS.is_debug_build():
+		root.add_child(_make_button("Online Diagnostics", _show_diagnostics))
+	root.add_child(_make_button("Sign Out", func() -> void:
 		state.sign_out()
 		if state.is_demo():
 			state.demo.enable()
 		_show_welcome()
 	))
-	root.add_child(_make_button("Back", _show_main_chest))
+	if state.membership.is_member or state.is_demo():
+		root.add_child(_make_button("Back", _show_main_chest))
+	else:
+		root.add_child(_make_button("Back", _show_welcome))
+
+
+func _show_diagnostics() -> void:
+	if not OS.is_debug_build():
+		_show_toast("Diagnostics are debug-only.")
+		return
+	_current_screen = "diagnostics"
+	_clear_screen()
+	var root := VBoxContainer.new()
+	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	root.offset_left = 36
+	root.offset_right = -36
+	root.offset_top = 28
+	root.offset_bottom = -28
+	root.add_theme_constant_override("separation", 12)
+	_screen_host.add_child(root)
+	var title := Label.new()
+	title.text = "Online Diagnostics"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 40)
+	title.add_theme_color_override("font_color", Color(0.98, 0.86, 0.45))
+	root.add_child(title)
+	var status := Label.new()
+	status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	status.add_theme_font_size_override("font_size", 24)
+	status.add_theme_color_override("font_color", Color(0.92, 0.88, 0.96))
+	root.add_child(status)
+	var refresh_status := func() -> void:
+		var snap: Dictionary = state.diagnostics_snapshot()
+		status.text = (
+			"Backend configuration loaded: %s\n"
+			+ "Backend host: %s\n"
+			+ "Signed in: %s\n"
+			+ "Email confirmed: %s\n"
+			+ "Private membership approved: %s\n"
+			+ "Private role: %s\n"
+			+ "Profile exists: %s\n"
+			+ "Last function name: %s\n"
+			+ "Last HTTP status: %s\n"
+			+ "Last safe error message: %s\n"
+			+ "Private Onboarding Build: %s\n"
+			+ "Local Demo Mode disabled: %s"
+		) % [
+			"Yes" if bool(snap.backend_configured) else "No",
+			str(snap.backend_host),
+			"Yes" if bool(snap.signed_in) else "No",
+			"Yes" if bool(snap.email_confirmed) else "No",
+			"Yes" if bool(snap.membership_approved) else "No",
+			str(snap.private_role) if str(snap.private_role) != "" else "(none)",
+			"Yes" if bool(snap.profile_exists) else "No",
+			str(snap.last_function),
+			str(snap.last_http_status),
+			str(snap.last_safe_error) if str(snap.last_safe_error) != "" else "(none)",
+			"Yes" if bool(snap.private_onboarding_build) else "No",
+			"Yes" if bool(snap.demo_disabled) else "No",
+		]
+	refresh_status.call()
+	root.add_child(_make_button("Test Backend", func() -> void:
+		if not state.config.is_configured():
+			_show_toast("Backend is not configured.")
+			refresh_status.call()
+			return
+		var url := "%s/auth/v1/health" % state.config.supabase_url.rstrip("/")
+		var result: Dictionary = await state.api.request(url, "GET", {}, false)
+		_show_toast("Backend reachable" if bool(result.get("ok", false)) else str(result.get("error", "Backend test failed.")))
+		refresh_status.call()
+	))
+	root.add_child(_make_button("Refresh Session", func() -> void:
+		var result: Dictionary = await state.auth.refresh_session()
+		_show_toast("Session refreshed" if bool(result.get("ok", false)) else str(result.get("error", "Refresh failed.")))
+		refresh_status.call()
+	))
+	root.add_child(_make_button("Claim Private Membership", func() -> void:
+		var result: Dictionary = await state.membership.claim_membership()
+		if bool(result.get("ok", false)):
+			_show_toast("Membership approved")
+		else:
+			_show_toast(str(result.get("error", "Claim failed.")))
+			if bool(result.get("forbidden", false)):
+				state.sign_out()
+		refresh_status.call()
+	))
+	root.add_child(_make_button("Refresh Profile", func() -> void:
+		var result: Dictionary = await state.profiles.fetch_own_profile()
+		_show_toast("Profile refreshed" if bool(result.get("ok", false)) else str(result.get("error", "Profile refresh failed.")))
+		refresh_status.call()
+	))
+	root.add_child(_make_button("Refresh Chest", func() -> void:
+		var result: Dictionary = await state.scrolls.get_chest()
+		if bool(result.get("ok", false)):
+			state.cached_chest = result.get("data", {}) if typeof(result.get("data")) == TYPE_DICTIONARY else {}
+			_show_toast("Chest refreshed")
+		else:
+			_show_toast(str(result.get("error", "Chest refresh failed.")))
+		refresh_status.call()
+	))
+	root.add_child(_make_button("Sign Out", func() -> void:
+		state.sign_out()
+		_show_welcome()
+	))
+	root.add_child(_make_button("Back", _show_profile if state.tokens.has_session() else _show_welcome))
 
 
 func _show_modal_panel(title_text: String, lines: Array, button_text: String, cb: Callable) -> void:
@@ -1013,6 +1577,10 @@ func _notification(what: int) -> void:
 		match _current_screen:
 			"inventory", "saved", "compose", "friends", "sent", "profile":
 				_show_main_chest()
+			"diagnostics":
+				_show_profile()
+			"profile_setup", "check_email", "auth_signin", "auth_signup":
+				_show_welcome()
 			"main_chest":
 				_show_welcome()
 			_:

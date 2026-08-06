@@ -19,6 +19,7 @@ build/*.idsig
 *.apk
 !build/ChestOfLoveNotes-debug.apk
 !build/ChestOfLoveNotes-private-online-debug.apk
+!build/ChestOfLoveNotes-private-onboarding-debug.apk
 
 # Android Gradle template
 android/build/
