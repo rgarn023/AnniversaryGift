@@ -70,6 +70,8 @@ var _safe_right: float = 24.0
 var _safe_top: float = 24.0
 var _safe_bottom: float = 24.0
 var _pending_message_text: String = ""
+## Headless tests may override the logical viewport size.
+var _test_override_viewport: Vector2 = Vector2.ZERO
 
 
 func _ready() -> void:
@@ -343,24 +345,38 @@ func _apply_fonts() -> void:
 		_hint.add_theme_font_override("font", body)
 
 
-func _compute_safe_insets() -> void:
+func _logical_viewport_size() -> Vector2:
+	if _test_override_viewport.x > 1.0 and _test_override_viewport.y > 1.0:
+		return _test_override_viewport
 	var viewport_size := get_viewport().get_visible_rect().size
 	if viewport_size.x <= 1.0 or viewport_size.y <= 1.0:
-		viewport_size = Vector2(1080, 2400)
-	var safe := DisplayServer.get_display_safe_area()
-	var screen := DisplayServer.screen_get_size()
-	var scale_x := viewport_size.x / float(maxi(screen.x, 1))
-	var scale_y := viewport_size.y / float(maxi(screen.y, 1))
-	_safe_left = maxf(MIN_SIDE_GAP, safe.position.x * scale_x)
-	_safe_top = maxf(MIN_SIDE_GAP, safe.position.y * scale_y)
-	_safe_right = maxf(
-		MIN_SIDE_GAP,
-		(screen.x - (safe.position.x + safe.size.x)) * scale_x
-	)
-	_safe_bottom = maxf(
-		MIN_SIDE_GAP,
-		(screen.y - (safe.position.y + safe.size.y)) * scale_y
-	)
+		return Vector2(1080, 2400)
+	return viewport_size
+
+
+func _compute_safe_insets() -> void:
+	var viewport_size := _logical_viewport_size()
+	if _test_override_viewport.x > 1.0:
+		# Deterministic insets for layout tests / narrow simulated phones.
+		_safe_left = MIN_SIDE_GAP
+		_safe_right = MIN_SIDE_GAP
+		_safe_top = MIN_SIDE_GAP
+		_safe_bottom = MIN_SIDE_GAP
+	else:
+		var safe := DisplayServer.get_display_safe_area()
+		var screen := DisplayServer.screen_get_size()
+		var scale_x := viewport_size.x / float(maxi(screen.x, 1))
+		var scale_y := viewport_size.y / float(maxi(screen.y, 1))
+		_safe_left = maxf(MIN_SIDE_GAP, safe.position.x * scale_x)
+		_safe_top = maxf(MIN_SIDE_GAP, safe.position.y * scale_y)
+		_safe_right = maxf(
+			MIN_SIDE_GAP,
+			(screen.x - (safe.position.x + safe.size.x)) * scale_x
+		)
+		_safe_bottom = maxf(
+			MIN_SIDE_GAP,
+			(screen.y - (safe.position.y + safe.size.y)) * scale_y
+		)
 	_full_screen_margin.add_theme_constant_override("margin_left", int(_safe_left))
 	_full_screen_margin.add_theme_constant_override("margin_right", int(_safe_right))
 	_full_screen_margin.add_theme_constant_override("margin_top", int(_safe_top))
@@ -369,9 +385,7 @@ func _compute_safe_insets() -> void:
 
 func _fit_panel() -> void:
 	_compute_safe_insets()
-	var viewport_size := get_viewport().get_visible_rect().size
-	if viewport_size.x <= 1.0 or viewport_size.y <= 1.0:
-		viewport_size = Vector2(1080, 2400)
+	var viewport_size := _logical_viewport_size()
 
 	var safe_width := viewport_size.x - _safe_left - _safe_right
 	var safe_height := viewport_size.y - _safe_top - _safe_bottom
@@ -408,15 +422,16 @@ func _fit_panel() -> void:
 
 
 func _usable_message_width() -> float:
-	# MarginContainer already subtracts content pads from children.
-	if _scroll.size.x > 8.0:
-		return maxf(_scroll.size.x, 160.0)
-	if _content.size.x > 8.0:
-		return maxf(_content.size.x, 160.0)
-	return maxf(
-		_parchment_size.x - 40.0 - _content_pad_left - _content_pad_right,
-		160.0
+	# Authoritative width from parchment size — never grow from unconstrained
+	# child sizes, or custom_minimum_size will force right-side overflow.
+	var panel_side_inset := 40.0 # parchment_panel offset_left + |offset_right|
+	var usable := (
+		_parchment_size.x
+		- panel_side_inset
+		- _content_pad_left
+		- _content_pad_right
 	)
+	return maxf(usable, 160.0)
 
 
 func _queue_layout_refresh() -> void:
@@ -432,32 +447,52 @@ func _refresh_message_layout() -> void:
 	_date_label.custom_minimum_size = Vector2(w, 0)
 	_hint.custom_minimum_size = Vector2(w, 0)
 	_message.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# Keep the parchment shell from being stretched by text minimum sizes.
+	_parchment_aspect.custom_minimum_size = _parchment_size
+	_parchment_aspect.size = _parchment_size
 	_content_margin.queue_sort()
 	_content.queue_sort()
 	_scroll.queue_sort()
 	if OS.is_debug_build():
-		_validate_message_layout()
+		call_deferred("_validate_message_layout")
 
 
 func _validate_message_layout() -> void:
-	var viewport_width := get_viewport().get_visible_rect().size.x
+	var viewport_width := _logical_viewport_size().x
 	var safe_width := viewport_width - _safe_left - _safe_right
 	var body_size := int(_message.get_theme_font_size("normal_font_size"))
+	var usable := _usable_message_width()
 	print(
-		"[ScrollViewer] vp=%.0f safe=%.0f parchment=%.0f pads=%.0f/%.0f msg_w=%.1f msg_min=%.1f scroll_w=%.1f font=%d"
+		"[ScrollViewer] vp=%.0f safe=%.0f parchment=%.0f pads=%.0f/%.0f usable=%.1f msg_w=%.1f msg_min=%.1f scroll_w=%.1f font=%d"
 		% [
 			viewport_width,
 			safe_width,
 			_parchment_size.x,
 			_content_pad_left,
 			_content_pad_right,
+			usable,
 			_message.size.x,
 			_message.custom_minimum_size.x,
 			_scroll.size.x,
 			body_size,
 		]
 	)
-	if _message.size.x > 1.0 and _content_margin.size.x > 1.0:
+	if _message.custom_minimum_size.x > usable + 1.0:
+		push_error(
+			"MessageText minimum width %.1f exceeds usable parchment width %.1f."
+			% [_message.custom_minimum_size.x, usable]
+		)
+	if _parchment_size.x > safe_width - MIN_SIDE_GAP + 1.0:
+		push_error(
+			"Parchment width %.1f exceeds safe area width %.1f."
+			% [_parchment_size.x, safe_width]
+		)
+	var expected_margin_w := _parchment_size.x - 40.0
+	if (
+		_message.size.x > 1.0
+		and _content_margin.size.x > 1.0
+		and absf(_content_margin.size.x - expected_margin_w) <= 8.0
+	):
 		if _message.global_position.x + 0.5 < _content_margin.global_position.x:
 			push_error("MessageText starts left of parchment content margin.")
 		var msg_right := _message.global_position.x + _message.size.x
