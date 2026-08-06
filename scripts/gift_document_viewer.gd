@@ -29,7 +29,7 @@ func _ready() -> void:
 	_zoom.zoom_changed.connect(_on_zoom_changed)
 	_build_ui()
 	visible = false
-	set_process_unhandled_input(true)
+	set_process_input(true)
 	get_viewport().size_changed.connect(_on_viewport_resized)
 
 
@@ -209,7 +209,7 @@ func close_viewer() -> void:
 	closed.emit()
 
 
-func _unhandled_input(event: InputEvent) -> void:
+func _input(event: InputEvent) -> void:
 	if not visible:
 		return
 	if _zoom.handle_input(event):

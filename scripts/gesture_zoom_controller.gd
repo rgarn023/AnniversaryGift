@@ -1,7 +1,7 @@
 class_name GestureZoomController
 extends RefCounted
 
-## Pinch-to-zoom helper that cooperates with vertical scrolling.
+## Pinch / magnify / wheel zoom helper that cooperates with vertical scrolling.
 
 signal zoom_changed(scale: float)
 
@@ -33,6 +33,26 @@ func is_pinching() -> bool:
 
 
 func handle_input(event: InputEvent) -> bool:
+	# Desktop / emulator: ctrl + mouse wheel
+	if event is InputEventMouseButton and event.pressed:
+		var mb := event as InputEventMouseButton
+		if mb.ctrl_pressed or mb.meta_pressed:
+			if mb.button_index == MOUSE_BUTTON_WHEEL_UP:
+				adjust(1.08)
+				return true
+			if mb.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+				adjust(0.92)
+				return true
+
+	# Some Android devices emit magnify gestures
+	if event is InputEventMagnifyGesture:
+		var mag := event as InputEventMagnifyGesture
+		# factor is typically near 1.0
+		var factor: float = mag.factor
+		if factor > 0.0:
+			set_scale(current_scale * clampf(factor, 0.85, 1.15))
+			return true
+
 	if event is InputEventScreenTouch:
 		var touch := event as InputEventScreenTouch
 		if touch.pressed:
@@ -42,7 +62,8 @@ func handle_input(event: InputEvent) -> bool:
 			if _touch_positions.size() < 2:
 				_pinching = false
 				_last_distance = 0.0
-		return false
+		# Do not consume single taps; only multi-touch pinches.
+		return _touch_positions.size() >= 2
 
 	if event is InputEventScreenDrag:
 		var drag := event as InputEventScreenDrag
@@ -53,14 +74,15 @@ func handle_input(event: InputEvent) -> bool:
 			var a: Vector2 = _touch_positions[keys[0]]
 			var b: Vector2 = _touch_positions[keys[1]]
 			var dist: float = a.distance_to(b)
+			if dist < 8.0:
+				return true
 			if not _pinching:
 				_pinching = true
 				_last_distance = dist
 				return true
 			if _last_distance > 0.0:
 				var ratio: float = dist / _last_distance
-				# Soften extreme jumps.
-				ratio = clampf(ratio, 0.92, 1.08)
+				ratio = clampf(ratio, 0.90, 1.10)
 				set_scale(current_scale * ratio)
 			_last_distance = dist
 			return true

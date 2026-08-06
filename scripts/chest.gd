@@ -62,6 +62,7 @@ func _build_visuals() -> void:
 		tex_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		tex_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		tex_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		tex_rect.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 		var path: String = ART.path_join(name + ".png")
 		if ResourceLoader.exists(path):
 			tex_rect.texture = load(path)

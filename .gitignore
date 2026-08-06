@@ -3,11 +3,14 @@
 *.translation
 export_credentials.cfg
 
-# Build outputs (keep the debug APK committed for download)
+# Build outputs
 build/*.aab
 build/*.idsig
 *.aab
-*.idsig
+# Keep the distributable debug APK in-repo for easy download
+!build/AnniversaryGift-debug.apk
+*.apk
+!build/AnniversaryGift-debug.apk
 
 # Android Gradle build template (reinstall with tools/install_android_template.sh)
 android/build/

@@ -42,26 +42,36 @@ func _ready() -> void:
 
 
 func _build_background() -> void:
-	_bg = ColorRect.new()
-	_bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var mat := ShaderMaterial.new()
-	if ResourceLoader.exists("res://assets/shaders/starfield.gdshader"):
-		mat.shader = load("res://assets/shaders/starfield.gdshader")
-		_bg.material = mat
-	else:
-		_bg.color = Color(0.06, 0.03, 0.14)
-	add_child(_bg)
-
+	# Smooth painted night sky texture (filtered) — avoids blocky purple pixelation.
 	if ResourceLoader.exists("res://assets/art/background/starfield.png"):
 		var stars := TextureRect.new()
 		stars.texture = load("res://assets/art/background/starfield.png")
 		stars.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		stars.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		stars.stretch_mode = TextureRect.STRETCH_SCALE
-		stars.modulate = Color(1, 1, 1, 0.35)
+		stars.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 		stars.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		add_child(stars)
+		_bg = ColorRect.new()
+		_bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_bg.color = Color(0.04, 0.02, 0.1, 0.18)
+		var mat := ShaderMaterial.new()
+		if ResourceLoader.exists("res://assets/shaders/starfield.gdshader"):
+			mat.shader = load("res://assets/shaders/starfield.gdshader")
+			_bg.material = mat
+			_bg.color = Color(1, 1, 1, 0.22)
+		add_child(_bg)
+	else:
+		_bg = ColorRect.new()
+		_bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_bg.color = Color(0.05, 0.03, 0.12)
+		var mat2 := ShaderMaterial.new()
+		if ResourceLoader.exists("res://assets/shaders/starfield.gdshader"):
+			mat2.shader = load("res://assets/shaders/starfield.gdshader")
+			_bg.material = mat2
+		add_child(_bg)
 
 	_particles = CPUParticles2D.new()
 	_particles.amount = 36
@@ -151,10 +161,10 @@ func _build_ui() -> void:
 	add_child(_subtitle)
 
 	_chest = TreasureChest.new()
-	_chest.custom_minimum_size = Vector2(440, 440)
-	_chest.size = Vector2(440, 440)
+	_chest.custom_minimum_size = Vector2(520, 520)
+	_chest.size = Vector2(520, 520)
 	_chest.set_anchors_preset(Control.PRESET_CENTER)
-	_chest.position = Vector2(-220, -120)
+	_chest.position = Vector2(-260, -160)
 	_chest.z_index = 5
 	_chest.tapped.connect(_on_chest_tapped)
 	add_child(_chest)
