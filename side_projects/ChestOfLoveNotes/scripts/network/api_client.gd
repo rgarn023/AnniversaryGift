@@ -88,8 +88,16 @@ func _http_method(method: String) -> int:
 func _safe_error(data: Variant, status: int) -> String:
 	if typeof(data) == TYPE_DICTIONARY:
 		var d: Dictionary = data
-		if d.has("error") and typeof(d["error"]) == TYPE_STRING:
-			return str(d["error"])
+		if d.has("error"):
+			var err_v: Variant = d["error"]
+			if typeof(err_v) == TYPE_STRING:
+				return str(err_v)
+			if typeof(err_v) == TYPE_DICTIONARY:
+				var err_d: Dictionary = err_v
+				if err_d.has("message"):
+					return str(err_d["message"])
+				if err_d.has("code"):
+					return str(err_d["code"])
 		if d.has("message") and typeof(d["message"]) == TYPE_STRING:
 			return str(d["message"])
 	return "Request failed (%d)." % status

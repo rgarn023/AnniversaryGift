@@ -8,12 +8,20 @@ var mode: Mode = Mode.UNCONFIGURED
 var config: BackendConfig = BackendConfig.new()
 var tokens: SecureTokenService = SecureTokenService.new()
 var api: ApiClient
+var scrolls: ScrollService
 var demo: DemoSession = DemoSession.new()
 var reduced_motion: bool = false
+## Ephemeral plaintext held only while a scroll viewer is open (online/demo).
+var open_message_plaintext: String = ""
 
 
 func _init() -> void:
 	api = ApiClient.new(config, tokens)
+	scrolls = ScrollService.new(api)
+
+
+func clear_open_message() -> void:
+	open_message_plaintext = ""
 
 
 func bootstrap() -> void:
@@ -41,4 +49,5 @@ func is_online() -> bool:
 
 func sign_out() -> void:
 	tokens.clear()
+	clear_open_message()
 	demo.clear_sensitive()

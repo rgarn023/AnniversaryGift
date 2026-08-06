@@ -1,6 +1,6 @@
 extends RefCounted
 class_name DemoSession
-## LOCAL DEMO MODE — fictional accounts and scrolls for offline UI testing.
+## LOCAL DEMO MODE — fictional accounts and permanent-scroll state for offline UI.
 ## Never mixed with production Supabase data. Disabled in release exports.
 
 const DEMO_PASSWORD := "starlight"
@@ -14,8 +14,11 @@ var friend_requests: Array[Dictionary] = []
 var blocks: Array[Dictionary] = []
 var scrolls: Array[Dictionary] = []
 var scroll_bodies: Dictionary = {} ## id -> plaintext (demo only; never used online)
-var sent_scrolls: Array[Dictionary] = []
+## Permanent per-party state (mirrors scroll_recipient_states / scroll_sender_states).
+var recipient_states: Dictionary = {} ## scroll_id -> Dictionary
+var sender_states: Dictionary = {} ## scroll_id -> Dictionary
 var password_attempts: Dictionary = {} ## scroll_id -> Array[unix]
+var open_message_plaintext: String = ""
 
 
 func enable() -> void:
@@ -31,6 +34,7 @@ func disable() -> void:
 func clear_sensitive() -> void:
 	scroll_bodies.clear()
 	password_attempts.clear()
+	open_message_plaintext = ""
 
 
 func _seed() -> void:
@@ -69,82 +73,75 @@ func _seed() -> void:
 		"kind": "friend_request",
 	}]
 	blocks = []
+	recipient_states.clear()
+	sender_states.clear()
 	var unlocked_id := "scroll-open-now"
 	var locked_id := "scroll-locked-soon"
 	var protected_id := "scroll-magic"
 	var opened_id := "scroll-opened"
 	scrolls = [
-		{
-			"id": unlocked_id,
-			"sender_id": "demo-mandy",
-			"recipient_id": "demo-robert",
-			"title": "For tonight",
-			"unlock_at_unix": simulated_now_unix - 120,
-			"has_magic_password": false,
-			"created_at": _iso(-7200),
-			"first_opened_at": null,
-			"opened_count": 0,
-			"kind": "love_note",
-			"state": "unlocked_unread",
-		},
-		{
-			"id": locked_id,
-			"sender_id": "demo-mandy",
-			"recipient_id": "demo-robert",
-			"title": "A tomorrow note",
-			"unlock_at_unix": simulated_now_unix + 3600,
-			"has_magic_password": false,
-			"created_at": _iso(-5400),
-			"first_opened_at": null,
-			"opened_count": 0,
-			"kind": "love_note",
-			"state": "locked",
-		},
-		{
-			"id": protected_id,
-			"sender_id": "demo-mandy",
-			"recipient_id": "demo-robert",
-			"title": "Sealed with starlight",
-			"unlock_at_unix": simulated_now_unix - 60,
-			"has_magic_password": true,
-			"created_at": _iso(-4000),
-			"first_opened_at": null,
-			"opened_count": 0,
-			"kind": "love_note",
-			"state": "password_unlocked_unread",
-		},
-		{
-			"id": opened_id,
-			"sender_id": "demo-mandy",
-			"recipient_id": "demo-robert",
-			"title": "Yesterday's note",
-			"unlock_at_unix": simulated_now_unix - 86400,
-			"has_magic_password": false,
-			"created_at": _iso(-90000),
-			"first_opened_at": _iso(-80000),
-			"opened_count": 2,
-			"kind": "love_note",
-			"state": "opened",
-		},
+		_meta(unlocked_id, "demo-mandy", "demo-robert", "For tonight", simulated_now_unix - 120, false, -7200),
+		_meta(locked_id, "demo-mandy", "demo-robert", "A tomorrow note", simulated_now_unix + 3600, false, -5400),
+		_meta(protected_id, "demo-mandy", "demo-robert", "Sealed with starlight", simulated_now_unix - 60, true, -4000),
+		_meta(opened_id, "demo-mandy", "demo-robert", "Yesterday's note", simulated_now_unix - 86400, false, -90000),
 	]
+	for s in scrolls:
+		_ensure_party_states(str(s.id), str(s.sender_id), str(s.recipient_id))
+	# Already-opened scroll lives under Saved, not Current.
+	var opened_state: Dictionary = recipient_states[opened_id]
+	opened_state["is_read"] = true
+	opened_state["is_saved"] = true
+	opened_state["first_opened_at"] = _iso(-80000)
+	opened_state["last_opened_at"] = _iso(-70000)
+	opened_state["opened_count"] = 2
+	recipient_states[opened_id] = opened_state
 	scroll_bodies = {
 		unlocked_id: "This note is available now. The chest can hold many scrolls at once — unlocked, locked, and sealed.",
 		locked_id: "You should not see this body until the simulated unlock time advances.",
 		protected_id: "The magic password worked. In production this text is decrypted only after server checks.",
-		opened_id: "An older note that was already opened. It remains in chest history.",
+		opened_id: "An older note that was already opened. It remains in Saved Scrolls.",
 	}
-	sent_scrolls = [
-		{
-			"id": "sent-1",
-			"sender_id": "demo-robert",
-			"recipient_id": "demo-mandy",
-			"title": "From Robert",
-			"unlock_at_unix": simulated_now_unix + 7200,
-			"has_magic_password": false,
-			"created_at": _iso(-600),
+	# Sent history for Robert
+	var sent_id := "sent-1"
+	scrolls.append(_meta(sent_id, "demo-robert", "demo-mandy", "From Robert", simulated_now_unix + 7200, false, -600))
+	_ensure_party_states(sent_id, "demo-robert", "demo-mandy")
+	scroll_bodies[sent_id] = "A note waiting for Mandy."
+
+
+func _meta(id: String, sender: String, recipient: String, title: String, unlock_unix: int, has_pw: bool, created_offset: int) -> Dictionary:
+	return {
+		"id": id,
+		"sender_id": sender,
+		"recipient_id": recipient,
+		"title": title,
+		"unlock_at_unix": unlock_unix,
+		"has_magic_password": has_pw,
+		"has_password": has_pw,
+		"created_at": _iso(created_offset),
+		"kind": "love_note",
+		"_demo_password": DEMO_PASSWORD if has_pw else "",
+	}
+
+
+func _ensure_party_states(scroll_id: String, sender_id: String, recipient_id: String) -> void:
+	if not recipient_states.has(scroll_id):
+		recipient_states[scroll_id] = {
+			"scroll_id": scroll_id,
+			"recipient_id": recipient_id,
+			"is_read": false,
+			"is_saved": false,
+			"is_favorite": false,
+			"first_opened_at": null,
+			"last_opened_at": null,
 			"opened_count": 0,
+			"deleted_at": null,
 		}
-	]
+	if not sender_states.has(scroll_id):
+		sender_states[scroll_id] = {
+			"scroll_id": scroll_id,
+			"sender_id": sender_id,
+			"deleted_at": null,
+		}
 
 
 func _iso(offset_sec: int) -> String:
@@ -194,6 +191,7 @@ func get_friends() -> Array[Dictionary]:
 
 
 func get_chest_items(filter_name: String = "all") -> Array[Dictionary]:
+	## Current Scrolls: not recipient-deleted and not yet saved.
 	var items: Array[Dictionary] = []
 	for req in friend_requests:
 		if str(req.recipient_id) == current_user_id and str(req.status) == "pending":
@@ -210,10 +208,14 @@ func get_chest_items(filter_name: String = "all") -> Array[Dictionary]:
 	for s in scrolls:
 		if str(s.recipient_id) != current_user_id:
 			continue
-		var item := s.duplicate(true)
-		item["sender_display_name"] = get_profile(str(s.sender_id)).get("display_name", "Friend")
-		item["state"] = _derive_state(s)
-		items.append(item)
+		var st: Dictionary = recipient_states.get(str(s.id), {})
+		if st.is_empty():
+			continue
+		if st.get("deleted_at") != null:
+			continue
+		if bool(st.get("is_saved", false)):
+			continue
+		items.append(_public_recipient_item(s, st))
 	items.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
 		return _sort_rank(a) < _sort_rank(b)
 	)
@@ -221,25 +223,99 @@ func get_chest_items(filter_name: String = "all") -> Array[Dictionary]:
 		return items
 	var filtered: Array[Dictionary] = []
 	for item in items:
-		var st := str(item.get("state", ""))
+		var state_name := str(item.get("state", ""))
 		match filter_name:
 			"unread":
-				if st in ["unlocked_unread", "password_unlocked_unread"]:
+				if state_name in ["unlocked_unread", "password_unlocked_unread"]:
 					filtered.append(item)
 			"locked":
-				if st == "locked":
-					filtered.append(item)
-			"opened":
-				if st == "opened":
+				if state_name == "locked":
 					filtered.append(item)
 			"requests":
-				if st == "friend_request":
+				if state_name == "friend_request":
 					filtered.append(item)
 	return filtered
 
 
-func _derive_state(s: Dictionary) -> String:
-	if int(s.get("opened_count", 0)) > 0 and s.get("first_opened_at") != null:
+func get_saved_scrolls(filters: Dictionary = {}) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for s in scrolls:
+		if str(s.recipient_id) != current_user_id:
+			continue
+		var st: Dictionary = recipient_states.get(str(s.id), {})
+		if st.is_empty():
+			continue
+		if not bool(st.get("is_saved", false)):
+			continue
+		if st.get("deleted_at") != null:
+			continue
+		if bool(filters.get("favorites_only", false)) and not bool(st.get("is_favorite", false)):
+			continue
+		if bool(filters.get("password_protected_only", false)) and not bool(s.get("has_magic_password", false)):
+			continue
+		if filters.has("sender_id") and str(filters.sender_id) != str(s.sender_id):
+			continue
+		var title_q := str(filters.get("title_query", "")).strip_edges().to_lower()
+		if not title_q.is_empty() and not str(s.title).to_lower().contains(title_q):
+			continue
+		out.append(_public_recipient_item(s, st))
+	if str(filters.get("sort", "newest")) == "oldest":
+		out.reverse()
+	return out
+
+
+func get_sent_scrolls() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for s in scrolls:
+		if str(s.sender_id) != current_user_id:
+			continue
+		var sst: Dictionary = sender_states.get(str(s.id), {})
+		if sst.is_empty() or sst.get("deleted_at") != null:
+			continue
+		var rst: Dictionary = recipient_states.get(str(s.id), {})
+		var recip := get_profile(str(s.recipient_id))
+		out.append({
+			"id": s.id,
+			"sender_id": s.sender_id,
+			"recipient_id": s.recipient_id,
+			"title": s.title,
+			"created_at": s.created_at,
+			"unlock_at_unix": s.unlock_at_unix,
+			"has_password": bool(s.get("has_magic_password", false)),
+			"recipient_opened": bool(rst.get("is_read", false)),
+			"first_opened_at": rst.get("first_opened_at", null),
+			"last_opened_at": rst.get("last_opened_at", null),
+			"opened_count": int(rst.get("opened_count", 0)),
+			"recipient_display_name": recip.get("display_name", "Friend"),
+		})
+	return out
+
+
+func _public_recipient_item(s: Dictionary, st: Dictionary) -> Dictionary:
+	var item := {
+		"id": s.id,
+		"sender_id": s.sender_id,
+		"recipient_id": s.recipient_id,
+		"title": s.title,
+		"unlock_at_unix": s.unlock_at_unix,
+		"has_magic_password": bool(s.get("has_magic_password", false)),
+		"has_password": bool(s.get("has_magic_password", false)),
+		"created_at": s.created_at,
+		"kind": "love_note",
+		"is_read": bool(st.get("is_read", false)),
+		"is_saved": bool(st.get("is_saved", false)),
+		"is_favorite": bool(st.get("is_favorite", false)),
+		"first_opened_at": st.get("first_opened_at", null),
+		"last_opened_at": st.get("last_opened_at", null),
+		"opened_count": int(st.get("opened_count", 0)),
+		"sender_display_name": get_profile(str(s.sender_id)).get("display_name", "Friend"),
+	}
+	item["state"] = _derive_state(s, st)
+	return item
+
+
+func _derive_state(s: Dictionary, st: Dictionary) -> String:
+	if bool(st.get("is_saved", false)) or bool(st.get("is_read", false)):
 		return "opened"
 	if int(s.get("unlock_at_unix", 0)) > now_unix():
 		return "locked"
@@ -271,16 +347,10 @@ func respond_friend_request(request_id: String, accept: bool) -> Dictionary:
 		friend_requests[i] = req
 		if accept:
 			friendships.append({
-				"user_one_id": "demo-friend" if current_user_id == "demo-robert" else current_user_id,
-				"user_two_id": current_user_id if current_user_id != "demo-friend" else "demo-robert",
-				"created_at": _iso(0),
-			})
-			# Normalize for demo-friend + robert
-			friendships[friendships.size() - 1] = {
 				"user_one_id": "demo-friend",
 				"user_two_id": "demo-robert",
 				"created_at": _iso(0),
-			}
+			})
 		return {"ok": true, "status": req.status}
 	return {"ok": false, "error": "Request not found."}
 
@@ -317,35 +387,31 @@ func send_scroll(recipient_id: String, title: String, body: String, unlock_unix:
 	if not ok_friend:
 		return {"ok": false, "error": "Recipient is not an accepted friend."}
 	var id := "scroll-%d" % (scrolls.size() + 10)
-	var meta := {
-		"id": id,
-		"sender_id": current_user_id,
-		"recipient_id": recipient_id,
-		"title": title.substr(0, 80),
-		"unlock_at_unix": unlock_unix,
-		"has_magic_password": not magic_password.is_empty(),
-		"created_at": _iso(0),
-		"first_opened_at": null,
-		"opened_count": 0,
-		"kind": "love_note",
-		"state": "locked" if unlock_unix > now_unix() else "unlocked_unread",
-		"_demo_password": magic_password,
-	}
+	var meta := _meta(id, current_user_id, recipient_id, title.substr(0, 80), unlock_unix, not magic_password.is_empty(), 0)
+	if not magic_password.is_empty():
+		meta["_demo_password"] = magic_password
 	scrolls.append(meta)
 	scroll_bodies[id] = body
-	sent_scrolls.append(meta.duplicate(true))
-	var safe := meta.duplicate(true)
+	_ensure_party_states(id, current_user_id, recipient_id)
+	# Idempotent re-init must not duplicate.
+	_ensure_party_states(id, current_user_id, recipient_id)
+	var safe := _public_recipient_item(meta, recipient_states[id])
 	safe.erase("_demo_password")
 	return {"ok": true, "scroll": safe}
 
 
 func open_scroll(scroll_id: String, magic_password: String = "") -> Dictionary:
-	for i in scrolls.size():
-		var s: Dictionary = scrolls[i]
+	for s in scrolls:
 		if str(s.id) != scroll_id:
 			continue
 		if str(s.recipient_id) != current_user_id:
 			return {"ok": false, "error": "Not your scroll.", "locked": false}
+		var st: Dictionary = recipient_states.get(scroll_id, {})
+		if st.is_empty():
+			_ensure_party_states(scroll_id, str(s.sender_id), str(s.recipient_id))
+			st = recipient_states[scroll_id]
+		if st.get("deleted_at") != null:
+			return {"ok": false, "error": "This scroll is no longer available."}
 		if int(s.unlock_at_unix) > now_unix():
 			return {
 				"ok": false,
@@ -362,28 +428,53 @@ func open_scroll(scroll_id: String, magic_password: String = "") -> Dictionary:
 				_record_attempt(scroll_id, false)
 				return {"ok": false, "locked": false, "error": "That magic password did not work."}
 		_record_attempt(scroll_id, true)
-		if s.get("first_opened_at") == null:
-			s.first_opened_at = _iso(0)
-		s.opened_count = int(s.get("opened_count", 0)) + 1
-		s.state = "opened"
-		scrolls[i] = s
+		# Atomic permanent-state open: read + saved; first_opened once; last_opened always; count++
+		if st.get("first_opened_at") == null:
+			st["first_opened_at"] = _iso(0)
+		st["last_opened_at"] = _iso(0)
+		st["opened_count"] = int(st.get("opened_count", 0)) + 1
+		st["is_read"] = true
+		st["is_saved"] = true
+		recipient_states[scroll_id] = st
 		var body := str(scroll_bodies.get(scroll_id, ""))
+		open_message_plaintext = body
 		return {
 			"ok": true,
 			"locked": false,
 			"message": body,
-			"scroll": _public_scroll(s),
+			"scroll": _public_recipient_item(s, st),
 			"ephemeral": bool(s.has_magic_password),
 		}
 	return {"ok": false, "error": "Scroll not found."}
 
 
-func _public_scroll(s: Dictionary) -> Dictionary:
-	var out := s.duplicate(true)
-	out.erase("_demo_password")
-	out["sender_display_name"] = get_profile(str(s.sender_id)).get("display_name", "Friend")
-	out["state"] = _derive_state(out)
-	return out
+func set_scroll_favorite(scroll_id: String, is_favorite: bool) -> Dictionary:
+	var st: Dictionary = recipient_states.get(scroll_id, {})
+	if st.is_empty() or str(st.get("recipient_id", "")) != current_user_id:
+		return {"ok": false, "error": "Not your scroll."}
+	if st.get("deleted_at") != null:
+		return {"ok": false, "error": "This scroll is no longer available."}
+	st["is_favorite"] = is_favorite
+	recipient_states[scroll_id] = st
+	return {"ok": true, "recipient_state": st.duplicate(true)}
+
+
+func delete_received_scroll(scroll_id: String) -> Dictionary:
+	var st: Dictionary = recipient_states.get(scroll_id, {})
+	if st.is_empty() or str(st.get("recipient_id", "")) != current_user_id:
+		return {"ok": false, "error": "Not your scroll."}
+	st["deleted_at"] = _iso(0)
+	recipient_states[scroll_id] = st
+	return {"ok": true, "soft_deleted": true, "physical_erasure": false}
+
+
+func delete_sent_scroll(scroll_id: String) -> Dictionary:
+	var st: Dictionary = sender_states.get(scroll_id, {})
+	if st.is_empty() or str(st.get("sender_id", "")) != current_user_id:
+		return {"ok": false, "error": "Not your sent scroll."}
+	st["deleted_at"] = _iso(0)
+	sender_states[scroll_id] = st
+	return {"ok": true, "soft_deleted": true, "recalled": false, "physical_erasure": false}
 
 
 func _password_allowed(scroll_id: String) -> bool:
@@ -417,4 +508,9 @@ func counts() -> Dictionary:
 				locked += 1
 			"friend_request":
 				requests += 1
-	return {"unread": unread, "locked": locked, "requests": requests}
+	return {
+		"unread": unread,
+		"locked": locked,
+		"requests": requests,
+		"saved": get_saved_scrolls().size(),
+	}

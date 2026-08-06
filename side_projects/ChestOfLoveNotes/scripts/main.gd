@@ -327,12 +327,13 @@ func _show_inventory() -> void:
 	var filters := HBoxContainer.new()
 	filters.add_theme_constant_override("separation", 8)
 	root.add_child(filters)
-	for f in ["all", "unread", "locked", "opened", "requests"]:
+	for f in ["all", "unread", "locked", "requests"]:
 		var fname: String = str(f)
 		filters.add_child(_make_button(fname.capitalize(), func() -> void:
 			_inventory_filter = fname
 			_show_inventory()
-		, Vector2(150, 56)))
+		, Vector2(140, 56)))
+	filters.add_child(_make_button("Saved", _show_saved, Vector2(140, 56)))
 
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -399,9 +400,124 @@ func _make_chest_item_row(item: Dictionary) -> PanelContainer:
 	meta.add_theme_font_size_override("font_size", 22)
 	meta.add_theme_color_override("font_color", Color(0.82, 0.76, 0.88))
 	row.add_child(meta)
-	var open_btn := _make_button("Open", func() -> void: _open_chest_item(item), Vector2(180, 56))
-	row.add_child(open_btn)
+	var actions := HBoxContainer.new()
+	actions.add_theme_constant_override("separation", 8)
+	row.add_child(actions)
+	actions.add_child(_make_button("Open", func() -> void: _open_chest_item(item), Vector2(160, 56)))
+	if str(item.get("kind", "love_note")) != "friend_request":
+		var fav := bool(item.get("is_favorite", false))
+		actions.add_child(_make_button("★" if fav else "☆", func() -> void:
+			_toggle_favorite(str(item.id), not fav)
+		, Vector2(80, 56)))
+		actions.add_child(_make_button("Delete", func() -> void:
+			_confirm_delete_received(str(item.id))
+		, Vector2(140, 56)))
 	return panel
+
+
+func _show_saved() -> void:
+	_current_screen = "saved"
+	_clear_screen()
+	var root := VBoxContainer.new()
+	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	root.offset_left = 28
+	root.offset_right = -28
+	root.offset_top = 24
+	root.offset_bottom = -24
+	root.add_theme_constant_override("separation", 12)
+	_screen_host.add_child(root)
+	var header := HBoxContainer.new()
+	root.add_child(header)
+	var title := Label.new()
+	title.text = "Saved Scrolls"
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title.add_theme_font_size_override("font_size", 40)
+	title.add_theme_color_override("font_color", Color(0.98, 0.86, 0.45))
+	header.add_child(title)
+	header.add_child(_make_button("Back", _show_inventory, Vector2(160, 64)))
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	root.add_child(scroll)
+	var list := VBoxContainer.new()
+	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	list.add_theme_constant_override("separation", 12)
+	scroll.add_child(list)
+	var items: Array[Dictionary] = []
+	if state.is_demo():
+		items = state.demo.get_saved_scrolls()
+	if items.is_empty():
+		var empty := Label.new()
+		empty.text = "No saved scrolls yet. Open a note to keep it here."
+		empty.add_theme_font_size_override("font_size", 28)
+		empty.add_theme_color_override("font_color", Color(0.85, 0.8, 0.9))
+		list.add_child(empty)
+		return
+	for item in items:
+		list.add_child(_make_chest_item_row(item))
+
+
+func _toggle_favorite(scroll_id: String, is_favorite: bool) -> void:
+	if state.is_demo():
+		var result := state.demo.set_scroll_favorite(scroll_id, is_favorite)
+		if bool(result.get("ok", false)):
+			_show_toast("Favorite updated")
+			if _current_screen == "saved":
+				_show_saved()
+			else:
+				_show_inventory()
+		else:
+			_show_toast(str(result.get("error", "Could not update favorite.")))
+		return
+	_show_toast("Online favorite update is ready after Edge deploy.")
+
+
+func _confirm_delete_received(scroll_id: String) -> void:
+	_overlay.visible = true
+	for c in _overlay.get_children():
+		c.queue_free()
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.75)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_overlay.add_child(dim)
+	var box := VBoxContainer.new()
+	box.set_anchors_preset(Control.PRESET_CENTER)
+	box.position = Vector2(-340, -220)
+	box.size = Vector2(680, 420)
+	box.add_theme_constant_override("separation", 14)
+	_overlay.add_child(box)
+	var title := Label.new()
+	title.text = "Hide this scroll?"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 36)
+	title.add_theme_color_override("font_color", Color(0.98, 0.86, 0.45))
+	box.add_child(title)
+	var body := Label.new()
+	body.text = "This hides the note from your Current and Saved views only. It does not erase the sender's history or permanently destroy the message."
+	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	body.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	body.add_theme_font_size_override("font_size", 24)
+	body.add_theme_color_override("font_color", Color(0.9, 0.85, 0.95))
+	box.add_child(body)
+	box.add_child(_make_button("Hide from my chest", func() -> void:
+		_hide_overlay()
+		_delete_received(scroll_id)
+	))
+	box.add_child(_make_button("Cancel", _hide_overlay, Vector2(220, 64)))
+
+
+func _delete_received(scroll_id: String) -> void:
+	if state.is_demo():
+		var result := state.demo.delete_received_scroll(scroll_id)
+		if bool(result.get("ok", false)):
+			_show_toast("Scroll hidden from your chest")
+			if _current_screen == "saved":
+				_show_saved()
+			else:
+				_show_inventory()
+		else:
+			_show_toast(str(result.get("error", "Could not delete.")))
+		return
+	_show_toast("Online delete-received is ready after Edge deploy.")
 
 
 func _open_chest_item(item: Dictionary) -> void:
@@ -522,10 +638,24 @@ func _show_password_dialog(item: Dictionary) -> void:
 
 
 func _open_authorized_scroll(scroll_id: String, magic_password: String) -> void:
-	if not state.is_demo():
-		_show_toast("Online open-scroll requires Supabase credentials.")
+	var result: Dictionary = {}
+	if state.is_demo():
+		result = state.demo.open_scroll(scroll_id, magic_password)
+	elif state.is_online():
+		result = await state.scrolls.open_scroll(scroll_id, magic_password)
+		if bool(result.get("ok", false)):
+			var data: Dictionary = result.get("data", {})
+			result = {
+				"ok": true,
+				"message": str(data.get("message", "")),
+				"scroll": data.get("scroll", {}),
+				"ephemeral": bool(data.get("ephemeral", false)),
+			}
+		else:
+			result = {"ok": false, "error": str(result.get("error", "Could not open scroll."))}
+	else:
+		_show_toast("Backend is not configured.")
 		return
-	var result: Dictionary = state.demo.open_scroll(scroll_id, magic_password)
 	if not bool(result.get("ok", false)):
 		if bool(result.get("locked", false)):
 			_show_toast("Still locked on demo server clock.")
@@ -534,17 +664,27 @@ func _open_authorized_scroll(scroll_id: String, magic_password: String) -> void:
 		return
 	var meta: Dictionary = result.get("scroll", {})
 	var body := str(result.get("message", ""))
+	state.open_message_plaintext = body
 	var ephemeral := bool(result.get("ephemeral", false))
 	var heading := str(meta.get("title", "A Love Note"))
-	var meta_line := "From %s" % str(meta.get("sender_display_name", "Friend"))
+	var meta_line := "From %s" % str(meta.get("sender_display_name", meta.get("sender_id", "Friend")))
 	await _scroll_viewer.open_message(heading, meta_line, body, false, ephemeral)
 
 
 func _on_scroll_closed() -> void:
-	if _current_screen == "inventory":
-		_show_inventory()
-	else:
-		_show_main_chest()
+	# Clear plaintext from memory when the viewer closes.
+	state.clear_open_message()
+	if state.is_demo():
+		state.demo.open_message_plaintext = ""
+	match _current_screen:
+		"inventory":
+			_show_inventory()
+		"saved":
+			_show_saved()
+		"sent":
+			_show_sent()
+		_:
+			_show_main_chest()
 
 
 func _show_compose() -> void:
@@ -734,20 +874,53 @@ func _show_sent() -> void:
 	title.add_theme_color_override("font_color", Color(0.98, 0.86, 0.45))
 	header.add_child(title)
 	header.add_child(_make_button("Back", _show_main_chest, Vector2(160, 64)))
-	for s in state.demo.sent_scrolls:
-		var recip := state.demo.get_profile(str(s.recipient_id))
+	var sent_items: Array[Dictionary] = []
+	if state.is_demo():
+		sent_items = state.demo.get_sent_scrolls()
+	if sent_items.is_empty():
+		var empty := Label.new()
+		empty.text = "No sent scrolls."
+		empty.add_theme_font_size_override("font_size", 28)
+		empty.add_theme_color_override("font_color", Color(0.85, 0.8, 0.9))
+		root.add_child(empty)
+		return
+	for s in sent_items:
+		var panel := PanelContainer.new()
+		var style := StyleBoxFlat.new()
+		style.bg_color = Color(0.12, 0.08, 0.16, 0.92)
+		style.set_corner_radius_all(14)
+		style.content_margin_left = 16
+		style.content_margin_right = 16
+		style.content_margin_top = 12
+		style.content_margin_bottom = 12
+		panel.add_theme_stylebox_override("panel", style)
+		var col := VBoxContainer.new()
+		panel.add_child(col)
 		var row := Label.new()
 		row.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		row.text = "%s → %s · unlock_unix=%d · password=%s · opened=%d" % [
 			str(s.get("title", "")),
-			str(recip.get("display_name", "")),
+			str(s.get("recipient_display_name", "")),
 			int(s.get("unlock_at_unix", 0)),
-			"yes" if bool(s.get("has_magic_password", false)) else "no",
+			"yes" if bool(s.get("has_password", false)) else "no",
 			int(s.get("opened_count", 0)),
 		]
 		row.add_theme_font_size_override("font_size", 22)
 		row.add_theme_color_override("font_color", Color(0.9, 0.85, 0.95))
-		root.add_child(row)
+		col.add_child(row)
+		var sid := str(s.id)
+		col.add_child(_make_button("Hide from Sent", func() -> void:
+			if state.is_demo():
+				var result := state.demo.delete_sent_scroll(sid)
+				if bool(result.get("ok", false)):
+					_show_toast("Hidden from your Sent history")
+					_show_sent()
+				else:
+					_show_toast(str(result.get("error", "Could not hide sent scroll.")))
+			else:
+				_show_toast("Online delete-sent is ready after Edge deploy.")
+		, Vector2(240, 56)))
+		root.add_child(panel)
 
 
 func _show_profile() -> void:
@@ -838,7 +1011,7 @@ func _notification(what: int) -> void:
 			_hide_overlay()
 			return
 		match _current_screen:
-			"inventory", "compose", "friends", "sent", "profile":
+			"inventory", "saved", "compose", "friends", "sent", "profile":
 				_show_main_chest()
 			"main_chest":
 				_show_welcome()

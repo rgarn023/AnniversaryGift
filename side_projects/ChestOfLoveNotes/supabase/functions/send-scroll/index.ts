@@ -27,6 +27,7 @@ Deno.serve(async (req) => {
 
     const { user } = await requireUser(req);
     await requirePrivateMember(user);
+    // Sender identity always from verified session — never trust body.sender_id.
     const me = callerId(user);
     const body = (await req.json()) as Body;
     requireFields(body, ["recipient_id", "message"]);
@@ -61,15 +62,12 @@ Deno.serve(async (req) => {
       hasPassword = true;
     }
 
-    const unlockAt = body.unlock_at
-      ? new Date(body.unlock_at)
-      : new Date();
+    const unlockAt = body.unlock_at ? new Date(body.unlock_at) : new Date();
     if (Number.isNaN(unlockAt.getTime())) {
       throw new AppError("invalid_unlock_at", "unlock_at must be a valid ISO timestamp", 400);
     }
 
     const title = (body.title?.trim() || "A Love Note").slice(0, 120);
-
     const service = createServiceClient();
 
     const { data: friends } = await service.rpc("are_friends", {
@@ -90,7 +88,6 @@ Deno.serve(async (req) => {
 
     const encrypted = await encryptMessage(message);
 
-    // Insert metadata then contents (service role). If contents fail, soft-delete scroll.
     const { data: scroll, error: scrollErr } = await service
       .from("scrolls")
       .insert({
@@ -101,7 +98,7 @@ Deno.serve(async (req) => {
         has_password: hasPassword,
       })
       .select(
-        "id, sender_id, recipient_id, title, unlock_at, has_password, is_opened, created_at",
+        "id, sender_id, recipient_id, title, unlock_at, has_password, created_at",
       )
       .single();
 
@@ -120,6 +117,7 @@ Deno.serve(async (req) => {
 
     if (contentErr) {
       console.error(contentErr);
+      // Compensating soft-hide on legacy column only; do not claim delivery.
       await service
         .from("scrolls")
         .update({ deleted_at: new Date().toISOString() })
@@ -127,8 +125,64 @@ Deno.serve(async (req) => {
       throw new AppError("insert_failed", "Could not store encrypted message", 500);
     }
 
-    // Never return ciphertext to the client.
-    return jsonResponse({ scroll });
+    // Create recipient + sender state rows (idempotent; no duplicates).
+    const { error: stateErr } = await service.rpc("ensure_scroll_party_states", {
+      p_scroll_id: scroll.id,
+    });
+    if (stateErr) {
+      console.error(stateErr);
+      await service
+        .from("scrolls")
+        .update({ deleted_at: new Date().toISOString() })
+        .eq("id", scroll.id);
+      throw new AppError(
+        "insert_failed",
+        "Could not initialize permanent scroll state",
+        500,
+      );
+    }
+
+    // Confirm both state rows exist before reporting success.
+    const [{ data: rState }, { data: sState }] = await Promise.all([
+      service
+        .from("scroll_recipient_states")
+        .select("scroll_id")
+        .eq("scroll_id", scroll.id)
+        .eq("recipient_id", body.recipient_id)
+        .maybeSingle(),
+      service
+        .from("scroll_sender_states")
+        .select("scroll_id")
+        .eq("scroll_id", scroll.id)
+        .eq("sender_id", me)
+        .maybeSingle(),
+    ]);
+
+    if (!rState || !sState) {
+      await service
+        .from("scrolls")
+        .update({ deleted_at: new Date().toISOString() })
+        .eq("id", scroll.id);
+      throw new AppError(
+        "insert_failed",
+        "Scroll state rows were not created",
+        500,
+      );
+    }
+
+    // Never return ciphertext / password material.
+    return jsonResponse({
+      scroll: {
+        id: scroll.id,
+        sender_id: scroll.sender_id,
+        recipient_id: scroll.recipient_id,
+        title: scroll.title,
+        unlock_at: scroll.unlock_at,
+        has_password: scroll.has_password,
+        created_at: scroll.created_at,
+        is_opened: false,
+      },
+    });
   } catch (err) {
     return errorResponse(err);
   }

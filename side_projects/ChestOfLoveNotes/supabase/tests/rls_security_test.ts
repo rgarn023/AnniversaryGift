@@ -221,19 +221,22 @@ Deno.test({
     // Living documentation assertion — keep in sync with open-scroll/index.ts.
     const order = [
       "auth",
+      "private_membership",
       "recipient",
-      "not_deleted",
+      "recipient_not_deleted",
       "blocks",
       "unlock_at",
       "rate_limit",
       "password_verify",
       "decrypt",
-      "update_opened",
+      "mark_recipient_scroll_opened",
       "return_message",
     ];
-    assertEquals(order.length, 10);
+    assertEquals(order.length, 11);
     assertEquals(order[0], "auth");
-    assertEquals(order[4], "unlock_at");
-    assertEquals(order[9], "return_message");
+    assertEquals(order[1], "private_membership");
+    assertEquals(order[5], "unlock_at");
+    assertEquals(order[9], "mark_recipient_scroll_opened");
+    assertEquals(order[10], "return_message");
   },
 });

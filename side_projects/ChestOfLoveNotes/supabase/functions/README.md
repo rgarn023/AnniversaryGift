@@ -9,13 +9,18 @@ TypeScript Deno functions for friend graph + encrypted scrolls.
 | `send-friend-request` | Create pending request by `recipient_id` or `friend_code` |
 | `respond-to-friend-request` | Accept / decline / cancel; accept creates friendship |
 | `block-user` | Block or unblock; removes friendship + pending requests |
-| `send-scroll` | Validate friendship, encrypt message, optional password hash |
-| `open-scroll` | Auth → recipient → deleted → block → unlock → rate limit → password → decrypt |
+| `send-scroll` | Encrypt + create scroll, contents, recipient/sender state rows |
+| `open-scroll` | Auth → member → recipient → not deleted → block → unlock → password → decrypt → `mark_recipient_scroll_opened` |
+| `get-chest` | Current Scrolls via `scroll_recipient_states` (excludes saved/deleted) |
+| `get-saved-scrolls` | Saved Scrolls (`is_saved`, not deleted) with safe filters |
+| `get-sent-scrolls` | Sent history via `scroll_sender_states` |
+| `update-scroll-favorite` | Recipient favorite toggle via `set_recipient_scroll_favorite` |
+| `delete-received-scroll` | Soft-delete recipient copy only |
+| `delete-sent-scroll` | Soft-delete sender history only |
+| `claim-private-membership` | Claim private allowlist membership |
 | `delete-account` | `{ confirm: true }` hard-deletes auth user (cascade) |
 | `search-profiles` | Public profile fields only (no email) |
-| `get-chest` | Recipient scroll metadata for the caller's chest |
 | `get-friends` | Friends + pending incoming/outgoing requests |
-| `get-sent-scrolls` | Sender scroll metadata |
 
 ## Required secrets
 
