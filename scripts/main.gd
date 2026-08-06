@@ -164,13 +164,18 @@ func _build_ui() -> void:
 		_subtitle.add_theme_font_override("font", load("res://assets/fonts/CormorantGaramond-Regular.ttf"))
 	add_child(_subtitle)
 
-	_chest = TreasureChest.new()
+	# Instance scene so realistic frame textures are packed/preloaded with the node.
+	var chest_scene: PackedScene = load("res://scenes/Chest.tscn")
+	_chest = chest_scene.instantiate() as TreasureChest
 	_chest.custom_minimum_size = Vector2(520, 520)
 	_chest.size = Vector2(520, 520)
 	_chest.set_anchors_preset(Control.PRESET_CENTER)
 	_chest.position = Vector2(-260, -160)
 	_chest.z_index = 5
+	# Chest fades itself in after textures are ready; keep hidden until then.
+	_chest.visible = false
 	_chest.tapped.connect(_on_chest_tapped)
+	_chest.scroll_emerged.connect(_on_scroll_emerged)
 	add_child(_chest)
 
 	_safe_bottom = Control.new()
@@ -398,8 +403,14 @@ func _on_chest_tapped() -> void:
 	if not manager.is_chest_opened(next):
 		await _chest.play_open_animation(manager.is_reduced_motion())
 		manager.mark_chest_opened(next)
+		_scroll_viewer.set_emerge_from(_chest.get_scroll_global_center())
+		_chest.hide_rolled_scroll()
 	await _scroll_viewer.open_message(next, false)
 	_input_locked = false
+
+
+func _on_scroll_emerged(global_pos: Vector2) -> void:
+	_scroll_viewer.set_emerge_from(global_pos)
 
 
 func _on_archive_selected(date_iso: String) -> void:

@@ -35,3 +35,15 @@ Aliases kept for older references: `chest_glow.png`, `chest_shadow.png`, `chest_
 | `scroll_mini.png` / `scroll_mini_unread.png` | Archive icons |
 
 Alias: `scroll_parchment.png` → center parchment.
+
+## Open frames (lid animation)
+
+Frame-based opening (preferred for front-facing renders):
+
+- `chest_closed.png`
+- `chest_ajar.png`
+- `chest_half.png`
+- `chest_open.png`
+- `chest_front_lip.png` — masks rising scroll
+
+Z-order while scroll is inside: InteriorGlow(1) < Frames(2) < RolledScroll(3) < ForegroundLip(4) < Latch/Lock(5) < Particles(10+)

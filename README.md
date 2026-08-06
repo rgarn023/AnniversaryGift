@@ -134,8 +134,9 @@ Export preset name: **Android**
 | Renderer | gl_compatibility |
 | Gradle build | Enabled (required for PDF plugin) |
 | Non-resource filter | includes `*.pdf` |
-| Launcher icons | adaptive gold chest / scroll / sparkle |
-| Boot splash | celestial splash art |
+| Launcher icons | realistic antique chest (adaptive) |
+| Boot splash | realistic closed chest on night sky |
+| versionCode | 2 (1.0.1) |
 
 Editor Android paths (example):
 
@@ -156,22 +157,33 @@ This extracts Godot’s `android_source.zip`, writes `android/.build_version`, a
 
 ```bash
 mkdir -p build
-godot --headless --path . --export-debug "Android" build/AnniversaryGift-debug.apk
+godot --headless --path . --export-debug "Android" build/AnniversaryGift-fixed-debug.apk
 ```
 
 Exact output path:
 
 ```text
-build/AnniversaryGift-debug.apk
+build/AnniversaryGift-fixed-debug.apk
 ```
 
 ### Install on a Samsung phone
 
 ```bash
-adb install -r build/AnniversaryGift-debug.apk
+adb install -r build/AnniversaryGift-fixed-debug.apk
 ```
 
 Or copy the APK to the device and open it (enable install from this source if prompted).
+
+### Android launcher icon cache
+
+Android launchers often cache app icons. After installing a build with a new icon:
+
+1. **Uninstall** the previous Anniversary Gift APK.
+2. Restart the launcher or phone (optional but helps stubborn caches).
+3. Install the new APK (`versionCode` must be higher than the previous install).
+
+Do not assume the icon changed just because a new PNG exists in the project — the export preset, adaptive icon resources, and a fresh install all matter.
+
 
 ## Signed release APK (do not commit secrets)
 
