@@ -6,6 +6,19 @@
 create extension if not exists pgcrypto with schema extensions;
 create extension if not exists citext with schema extensions;
 
+-- Ensure extension types are reachable without forcing every caller to
+-- schema-qualify (Supabase installs citext into `extensions`).
+do $$
+begin
+  execute 'alter database ' || quote_ident(current_database())
+    || ' set search_path to public, extensions';
+exception
+  when insufficient_privilege then
+    -- Fallback for roles that cannot alter database settings.
+    null;
+end $$;
+set search_path to public, extensions;
+
 -- ---------------------------------------------------------------------------
 -- Enums
 -- ---------------------------------------------------------------------------
@@ -26,11 +39,11 @@ end $$;
 
 -- Normalize usernames: trim, lowercase, strip surrounding whitespace.
 create or replace function public.normalize_username(raw text)
-returns citext
+returns extensions.citext
 language sql
 immutable
 as $$
-  select nullif(lower(trim(raw)), '')::citext;
+  select nullif(lower(trim(raw)), '')::extensions.citext;
 $$;
 
 -- Generate a short human-shareable friend code (e.g. CHEST-AB12CD).
@@ -80,7 +93,7 @@ $$;
 -- ---------------------------------------------------------------------------
 create table if not exists public.profiles (
   id uuid primary key references auth.users (id) on delete cascade,
-  username citext not null,
+  username extensions.citext not null,
   display_name text not null default '',
   friend_code text not null,
   avatar_url text,

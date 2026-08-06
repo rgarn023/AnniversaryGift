@@ -107,7 +107,7 @@ $$;
 create or replace function public.search_profiles(query text, result_limit int default 20)
 returns table (
   id uuid,
-  username citext,
+  username extensions.citext,
   display_name text,
   friend_code text,
   avatar_url text
@@ -115,7 +115,7 @@ returns table (
 language sql
 stable
 security definer
-set search_path = public
+set search_path = public, extensions
 as $$
   with q as (
     select trim(query) as raw,
@@ -125,7 +125,7 @@ as $$
   from public.profiles p, q
   where q.raw <> ''
     and (
-      p.username like (coalesce(q.uname::text, '') || '%')::citext
+      p.username like (coalesce(q.uname::text, '') || '%')::extensions.citext
       or upper(p.friend_code) = upper(q.raw)
       or p.display_name ilike ('%' || q.raw || '%')
     )
