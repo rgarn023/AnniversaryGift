@@ -1,5 +1,5 @@
 import { handleCors, jsonResponse } from "../_shared/cors.ts";
-import { requireUser, callerId } from "../_shared/auth.ts";
+import { requireUser, callerId, requirePrivateMember } from "../_shared/auth.ts";
 import { createServiceClient } from "../_shared/supabase.ts";
 import { AppError, errorResponse, requireFields } from "../_shared/errors.ts";
 import { decryptMessage, verifyPassword } from "../_shared/crypto.ts";
@@ -34,6 +34,7 @@ Deno.serve(async (req) => {
 
     // 1. Auth
     const { user } = await requireUser(req);
+    await requirePrivateMember(user);
     const me = callerId(user);
     const body = (await req.json()) as Body;
     requireFields(body, ["scroll_id"]);

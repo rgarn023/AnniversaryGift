@@ -1,5 +1,5 @@
 import { handleCors, jsonResponse } from "../_shared/cors.ts";
-import { requireUser, callerId } from "../_shared/auth.ts";
+import { requireUser, callerId, requirePrivateMember } from "../_shared/auth.ts";
 import { createServiceClient } from "../_shared/supabase.ts";
 import { AppError, errorResponse, requireFields } from "../_shared/errors.ts";
 
@@ -18,6 +18,7 @@ Deno.serve(async (req) => {
     }
 
     const { user } = await requireUser(req);
+    await requirePrivateMember(user);
     // Derive caller from JWT (used implicitly by search_profiles via auth.uid()
     // when called with user client; here we filter self via service + exclude).
     const me = callerId(user);

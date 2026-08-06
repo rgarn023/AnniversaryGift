@@ -1,5 +1,5 @@
 import { handleCors, jsonResponse } from "../_shared/cors.ts";
-import { requireUser, callerId } from "../_shared/auth.ts";
+import { requireUser, callerId, requirePrivateMember } from "../_shared/auth.ts";
 import { createServiceClient } from "../_shared/supabase.ts";
 import { AppError, errorResponse } from "../_shared/errors.ts";
 
@@ -17,6 +17,7 @@ Deno.serve(async (req) => {
     }
 
     const { user } = await requireUser(req);
+    await requirePrivateMember(user);
     const me = callerId(user);
     const service = createServiceClient();
 
