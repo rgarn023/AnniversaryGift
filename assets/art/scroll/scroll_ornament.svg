@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="640" height="900" viewBox="0 0 640 900">
-  <path d="M180 160 H460" stroke="#8b1e3f" stroke-width="3"/>
-  <path d="M200 175 H440" stroke="#d4af37" stroke-width="2"/>
-  <circle cx="320" cy="168" r="10" fill="#d4af37"/>
-  <path d="M300 168 Q320 148 340 168 Q320 188 300 168" fill="#b33b5a" opacity="0.85"/>
-</svg>
