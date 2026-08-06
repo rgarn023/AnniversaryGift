@@ -2,10 +2,16 @@ class_name PdfHelper
 extends RefCounted
 
 ## Copies the bundled PDF to user storage and talks to the Android plugin.
+## In-app previews use explicit ResourceLoader paths (not DirAccess scans).
 
 const BUNDLED_PDF := "res://assets/documents/anniversary_gift.pdf"
 const USER_PDF := "user://anniversary_gift.pdf"
-const PAGE_DIR := "res://assets/documents/pdf_pages/"
+
+## Authoritative ordered preview list — do not directory-enumerate on Android.
+const PDF_PAGE_PATHS: Array[String] = [
+	"res://assets/documents/pdf_pages/page_001.png",
+	"res://assets/documents/pdf_pages/page_002.png",
+]
 
 signal operation_finished(success: bool, message: String)
 
@@ -37,19 +43,28 @@ func get_absolute_user_pdf_path() -> String:
 
 
 func list_page_previews() -> PackedStringArray:
+	## Explicit ResourceLoader paths only — DirAccess fails inside exported APKs.
 	var pages: PackedStringArray = []
-	var dir := DirAccess.open(PAGE_DIR)
-	if dir == null:
-		return pages
-	dir.list_dir_begin()
-	var file_name: String = dir.get_next()
-	while file_name != "":
-		if not dir.current_is_dir() and file_name.ends_with(".png"):
-			pages.append(PAGE_DIR.path_join(file_name))
-		file_name = dir.get_next()
-	dir.list_dir_end()
-	pages.sort()
+	for page_path: String in PDF_PAGE_PATHS:
+		if ResourceLoader.exists(page_path):
+			pages.append(page_path)
+		else:
+			push_error("Missing PDF preview resource: %s" % page_path)
 	return pages
+
+
+func load_page_textures() -> Array[Texture2D]:
+	var textures: Array[Texture2D] = []
+	for page_path: String in PDF_PAGE_PATHS:
+		if not ResourceLoader.exists(page_path):
+			push_error("Missing PDF preview resource: %s" % page_path)
+			continue
+		var resource: Resource = ResourceLoader.load(page_path)
+		if resource == null or not (resource is Texture2D):
+			push_error("PDF preview did not load as Texture2D: %s" % page_path)
+			continue
+		textures.append(resource as Texture2D)
+	return textures
 
 
 func open_original_pdf() -> Dictionary:

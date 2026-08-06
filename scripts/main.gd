@@ -265,6 +265,7 @@ func _build_modals() -> void:
 	_developer.manager = manager
 	_developer.closed.connect(_on_developer_closed)
 	_developer.date_applied.connect(_on_developer_date_applied)
+	_developer.request_test_gift_preview.connect(_on_test_gift_preview)
 	add_child(_developer)
 
 
@@ -474,6 +475,13 @@ func _on_developer_closed() -> void:
 func _on_developer_date_applied(iso_date: String) -> void:
 	_refresh_presentation()
 	_toast("Simulating open on %s" % DateService.format_display_date(iso_date))
+
+
+func _on_test_gift_preview() -> void:
+	## Same viewer path as the final chest gift.
+	_input_locked = true
+	await _gift_viewer.open_viewer()
+	_input_locked = false
 
 
 func _toast(text: String) -> void:

@@ -5,6 +5,7 @@ class_name DeveloperPanel
 
 signal closed
 signal date_applied(iso_date: String)
+signal request_test_gift_preview
 
 const PIN := "0813"
 const DATE_OPTIONS: PackedStringArray = [
@@ -92,6 +93,22 @@ func _build() -> void:
 		var iso := d
 		b.pressed.connect(func() -> void: _apply_date_and_close(iso))
 		col.add_child(b)
+
+	var preview_btn := Button.new()
+	preview_btn.text = "Test Gift Preview"
+	preview_btn.tooltip_text = "Open the final-gift in-app PDF page preview"
+	preview_btn.custom_minimum_size = Vector2(0, 64)
+	preview_btn.focus_mode = Control.FOCUS_NONE
+	preview_btn.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	preview_btn.offset_left = 48
+	preview_btn.offset_right = -48
+	preview_btn.offset_top = -180
+	preview_btn.offset_bottom = -108
+	preview_btn.pressed.connect(func() -> void:
+		_hide_ui()
+		request_test_gift_preview.emit()
+	)
+	add_child(preview_btn)
 
 	var exit_btn := Button.new()
 	exit_btn.text = "Exit simulation (use real date)"

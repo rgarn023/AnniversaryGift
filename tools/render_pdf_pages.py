@@ -21,7 +21,7 @@ def main() -> None:
     for i, page in enumerate(doc):
         scale = 2000.0 / page.rect.width
         pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
-        out = OUT / f"page_{i+1:02d}.png"
+        out = OUT / f"page_{i+1:03d}.png"
         pix.save(str(out))
         print(f"wrote {out} {pix.width}x{pix.height}")
     doc.close()

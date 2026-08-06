@@ -20,6 +20,8 @@ func _run() -> void:
 	_test_developer_isolation()
 	_test_final_chest_stages()
 	_test_missing_pdf_previews_safe()
+	_test_pdf_preview_resources()
+	await _test_gift_viewer_preview_load()
 	_test_missing_pdf_app_safe()
 	_test_save_reload()
 	print("=== Results: %d passed, %d failed ===" % [_passed, _failed])
@@ -168,11 +170,35 @@ func _test_final_chest_stages() -> void:
 
 func _test_missing_pdf_previews_safe() -> void:
 	var helper := PdfHelper.new()
-	# Listing should never throw even if directory odd; currently pages exist, so also verify empty-safe path.
 	var pages: PackedStringArray = helper.list_page_previews()
 	_assert(pages.size() >= 0, "list_page_previews does not crash")
-	# Simulate missing by calling through viewer logic indirectly: empty array is fine.
 	_assert(true, "missing PDF previews do not crash the app")
+
+
+func _test_pdf_preview_resources() -> void:
+	for page_path: String in PdfHelper.PDF_PAGE_PATHS:
+		_assert(ResourceLoader.exists(page_path), "ResourceLoader.exists %s" % page_path)
+		var resource: Resource = ResourceLoader.load(page_path)
+		_assert(resource is Texture2D, "loads as Texture2D: %s" % page_path)
+	var helper := PdfHelper.new()
+	var textures: Array[Texture2D] = helper.load_page_textures()
+	_assert(textures.size() == 2, "loads exactly two preview textures (got %d)" % textures.size())
+
+
+func _test_gift_viewer_preview_load() -> void:
+	var viewer := GiftDocumentViewer.new()
+	root.add_child(viewer)
+	await process_frame
+	viewer.load_pdf_previews()
+	await process_frame
+	_assert(viewer.get_loaded_page_count() == 2, "viewer creates exactly two page controls")
+	_assert(not viewer._error_panel.visible, "error panel hidden when pages load")
+	_assert(viewer._scroll.visible, "scroll container shown when pages load")
+	viewer.load_pdf_previews()
+	await process_frame
+	_assert(viewer.get_loaded_page_count() == 2, "reopen/reload does not duplicate pages")
+	viewer.queue_free()
+	await process_frame
 
 
 func _test_missing_pdf_app_safe() -> void:

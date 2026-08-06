@@ -49,10 +49,11 @@ assets/documents/anniversary_gift.pdf
 High-resolution page previews live in:
 
 ```text
-assets/documents/pdf_pages/
+assets/documents/pdf_pages/page_001.png
+assets/documents/pdf_pages/page_002.png
 ```
 
-Current previews were rendered at ~2000px wide with PyMuPDF:
+These exact filenames are loaded via `ResourceLoader` (not directory scans). Current previews were rendered with PyMuPDF:
 
 ```bash
 python3 - <<'PY'
