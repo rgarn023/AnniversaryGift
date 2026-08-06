@@ -276,15 +276,19 @@ func _apply_safe_areas() -> void:
 	var full: Vector2i = DisplayServer.screen_get_size()
 	if full.x <= 0 or full.y <= 0:
 		full = Vector2i(int(size.x), int(size.y))
-	var top_pad: float = maxf(safe.position.y, 24.0)
-	var bottom_pad: float = maxf(float(full.y) - (safe.position.y + safe.size.y), 24.0)
-	# Also respect window safe margins when running embedded.
-	if size.y > 0.0:
-		top_pad = maxf(top_pad * (size.y / maxf(float(full.y), 1.0)), 24.0)
-		bottom_pad = maxf(bottom_pad * (size.y / maxf(float(full.y), 1.0)), 24.0)
+	var top_pad: float = maxf(safe.position.y, 28.0)
+	# Samsung nav/gesture bars often need more than the reported inset.
+	var bottom_pad: float = maxf(float(full.y) - (safe.position.y + safe.size.y), 0.0)
+	bottom_pad = maxf(bottom_pad, 72.0)
+	if size.y > 0.0 and full.y > 0:
+		var scale_y: float = size.y / float(full.y)
+		top_pad = maxf(top_pad * scale_y, 28.0)
+		bottom_pad = maxf(bottom_pad * scale_y, 72.0)
 	_safe_top.offset_top = top_pad
 	_safe_top.offset_bottom = top_pad + 180.0
-	_safe_bottom.offset_top = - (160.0 + bottom_pad)
+	# Keep the whole archive (icons + date labels) above the system nav area.
+	var archive_h: float = 200.0
+	_safe_bottom.offset_top = -(archive_h + bottom_pad)
 	_safe_bottom.offset_bottom = -bottom_pad
 	if _bg and _bg.material is ShaderMaterial:
 		var sm := _bg.material as ShaderMaterial
