@@ -143,8 +143,10 @@ func _build_ui() -> void:
 	_parchment_clip = Control.new()
 	_parchment_clip.name = "ParchmentClip"
 	_parchment_clip.clip_contents = true
-	_parchment_clip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_parchment_clip.mouse_filter = Control.MOUSE_FILTER_STOP
 	_parchment_clip.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_parchment_clip.offset_left = 28.0
+	_parchment_clip.offset_right = -28.0
 	_parchment_clip.offset_top = 64.0
 	_parchment_clip.offset_bottom = -80.0
 	_unrolled_root.add_child(_parchment_clip)
@@ -152,59 +154,64 @@ func _build_ui() -> void:
 	_parchment = _make_tex(ART + "scroll_parchment_center.png")
 	_parchment.name = "ParchmentCenter"
 	_parchment.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# Inset parchment slightly so deckled edges stay inside the clip.
+	_parchment.offset_left = -20.0
+	_parchment.offset_right = 20.0
 	_parchment_clip.add_child(_parchment)
 
 	_left_edge = _make_tex(ART + "scroll_left_edge.png")
 	_left_edge.name = "LeftEdge"
 	_left_edge.set_anchors_and_offsets_preset(Control.PRESET_LEFT_WIDE)
-	_left_edge.offset_right = 64
-	_left_edge.modulate.a = 0.8
+	_left_edge.offset_right = 48
+	_left_edge.modulate.a = 0.75
 	_parchment_clip.add_child(_left_edge)
 
 	_right_edge = _make_tex(ART + "scroll_right_edge.png")
 	_right_edge.name = "RightEdge"
 	_right_edge.set_anchors_and_offsets_preset(Control.PRESET_RIGHT_WIDE)
-	_right_edge.offset_left = -80
-	_right_edge.modulate.a = 0.8
+	_right_edge.offset_left = -56
+	_right_edge.modulate.a = 0.75
 	_parchment_clip.add_child(_right_edge)
 
 	_highlight = _make_tex(ART + "scroll_highlight.png")
 	_highlight.name = "ScrollHighlight"
 	_highlight.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_highlight.modulate = Color(1, 1, 1, 0.22)
+	_highlight.modulate = Color(1, 1, 1, 0.18)
 	_parchment_clip.add_child(_highlight)
 
-	_top_roller = _make_tex(ART + "scroll_top_roller.png")
-	_top_roller.name = "TopRoller"
-	_top_roller.size = Vector2(900, 70)
-	_unrolled_root.add_child(_top_roller)
-
-	_bottom_roller = _make_tex(ART + "scroll_bottom_roller.png")
-	_bottom_roller.name = "BottomRoller"
-	_bottom_roller.size = Vector2(900, 70)
-	_unrolled_root.add_child(_bottom_roller)
-
+	# Text lives INSIDE the clipped parchment so it cannot spill past the paper.
 	_text_zoom = Control.new()
 	_text_zoom.name = "TextZoomContainer"
 	_text_zoom.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_text_zoom.offset_left = 52
-	_text_zoom.offset_right = -52
-	_text_zoom.offset_top = 88
-	_text_zoom.offset_bottom = -96
+	_text_zoom.offset_left = 56
+	_text_zoom.offset_right = -56
+	_text_zoom.offset_top = 18
+	_text_zoom.offset_bottom = -18
+	_text_zoom.clip_contents = true
 	_text_zoom.mouse_filter = Control.MOUSE_FILTER_STOP
 	_text_zoom.modulate.a = 0.0
-	_unrolled_root.add_child(_text_zoom)
+	_parchment_clip.add_child(_text_zoom)
+
+	var content_margin := MarginContainer.new()
+	content_margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	content_margin.add_theme_constant_override("margin_left", 8)
+	content_margin.add_theme_constant_override("margin_right", 8)
+	content_margin.add_theme_constant_override("margin_top", 4)
+	content_margin.add_theme_constant_override("margin_bottom", 4)
+	_text_zoom.add_child(content_margin)
 
 	_content = VBoxContainer.new()
 	_content.name = "MessageContent"
-	_content.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_content.add_theme_constant_override("separation", 12)
-	_text_zoom.add_child(_content)
+	_content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_content.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_content.add_theme_constant_override("separation", 10)
+	content_margin.add_child(_content)
 
 	_date_label = Label.new()
 	_date_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_date_label.add_theme_color_override("font_color", Color(0.42, 0.22, 0.16))
 	_date_label.add_theme_font_size_override("font_size", 22)
+	_date_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_content.add_child(_date_label)
 
 	_heading = Label.new()
@@ -212,18 +219,21 @@ func _build_ui() -> void:
 	_heading.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_heading.add_theme_color_override("font_color", Color(0.28, 0.13, 0.09))
 	_heading.add_theme_font_size_override("font_size", 34)
+	_heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_heading.clip_text = false
 	_content.add_child(_heading)
 
 	_scroll = ScrollContainer.new()
 	_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_scroll.clip_contents = true
-	_scroll.custom_minimum_size = Vector2(0, 680)
 	_content.add_child(_scroll)
 
 	var text_host := MarginContainer.new()
 	text_host.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	text_host.add_theme_constant_override("margin_right", 8)
+	text_host.add_theme_constant_override("margin_left", 4)
+	text_host.add_theme_constant_override("margin_right", 4)
 	_scroll.add_child(text_host)
 
 	_message = RichTextLabel.new()
@@ -239,21 +249,36 @@ func _build_ui() -> void:
 	text_host.add_child(_message)
 
 	_hint = Label.new()
-	_hint.text = "Pinch or use + and – to resize"
+	_hint.text = "Pinch or use A− / A+ to resize"
 	_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_hint.add_theme_color_override("font_color", Color(0.38, 0.24, 0.16, 0.85))
 	_hint.add_theme_font_size_override("font_size", 18)
+	_hint.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_content.add_child(_hint)
 
 	var toolbar := HBoxContainer.new()
-	toolbar.add_theme_constant_override("separation", 12)
+	toolbar.add_theme_constant_override("separation", 10)
+	toolbar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_content.add_child(toolbar)
-	_btn_minus = _make_tool_button("–", "Decrease text size")
-	_btn_plus = _make_tool_button("+", "Increase text size")
+	_btn_minus = _make_tool_button("A−", "Decrease text size")
+	_btn_plus = _make_tool_button("A+", "Increase text size")
 	_btn_reset = _make_tool_button("Reset", "Reset text size")
 	_btn_close = _make_tool_button("Close", "Close message")
 	for b in [_btn_minus, _btn_plus, _btn_reset, _btn_close]:
 		toolbar.add_child(b)
+
+	_top_roller = _make_tex(ART + "scroll_top_roller.png")
+	_top_roller.name = "TopRoller"
+	_top_roller.size = Vector2(900, 70)
+	_top_roller.z_index = 2
+	_unrolled_root.add_child(_top_roller)
+
+	_bottom_roller = _make_tex(ART + "scroll_bottom_roller.png")
+	_bottom_roller.name = "BottomRoller"
+	_bottom_roller.size = Vector2(900, 70)
+	_bottom_roller.z_index = 2
+	_unrolled_root.add_child(_bottom_roller)
 	_btn_minus.pressed.connect(func() -> void:
 		if _zoom_enabled:
 			_zoom.adjust(0.9)
@@ -310,8 +335,16 @@ func _fit_panel() -> void:
 
 
 func _update_message_width() -> void:
-	var w: float = maxf(_scroll.size.x - 16.0, 200.0)
+	# Derive wrap width from the clipped text host, not the full panel,
+	# so autowrap stays inside the parchment safe area.
+	var host_w: float = _text_zoom.size.x if _text_zoom.size.x > 8.0 else (_panel_size.x - 200.0)
+	var w: float = maxf(host_w - 28.0, 180.0)
+	if _scroll.size.x > 8.0:
+		w = minf(w, maxf(_scroll.size.x - 20.0, 180.0))
 	_message.custom_minimum_size = Vector2(w, 0)
+	_heading.custom_minimum_size = Vector2(w, 0)
+	_date_label.custom_minimum_size = Vector2(w, 0)
+	_hint.custom_minimum_size = Vector2(w, 0)
 
 
 func _on_viewport_resized() -> void:
@@ -403,6 +436,8 @@ func _play_open_animation(full_text: String) -> void:
 	var mid_y: float = _panel_size.y * 0.5
 	_top_roller.position = Vector2(0, mid_y - 35.0)
 	_bottom_roller.position = Vector2(0, mid_y - 35.0)
+	_parchment_clip.offset_left = 28.0
+	_parchment_clip.offset_right = -28.0
 	_parchment_clip.offset_top = mid_y - 16.0
 	_parchment_clip.offset_bottom = -(_panel_size.y - mid_y - 16.0)
 	_shadow.modulate.a = 0.25
@@ -452,6 +487,8 @@ func _set_fully_unrolled() -> void:
 	_rolled.visible = false
 	_unrolled_root.visible = true
 	_unrolled_root.modulate.a = 1.0
+	_parchment_clip.offset_left = 28.0
+	_parchment_clip.offset_right = -28.0
 	_parchment_clip.offset_top = 64.0
 	_parchment_clip.offset_bottom = -80.0
 	_top_roller.position = Vector2(0, -2.0)
@@ -464,6 +501,7 @@ func _set_fully_unrolled() -> void:
 	_anim_root.position = (vp - _panel_size) * 0.5
 	_anim_root.rotation = 0.0
 	_anim_root.scale = Vector2.ONE
+	_update_message_width()
 
 
 func _finish_open_immediate(full_text: String) -> void:

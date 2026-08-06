@@ -152,16 +152,18 @@ func _build_ui() -> void:
 	_dev_banner.z_index = 25
 	add_child(_dev_banner)
 
+	# Status line sits between title and chest with clear clearance (not over the chest).
 	_subtitle = Label.new()
 	_subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_subtitle.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_subtitle.set_anchors_preset(Control.PRESET_CENTER)
-	_subtitle.position = Vector2(-420, 280)
-	_subtitle.size = Vector2(840, 100)
-	_subtitle.add_theme_color_override("font_color", Color(0.9, 0.8, 0.95, 0.95))
-	_subtitle.add_theme_font_size_override("font_size", 28)
+	_subtitle.position = Vector2(-460, -430)
+	_subtitle.size = Vector2(920, 130)
+	_subtitle.add_theme_color_override("font_color", Color(0.95, 0.88, 0.98, 0.98))
+	_subtitle.add_theme_font_size_override("font_size", 40)
 	if ResourceLoader.exists("res://assets/fonts/CormorantGaramond-Regular.ttf"):
 		_subtitle.add_theme_font_override("font", load("res://assets/fonts/CormorantGaramond-Regular.ttf"))
+	_subtitle.z_index = 6
 	add_child(_subtitle)
 
 	# Instance scene so realistic frame textures are packed/preloaded with the node.
@@ -170,7 +172,8 @@ func _build_ui() -> void:
 	_chest.custom_minimum_size = Vector2(520, 520)
 	_chest.size = Vector2(520, 520)
 	_chest.set_anchors_preset(Control.PRESET_CENTER)
-	_chest.position = Vector2(-260, -160)
+	# Lowered slightly so subtitle above has breathing room.
+	_chest.position = Vector2(-260, -90)
 	_chest.z_index = 5
 	# Chest fades itself in after textures are ready; keep hidden until then.
 	_chest.visible = false
@@ -180,7 +183,7 @@ func _build_ui() -> void:
 
 	_safe_bottom = Control.new()
 	_safe_bottom.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	_safe_bottom.offset_top = -200
+	_safe_bottom.offset_top = -300
 	add_child(_safe_bottom)
 
 	_archive = ScrollArchive.new()
@@ -292,7 +295,7 @@ func _apply_safe_areas() -> void:
 	_safe_top.offset_top = top_pad
 	_safe_top.offset_bottom = top_pad + 180.0
 	# Keep the whole archive (icons + date labels) above the system nav area.
-	var archive_h: float = 200.0
+	var archive_h: float = 280.0
 	_safe_bottom.offset_top = -(archive_h + bottom_pad)
 	_safe_bottom.offset_bottom = -bottom_pad
 	if _bg and _bg.material is ShaderMaterial:
