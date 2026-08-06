@@ -11,6 +11,7 @@ var _title: Label
 var _subtitle: Label
 var _safe_top: Control
 var _safe_bottom: Control
+var _final_chest_presentation: Control
 var _chest: TreasureChest
 var _archive: ScrollArchive
 var _scroll_viewer: ScrollViewer
@@ -21,6 +22,8 @@ var _vignette: TextureRect
 var _particles: CPUParticles2D
 var _dev_banner: Label
 var _input_locked: bool = false
+var gift_viewer_open: bool = false
+var _restore_final_chest_after_viewer: bool = false
 var _title_taps: Array[float] = []
 var _poll_timer: float = 0.0
 var _sparkle_trail: CPUParticles2D
@@ -166,20 +169,28 @@ func _build_ui() -> void:
 	_subtitle.z_index = 6
 	add_child(_subtitle)
 
+	# Wrap the full chest presentation so hide/show covers glow, label, particles, hit area.
+	_final_chest_presentation = Control.new()
+	_final_chest_presentation.name = "FinalChestPresentation"
+	_final_chest_presentation.custom_minimum_size = Vector2(520, 520)
+	_final_chest_presentation.size = Vector2(520, 520)
+	_final_chest_presentation.set_anchors_preset(Control.PRESET_CENTER)
+	# Lowered slightly so subtitle above has breathing room.
+	_final_chest_presentation.position = Vector2(-260, -90)
+	_final_chest_presentation.z_index = 5
+	_final_chest_presentation.visible = false
+	add_child(_final_chest_presentation)
+
 	# Instance scene so realistic frame textures are packed/preloaded with the node.
 	var chest_scene: PackedScene = load("res://scenes/Chest.tscn")
 	_chest = chest_scene.instantiate() as TreasureChest
+	_chest.name = "TreasureChest"
 	_chest.custom_minimum_size = Vector2(520, 520)
 	_chest.size = Vector2(520, 520)
-	_chest.set_anchors_preset(Control.PRESET_CENTER)
-	# Lowered slightly so subtitle above has breathing room.
-	_chest.position = Vector2(-260, -90)
-	_chest.z_index = 5
-	# Chest fades itself in after textures are ready; keep hidden until then.
-	_chest.visible = false
+	_chest.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_chest.tapped.connect(_on_chest_tapped)
 	_chest.scroll_emerged.connect(_on_scroll_emerged)
-	add_child(_chest)
+	_final_chest_presentation.add_child(_chest)
 
 	_safe_bottom = Control.new()
 	_safe_bottom.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
@@ -259,7 +270,7 @@ func _build_modals() -> void:
 
 	var gift_scene: PackedScene = load("res://scenes/GiftDocumentViewer.tscn")
 	_gift_viewer = gift_scene.instantiate() as GiftDocumentViewer
-	_gift_viewer.closed.connect(func() -> void: _input_locked = false)
+	_gift_viewer.viewer_closed.connect(_on_gift_document_viewer_closed)
 	add_child(_gift_viewer)
 
 	_developer = DeveloperPanel.new()
@@ -316,14 +327,26 @@ func _process(delta: float) -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_FOCUS_IN or what == NOTIFICATION_APPLICATION_RESUMED:
 		manager.refresh_unlocks()
-		_refresh_presentation()
+		# Returning from an external PDF must NOT restore the chest while the
+		# in-app gift viewer is still logically open.
+		if not gift_viewer_open:
+			_refresh_presentation()
 	elif what == NOTIFICATION_WM_GO_BACK_REQUEST:
-		if _gift_viewer.visible:
-			_gift_viewer.close_viewer()
-		elif _scroll_viewer.visible:
+		if gift_viewer_open or _gift_viewer.visible:
+			_gift_viewer.request_close()
+			return
+		if _scroll_viewer.visible:
 			_scroll_viewer.close_viewer()
-		elif _developer.visible:
+			return
+		if _developer.visible:
 			_developer.close_panel()
+
+
+func _set_chest_presentation_visible(should_show: bool) -> void:
+	if gift_viewer_open:
+		_final_chest_presentation.visible = false
+		return
+	_final_chest_presentation.visible = should_show
 
 
 func _refresh_presentation() -> void:
@@ -336,10 +359,15 @@ func _refresh_presentation() -> void:
 	_chest.reduced_motion = manager.is_reduced_motion()
 	_archive.refresh()
 
+	if gift_viewer_open:
+		# Keep copy/archive fresh, but never force the chest back on top of the viewer.
+		_set_chest_presentation_visible(false)
+		return
+
 	if manager.is_before_start():
 		_subtitle.text = manager.get_prestart_message()
 		_chest.configure(TreasureChest.ChestState.LOCKED_SILHOUETTE)
-		_chest.visible = true
+		_set_chest_presentation_visible(true)
 		return
 
 	var next: String = manager.get_next_chest_date()
@@ -347,22 +375,22 @@ func _refresh_presentation() -> void:
 		if manager.is_final_gift_ready():
 			_subtitle.text = "Your anniversary scrolls are waiting below."
 			_chest.configure(TreasureChest.ChestState.FINAL_GIFT, true)
-			_chest.visible = true
+			_set_chest_presentation_visible(true)
 		else:
 			_subtitle.text = "Your anniversary scrolls are waiting below."
-			_chest.visible = false
+			_set_chest_presentation_visible(false)
 		return
 
 	if next == AnniversaryManager.FINAL_DATE and manager.is_final_gift_ready():
 		_subtitle.text = "One more surprise awaits."
 		_chest.configure(TreasureChest.ChestState.FINAL_GIFT, true)
-		_chest.visible = true
+		_set_chest_presentation_visible(true)
 		return
 
 	if manager.is_chest_opened(next) and not manager.is_scroll_viewed(next):
 		_subtitle.text = "Your scroll is ready."
 		_chest.configure(TreasureChest.ChestState.OPENED)
-		_chest.visible = true
+		_set_chest_presentation_visible(true)
 		return
 
 	var remaining: int = manager.catchup_queue.size()
@@ -371,11 +399,104 @@ func _refresh_presentation() -> void:
 	else:
 		_subtitle.text = "A chest awaits you."
 	_chest.configure(TreasureChest.ChestState.AVAILABLE)
-	_chest.visible = true
+	_set_chest_presentation_visible(true)
+
+
+func open_gift_document_viewer(from_final_chest: bool = true) -> void:
+	if gift_viewer_open or _gift_viewer.visible:
+		return
+
+	gift_viewer_open = true
+	_restore_final_chest_after_viewer = from_final_chest
+	_input_locked = true
+	_chest.set_interaction_enabled(false)
+	_set_underlying_ui_interactive(false)
+
+	if _chest.animating:
+		_chest.finish_opening_safely()
+		await get_tree().process_frame
+
+	await _fade_final_chest_presentation(false)
+	_final_chest_presentation.visible = false
+
+	if from_final_chest:
+		manager.mark_final_gift_opened()
+
+	await _gift_viewer.open_viewer()
+	_gift_viewer.move_to_front()
+	_gift_viewer.grab_focus()
+
+
+func close_gift_document_viewer() -> void:
+	if not gift_viewer_open and not _gift_viewer.visible:
+		return
+
+	gift_viewer_open = false
+	if _gift_viewer.visible:
+		_gift_viewer.visible = false
+
+	if _restore_final_chest_after_viewer or manager.is_final_gift_ready():
+		_chest.apply_final_gift_idle_state()
+		_subtitle.text = "Your anniversary scrolls are waiting below."
+		_final_chest_presentation.visible = true
+		_final_chest_presentation.modulate.a = 0.0
+		await _fade_final_chest_presentation(true)
+	else:
+		_refresh_presentation()
+		_final_chest_presentation.modulate.a = 0.0
+		if _final_chest_presentation.visible:
+			await _fade_final_chest_presentation(true)
+		else:
+			_final_chest_presentation.modulate.a = 1.0
+
+	_chest.set_interaction_enabled(true)
+	_set_underlying_ui_interactive(true)
+	_input_locked = false
+	_restore_final_chest_after_viewer = false
+
+
+func _on_gift_document_viewer_closed() -> void:
+	await close_gift_document_viewer()
+
+
+func _fade_final_chest_presentation(show_presentation: bool) -> void:
+	if manager != null and manager.is_reduced_motion():
+		_final_chest_presentation.modulate.a = 1.0 if show_presentation else 0.0
+		return
+	var target := 1.0 if show_presentation else 0.0
+	if show_presentation:
+		_final_chest_presentation.modulate.a = 0.0
+	var tw := create_tween()
+	tw.tween_property(_final_chest_presentation, "modulate:a", target, 0.2).set_trans(Tween.TRANS_SINE)
+	await tw.finished
+	if show_presentation:
+		_final_chest_presentation.modulate.a = 1.0
+
+
+func _set_underlying_ui_interactive(enabled: bool) -> void:
+	_safe_bottom.mouse_filter = (
+		Control.MOUSE_FILTER_STOP if enabled else Control.MOUSE_FILTER_IGNORE
+	)
+	if _archive != null:
+		_archive.mouse_filter = (
+			Control.MOUSE_FILTER_STOP if enabled else Control.MOUSE_FILTER_IGNORE
+		)
+	if _test_btn != null:
+		_test_btn.disabled = not enabled
+		_test_btn.mouse_filter = (
+			Control.MOUSE_FILTER_STOP if enabled else Control.MOUSE_FILTER_IGNORE
+		)
+	if _date_bar != null:
+		_date_bar.mouse_filter = (
+			Control.MOUSE_FILTER_STOP if enabled else Control.MOUSE_FILTER_IGNORE
+		)
+	if _developer != null and not enabled and _developer.visible:
+		# Keep developer panel from receiving taps under the modal.
+		pass
 
 
 func _on_chest_tapped() -> void:
-	if _input_locked or _scroll_viewer.visible or _gift_viewer.visible:
+	if _input_locked or gift_viewer_open or _scroll_viewer.visible or _gift_viewer.visible:
 		return
 	if manager.is_before_start():
 		_toast(manager.get_prestart_message())
@@ -384,10 +505,9 @@ func _on_chest_tapped() -> void:
 	# Final gift stage
 	if manager.is_final_gift_ready():
 		_input_locked = true
+		_chest.set_interaction_enabled(false)
 		await _chest.play_final_reopen_animation()
-		manager.mark_final_gift_opened()
-		await _gift_viewer.open_viewer()
-		_input_locked = false
+		await open_gift_document_viewer(true)
 		return
 
 	var next: String = manager.get_next_chest_date()
@@ -409,7 +529,7 @@ func _on_scroll_emerged(global_pos: Vector2) -> void:
 
 
 func _on_archive_selected(date_iso: String) -> void:
-	if _input_locked or _scroll_viewer.visible or _gift_viewer.visible:
+	if _input_locked or gift_viewer_open or _scroll_viewer.visible or _gift_viewer.visible:
 		return
 	_input_locked = true
 	await _scroll_viewer.open_message(date_iso, true)
@@ -479,10 +599,8 @@ func _on_developer_date_applied(iso_date: String) -> void:
 
 
 func _on_test_gift_preview() -> void:
-	## Same viewer path as the final chest gift.
-	_input_locked = true
-	await _gift_viewer.open_viewer()
-	_input_locked = false
+	## Same viewer path as the final chest gift (hides chest presentation).
+	await open_gift_document_viewer(false)
 
 
 func _toast(text: String) -> void:
@@ -495,8 +613,8 @@ func _toast(text: String) -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel"):
-		if _gift_viewer.visible:
-			_gift_viewer.close_viewer()
+		if gift_viewer_open or _gift_viewer.visible:
+			_gift_viewer.request_close()
 			get_viewport().set_input_as_handled()
 		elif _scroll_viewer.visible:
 			_scroll_viewer.close_viewer()

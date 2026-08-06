@@ -22,6 +22,8 @@ func _run() -> void:
 	_test_missing_pdf_previews_safe()
 	_test_pdf_preview_resources()
 	await _test_gift_viewer_preview_load()
+	await _test_final_chest_idle_restore()
+	await _test_gift_viewer_close_signal()
 	_test_missing_pdf_app_safe()
 	_test_save_reload()
 	print("=== Results: %d passed, %d failed ===" % [_passed, _failed])
@@ -210,6 +212,43 @@ func _test_gift_viewer_preview_load() -> void:
 	viewer.load_pdf_previews()
 	await process_frame
 	_assert(viewer.get_loaded_page_count() == 2, "reopen/reload does not duplicate pages")
+	viewer.queue_free()
+	await process_frame
+
+
+func _test_final_chest_idle_restore() -> void:
+	var chest_scene: PackedScene = load("res://scenes/Chest.tscn")
+	var chest := chest_scene.instantiate() as TreasureChest
+	root.add_child(chest)
+	await process_frame
+	chest.configure(TreasureChest.ChestState.FINAL_GIFT, true)
+	await chest.play_final_reopen_animation()
+	_assert(chest.animating == false, "final reopen animation completes")
+	chest.apply_final_gift_idle_state()
+	_assert(chest.chest_state == TreasureChest.ChestState.FINAL_GIFT, "idle restore keeps FINAL_GIFT")
+	_assert(chest._label.visible, "One More Surprise label visible after idle restore")
+	_assert(chest._label.text == "One More Surprise", "final label text restored")
+	_assert(not chest._input_locked, "chest interaction re-enabled after idle restore")
+	chest.queue_free()
+	await process_frame
+
+
+func _test_gift_viewer_close_signal() -> void:
+	var scene: PackedScene = load("res://scenes/GiftDocumentViewer.tscn")
+	var viewer := scene.instantiate() as GiftDocumentViewer
+	root.add_child(viewer)
+	await process_frame
+	var closed_count: Array[int] = [0]
+	viewer.viewer_closed.connect(func() -> void: closed_count[0] += 1)
+	await viewer.open_viewer()
+	_assert(viewer.visible, "viewer visible after open")
+	viewer.request_close()
+	await process_frame
+	_assert(not viewer.visible, "viewer hidden after request_close")
+	_assert(closed_count[0] == 1, "viewer_closed emitted once (got %d)" % closed_count[0])
+	viewer.request_close()
+	await process_frame
+	_assert(closed_count[0] == 1, "request_close while hidden does not re-emit")
 	viewer.queue_free()
 	await process_frame
 

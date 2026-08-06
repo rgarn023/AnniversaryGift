@@ -431,6 +431,53 @@ func play_final_reopen_animation() -> void:
 	open_finished.emit()
 
 
+func set_interaction_enabled(enabled: bool) -> void:
+	_input_locked = not enabled
+	if _button != null and is_instance_valid(_button):
+		_button.disabled = not enabled
+		_button.mouse_filter = (
+			Control.MOUSE_FILTER_STOP if enabled else Control.MOUSE_FILTER_IGNORE
+		)
+
+
+func finish_opening_safely() -> void:
+	## Abort any in-flight open tween and settle to a finished open pose.
+	if not animating:
+		return
+	_skip = true
+	_apply_finished_state()
+	animating = false
+
+
+func apply_final_gift_idle_state() -> void:
+	## Restore the completed final-gift idle without replaying message flow.
+	animating = false
+	_skip = false
+	_idle_time = 0.0
+	_press_scale = 1.0
+	if _dust != null:
+		_dust.emitting = false
+	if _sparks != null:
+		_sparks.emitting = false
+	hide_rolled_scroll()
+	if _latch != null:
+		_latch.modulate.a = 0.0
+		_latch.rotation = 0.0
+	if _lock != null:
+		_lock.modulate.a = 0.0
+		_lock.rotation = 0.0
+	if _root_visual != null:
+		_root_visual.scale = Vector2.ONE
+		_root_visual.position = Vector2.ZERO
+		_root_visual.rotation = 0.0
+	if _contact_shadow != null:
+		_contact_shadow.scale = Vector2.ONE
+	configure(ChestState.FINAL_GIFT, true)
+	set_interaction_enabled(true)
+	modulate = Color(1, 1, 1, 1)
+	visible = true
+
+
 func _open_short() -> void:
 	_emit_burst()
 	var tw := create_tween()

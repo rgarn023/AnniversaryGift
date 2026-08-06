@@ -2,6 +2,8 @@ extends Control
 class_name GiftDocumentViewer
 ## In-app PDF page preview with compile-time texture packaging + external open/share.
 
+signal viewer_closed
+## Legacy alias kept for existing callers/tests.
 signal closed
 
 const PDF_PAGE_001: Texture2D = preload("res://assets/documents/pdf_pages/page_001.png")
@@ -57,6 +59,7 @@ func _ready() -> void:
 
 func open_viewer() -> void:
 	visible = true
+	modulate.a = 1.0
 	move_to_front()
 	_zoom = 1.0
 	_gesture_zoom.reset(1.0)
@@ -73,10 +76,17 @@ func open_viewer() -> void:
 	_log_preview_diagnostics()
 
 
-func close_viewer() -> void:
+func request_close() -> void:
+	if not visible:
+		return
 	visible = false
 	_layout_ready = false
+	viewer_closed.emit()
 	closed.emit()
+
+
+func close_viewer() -> void:
+	request_close()
 
 
 func load_pdf_previews() -> void:
@@ -128,7 +138,7 @@ func _build_ui() -> void:
 	top_bar.add_child(zoom_out)
 	var zoom_in := _make_button("+", func() -> void: _gesture_zoom.adjust(1.15))
 	top_bar.add_child(zoom_in)
-	_close_button = _make_button("Close", close_viewer)
+	_close_button = _make_button("Close", request_close)
 	top_bar.add_child(_close_button)
 
 	_loading_label = Label.new()
@@ -403,8 +413,9 @@ func _gui_input(event: InputEvent) -> void:
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_GO_BACK_REQUEST and visible:
-		close_viewer()
+		request_close()
 	elif what == NOTIFICATION_APPLICATION_FOCUS_IN and visible:
+		# Returning from an external PDF app keeps this viewer open.
 		_refresh_safe_area()
 	elif what == NOTIFICATION_RESIZED and visible:
 		_refresh_safe_area()
