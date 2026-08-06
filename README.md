@@ -30,21 +30,13 @@ After a message is closed, a miniature scroll lands in the bottom **Scroll Archi
 
 ## Developer test mode / date simulation
 
-Ways to open it:
+1. Tap **Test Dates** (top-right), or long-press / 7-tap the title.
+2. Enter PIN: `0813`
+3. Pick a day from the list.
 
-1. Tap the on-screen **Test Dates** button (top-right), or
-2. Long-press the title for about one second, or
-3. Tap the title **Anniversary Gift** seven times within about five seconds
+The picker closes and the app behaves as if it were opened on that date. A **Simulated:** strip shows the active date, with **Change date** and **Exit**.
 
-Then enter PIN: `0813`
-
-While active you get:
-
-- A red **DEVELOPER TEST MODE** banner
-- On-screen **◀ Prev Day / date / Next Day ▶** controls to jump through August 5–14
-- A **More…** button for the full developer panel (unlock all, reset progress, PDF tests, etc.)
-
-Developer mode uses a separate save file and **never** modifies normal progress or the normal-mode latest legitimate date. Closing developer mode restores the real device date and normal save state.
+Developer mode uses a separate save file and never modifies normal progress. **Exit** restores the real device date and normal save.
 
 ## Gift PDF
 
