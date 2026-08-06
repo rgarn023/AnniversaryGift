@@ -1,0 +1,134 @@
+import { handleCors, jsonResponse } from "../_shared/cors.ts";
+import { requireUser, callerId } from "../_shared/auth.ts";
+import { createServiceClient } from "../_shared/supabase.ts";
+import { AppError, errorResponse, requireFields } from "../_shared/errors.ts";
+import { encryptMessage, hashPassword } from "../_shared/crypto.ts";
+
+interface Body {
+  recipient_id: string;
+  message: string;
+  title?: string;
+  unlock_at?: string;
+  password?: string;
+}
+
+const MIN_PASSWORD = 4;
+const MAX_PASSWORD = 64;
+const MAX_MESSAGE = 8000;
+
+Deno.serve(async (req) => {
+  const cors = handleCors(req);
+  if (cors) return cors;
+
+  try {
+    if (req.method !== "POST") {
+      throw new AppError("method_not_allowed", "POST required", 405);
+    }
+
+    const { user } = await requireUser(req);
+    const me = callerId(user);
+    const body = (await req.json()) as Body;
+    requireFields(body, ["recipient_id", "message"]);
+
+    if (body.recipient_id === me) {
+      throw new AppError("invalid_request", "Cannot send a scroll to yourself", 400);
+    }
+
+    const message = body.message.trim();
+    if (!message || message.length > MAX_MESSAGE) {
+      throw new AppError(
+        "invalid_message",
+        `Message must be 1–${MAX_MESSAGE} characters`,
+        400,
+      );
+    }
+
+    let passwordHash: string | null = null;
+    let hasPassword = false;
+    if (body.password != null && body.password !== "") {
+      if (
+        body.password.length < MIN_PASSWORD ||
+        body.password.length > MAX_PASSWORD
+      ) {
+        throw new AppError(
+          "invalid_password",
+          `Password must be ${MIN_PASSWORD}–${MAX_PASSWORD} characters`,
+          400,
+        );
+      }
+      passwordHash = await hashPassword(body.password);
+      hasPassword = true;
+    }
+
+    const unlockAt = body.unlock_at
+      ? new Date(body.unlock_at)
+      : new Date();
+    if (Number.isNaN(unlockAt.getTime())) {
+      throw new AppError("invalid_unlock_at", "unlock_at must be a valid ISO timestamp", 400);
+    }
+
+    const title = (body.title?.trim() || "A Love Note").slice(0, 120);
+
+    const service = createServiceClient();
+
+    const { data: friends } = await service.rpc("are_friends", {
+      a: me,
+      b: body.recipient_id,
+    });
+    if (!friends) {
+      throw new AppError("not_friends", "You can only send scrolls to friends", 403);
+    }
+
+    const { data: blocked } = await service.rpc("is_blocked", {
+      a: me,
+      b: body.recipient_id,
+    });
+    if (blocked) {
+      throw new AppError("blocked", "Cannot send scroll — a block exists", 403);
+    }
+
+    const encrypted = await encryptMessage(message);
+
+    // Insert metadata then contents (service role). If contents fail, soft-delete scroll.
+    const { data: scroll, error: scrollErr } = await service
+      .from("scrolls")
+      .insert({
+        sender_id: me,
+        recipient_id: body.recipient_id,
+        title,
+        unlock_at: unlockAt.toISOString(),
+        has_password: hasPassword,
+      })
+      .select(
+        "id, sender_id, recipient_id, title, unlock_at, has_password, is_opened, created_at",
+      )
+      .single();
+
+    if (scrollErr || !scroll) {
+      console.error(scrollErr);
+      throw new AppError("insert_failed", "Could not create scroll", 500);
+    }
+
+    const { error: contentErr } = await service.from("scroll_contents").insert({
+      scroll_id: scroll.id,
+      ciphertext: encrypted.ciphertext,
+      nonce: encrypted.nonce,
+      password_hash: passwordHash,
+      encryption_version: encrypted.encryption_version,
+    });
+
+    if (contentErr) {
+      console.error(contentErr);
+      await service
+        .from("scrolls")
+        .update({ deleted_at: new Date().toISOString() })
+        .eq("id", scroll.id);
+      throw new AppError("insert_failed", "Could not store encrypted message", 500);
+    }
+
+    // Never return ciphertext to the client.
+    return jsonResponse({ scroll });
+  } catch (err) {
+    return errorResponse(err);
+  }
+});
