@@ -186,9 +186,22 @@ func _test_pdf_preview_resources() -> void:
 
 
 func _test_gift_viewer_preview_load() -> void:
-	var viewer := GiftDocumentViewer.new()
+	_assert(GiftDocumentViewer.PDF_PAGE_001 != null, "PDF_PAGE_001 preload is non-null")
+	_assert(GiftDocumentViewer.PDF_PAGE_002 != null, "PDF_PAGE_002 preload is non-null")
+	_assert(GiftDocumentViewer.PDF_PAGE_001.get_width() > 0, "PDF_PAGE_001 has width")
+	_assert(GiftDocumentViewer.PDF_PAGE_002.get_width() > 0, "PDF_PAGE_002 has width")
+	_assert(GiftDocumentViewer.PDF_PAGE_TEXTURES.size() == 2, "preload texture array has 2 pages")
+
+	var pages_res: Resource = load("res://assets/documents/gift_document_pages.tres")
+	_assert(pages_res is GiftDocumentPages, "gift_document_pages.tres loads as GiftDocumentPages")
+	var typed_pages := pages_res as GiftDocumentPages
+	_assert(typed_pages.pages.size() == 2, "gift_document_pages.tres references 2 textures")
+
+	var scene: PackedScene = load("res://scenes/GiftDocumentViewer.tscn")
+	var viewer := scene.instantiate() as GiftDocumentViewer
 	root.add_child(viewer)
 	await process_frame
+	_assert(viewer.gift_document_pages != null, "scene assigns gift_document_pages export")
 	viewer.load_pdf_previews()
 	await process_frame
 	_assert(viewer.get_loaded_page_count() == 2, "viewer creates exactly two page controls")

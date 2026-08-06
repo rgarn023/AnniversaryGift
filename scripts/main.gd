@@ -257,7 +257,8 @@ func _build_modals() -> void:
 	_scroll_viewer.archive_flight_requested.connect(_on_archive_flight)
 	add_child(_scroll_viewer)
 
-	_gift_viewer = GiftDocumentViewer.new()
+	var gift_scene: PackedScene = load("res://scenes/GiftDocumentViewer.tscn")
+	_gift_viewer = gift_scene.instantiate() as GiftDocumentViewer
 	_gift_viewer.closed.connect(func() -> void: _input_locked = false)
 	add_child(_gift_viewer)
 

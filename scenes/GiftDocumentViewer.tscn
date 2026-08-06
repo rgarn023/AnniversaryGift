@@ -1,7 +1,14 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene load_steps=3 format=3]
 
-[ext_resource type="Script" path="res://scripts/gift_document_viewer.gd" id="1_gift"]
+[ext_resource type="Script" path="res://scripts/gift_document_viewer.gd" id="1_viewer"]
+[ext_resource type="Resource" path="res://assets/documents/gift_document_pages.tres" id="2_pages"]
 
-[node name="GiftDocumentViewer" type="CanvasLayer"]
-layer = 50
-script = ExtResource("1_gift")
+[node name="GiftDocumentViewer" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_viewer")
+gift_document_pages = ExtResource("2_pages")

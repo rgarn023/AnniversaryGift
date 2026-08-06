@@ -1,365 +1,424 @@
-extends CanvasLayer
+extends Control
 class_name GiftDocumentViewer
-
-## In-app viewer for high-resolution PDF page PNG previews.
-## Loads pages via explicit ResourceLoader paths (never DirAccess scans).
+## In-app PDF page preview with compile-time texture packaging + external open/share.
 
 signal closed
 
-const MIN_ZOOM := 0.5
-const MAX_ZOOM := 4.0
-const PAGE_GAP := 24.0
+const PDF_PAGE_001: Texture2D = preload("res://assets/documents/pdf_pages/page_001.png")
+const PDF_PAGE_002: Texture2D = preload("res://assets/documents/pdf_pages/page_002.png")
+const PDF_PAGE_TEXTURES: Array[Texture2D] = [PDF_PAGE_001, PDF_PAGE_002]
 
-var pdf_helper: PdfHelper
-var _zoom: GestureZoomController
-var _root: Control
-var _top_bar: HBoxContainer
+const PAGE_GAP := 28.0
+const HORIZONTAL_PAGE_MARGIN := 8.0
+const SAFE_SIDE := 28.0
+const SAFE_TOP_EXTRA := 12.0
+const SAFE_BOTTOM_EXTRA := 12.0
+
+@export var gift_document_pages: GiftDocumentPages
+
+var _safe_margin: MarginContainer
+var _main_vbox: VBoxContainer
+var _title_label: Label
 var _scroll: ScrollContainer
-var _zoom_root: Control
+var _horizontal_center: CenterContainer
 var _pages_box: VBoxContainer
-var _loading: Label
-var _error_panel: Label
-var _status: Label
-var _visible_modal: bool = false
+var _loading_label: Label
+var _error_panel: PanelContainer
+var _error_label: Label
+var _status_label: Label
+var _open_button: Button
+var _share_button: Button
+var _fit_button: Button
+var _close_button: Button
+
+var _page_panels: Array[PanelContainer] = []
 var _page_rects: Array[TextureRect] = []
-var _page_shadows: Array[Panel] = []
-var _fit_width_scale: float = 1.0
-var _user_zoom: float = 1.0
-var _mode_fit_width: bool = true
+var _page_textures: Array[Texture2D] = []
+var _zoom: float = 1.0
+var _gesture_zoom: GestureZoomController
+var _layout_ready := false
 
 
 func _ready() -> void:
-	layer = 50
-	pdf_helper = PdfHelper.new()
-	_zoom = GestureZoomController.new()
-	_zoom.min_scale = MIN_ZOOM
-	_zoom.max_scale = MAX_ZOOM
-	_zoom.current_scale = 1.0
-	_zoom.zoom_changed.connect(_on_zoom_changed)
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	mouse_filter = Control.MOUSE_FILTER_STOP
+	_gesture_zoom = GestureZoomController.new()
+	_gesture_zoom.min_scale = 0.65
+	_gesture_zoom.max_scale = 2.4
+	_gesture_zoom.zoom_changed.connect(func(scale: float) -> void:
+		_zoom = scale
+		_apply_page_fit()
+	)
 	_build_ui()
 	visible = false
-	set_process_input(true)
 	get_viewport().size_changed.connect(_on_viewport_resized)
-
-
-func _build_ui() -> void:
-	var dim := ColorRect.new()
-	dim.color = Color(0.04, 0.03, 0.07, 0.94)
-	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	dim.mouse_filter = Control.MOUSE_FILTER_STOP
-	add_child(dim)
-
-	_root = Control.new()
-	_root.name = "GiftDocumentViewerRoot"
-	_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_root.offset_left = 16
-	_root.offset_top = 24
-	_root.offset_right = -16
-	_root.offset_bottom = -16
-	add_child(_root)
-
-	_top_bar = HBoxContainer.new()
-	_top_bar.name = "TopBar"
-	_top_bar.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	_top_bar.offset_bottom = 64
-	_top_bar.add_theme_constant_override("separation", 8)
-	_root.add_child(_top_bar)
-
-	var title := Label.new()
-	title.name = "TitleLabel"
-	title.text = "Anniversary Gift"
-	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	title.add_theme_color_override("font_color", Color(1.0, 0.86, 0.55))
-	title.add_theme_font_size_override("font_size", 30)
-	if ResourceLoader.exists("res://assets/fonts/Cinzel-Bold.ttf"):
-		title.add_theme_font_override("font", load("res://assets/fonts/Cinzel-Bold.ttf"))
-	_top_bar.add_child(title)
-
-	_top_bar.add_child(_tool_button("−", "Zoom out", func() -> void: _adjust_zoom(0.9)))
-	_top_bar.add_child(_tool_button("Reset", "Reset zoom to 100%", func() -> void: _reset_zoom()))
-	_top_bar.add_child(_tool_button("+", "Zoom in", func() -> void: _adjust_zoom(1.1)))
-	_top_bar.add_child(_tool_button("Fit", "Fit page width", func() -> void: _apply_fit_width()))
-	_top_bar.add_child(_tool_button("Close", "Close gift viewer", close_viewer))
-
-	_scroll = ScrollContainer.new()
-	_scroll.name = "PageScrollContainer"
-	_scroll.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_scroll.offset_top = 72
-	_scroll.offset_bottom = -150
-	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
-	_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
-	_scroll.clip_contents = true
-	_root.add_child(_scroll)
-
-	_zoom_root = Control.new()
-	_zoom_root.name = "PageZoomRoot"
-	_zoom_root.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	_zoom_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_scroll.add_child(_zoom_root)
-
-	_pages_box = VBoxContainer.new()
-	_pages_box.name = "PagesVBox"
-	_pages_box.add_theme_constant_override("separation", int(PAGE_GAP))
-	_pages_box.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	_pages_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_zoom_root.add_child(_pages_box)
-
-	_loading = Label.new()
-	_loading.name = "LoadingIndicator"
-	_loading.text = "Loading gift pages…"
-	_loading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_loading.set_anchors_preset(Control.PRESET_CENTER)
-	_loading.add_theme_color_override("font_color", Color(0.9, 0.85, 0.95))
-	_loading.add_theme_font_size_override("font_size", 28)
-	_root.add_child(_loading)
-
-	_error_panel = Label.new()
-	_error_panel.name = "PreviewErrorPanel"
-	_error_panel.text = "Page previews unavailable.\nYou can still open or share the original PDF below."
-	_error_panel.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_error_panel.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_error_panel.set_anchors_preset(Control.PRESET_CENTER)
-	_error_panel.custom_minimum_size = Vector2(640, 120)
-	_error_panel.add_theme_color_override("font_color", Color(1.0, 0.75, 0.7))
-	_error_panel.add_theme_font_size_override("font_size", 26)
-	_error_panel.visible = false
-	_root.add_child(_error_panel)
-
-	var bottom := VBoxContainer.new()
-	bottom.name = "BottomActions"
-	bottom.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	bottom.offset_top = -140
-	bottom.offset_bottom = 0
-	bottom.add_theme_constant_override("separation", 8)
-	_root.add_child(bottom)
-
-	_status = Label.new()
-	_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_status.add_theme_color_override("font_color", Color(0.85, 0.8, 0.9))
-	_status.add_theme_font_size_override("font_size", 18)
-	bottom.add_child(_status)
-
-	var actions := HBoxContainer.new()
-	actions.add_theme_constant_override("separation", 12)
-	bottom.add_child(actions)
-	var open_btn := _tool_button("Open Original PDF", "Open original PDF in another app", _open_pdf)
-	open_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	open_btn.custom_minimum_size = Vector2(0, 64)
-	actions.add_child(open_btn)
-	var share_btn := _tool_button("Share or Save PDF", "Share or save the original PDF", _share_pdf)
-	share_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	share_btn.custom_minimum_size = Vector2(0, 64)
-	actions.add_child(share_btn)
-
-
-func _tool_button(text: String, tip: String, cb: Callable) -> Button:
-	var b := Button.new()
-	b.text = text
-	b.tooltip_text = tip
-	b.focus_mode = Control.FOCUS_NONE
-	b.custom_minimum_size = Vector2(88, 56)
-	b.pressed.connect(cb)
-	return b
+	call_deferred("_refresh_safe_area")
 
 
 func open_viewer() -> void:
-	_visible_modal = true
 	visible = true
-	_status.text = "Pinch or use + / − to zoom. Fit keeps pages readable."
-	_loading.visible = true
-	_loading.text = "Loading gift pages…"
+	move_to_front()
+	_zoom = 1.0
+	_gesture_zoom.reset(1.0)
+	_status_label.text = ""
+	_loading_label.visible = true
 	_error_panel.visible = false
 	_scroll.visible = false
-	_clear_pages()
 	await get_tree().process_frame
-	await get_tree().process_frame
+	_refresh_safe_area()
 	load_pdf_previews()
-	if not _page_rects.is_empty():
-		_apply_fit_width()
+	_layout_ready = true
+	await get_tree().process_frame
+	_apply_page_fit()
+	_log_preview_diagnostics()
+
+
+func close_viewer() -> void:
+	visible = false
+	_layout_ready = false
+	closed.emit()
 
 
 func load_pdf_previews() -> void:
-	_clear_pages()
-	var successfully_loaded: int = 0
-	for page_path: String in PdfHelper.PDF_PAGE_PATHS:
-		if not ResourceLoader.exists(page_path):
-			push_error("Missing PDF preview resource: %s" % page_path)
-			continue
-		var resource: Resource = ResourceLoader.load(page_path)
-		if resource == null or not (resource is Texture2D):
-			push_error("PDF preview did not load as Texture2D: %s" % page_path)
-			continue
-		_add_preview_page(resource as Texture2D, successfully_loaded)
-		successfully_loaded += 1
-
-	_loading.visible = false
-	if successfully_loaded == 0:
-		_error_panel.visible = true
-		_scroll.visible = false
-		_status.text = "Preview images missing. Use Open Original PDF if a PDF app is installed."
-	else:
-		_error_panel.visible = false
-		_scroll.visible = true
-		_status.text = "Showing %d page preview(s). Pinch or use + / − to zoom." % successfully_loaded
-
-
-func _clear_pages() -> void:
-	for child in _pages_box.get_children():
-		child.queue_free()
-	_page_rects.clear()
-	_page_shadows.clear()
-	_zoom_root.custom_minimum_size = Vector2.ZERO
-	_pages_box.custom_minimum_size = Vector2.ZERO
-
-
-func _add_preview_page(texture: Texture2D, index: int) -> void:
-	var wrap := Control.new()
-	wrap.name = "PageWrap_%d" % (index + 1)
-	wrap.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_pages_box.add_child(wrap)
-
-	var shadow := Panel.new()
-	shadow.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0, 0, 0, 0.35)
-	sb.corner_radius_top_left = 4
-	sb.corner_radius_top_right = 4
-	sb.corner_radius_bottom_left = 4
-	sb.corner_radius_bottom_right = 4
-	sb.shadow_size = 10
-	sb.shadow_color = Color(0, 0, 0, 0.45)
-	sb.shadow_offset = Vector2(0, 4)
-	shadow.add_theme_stylebox_override("panel", sb)
-	wrap.add_child(shadow)
-
-	var tr := TextureRect.new()
-	tr.name = "Page_%d" % (index + 1)
-	tr.texture = texture
-	tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	tr.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
-	wrap.add_child(tr)
-
-	_page_rects.append(tr)
-	_page_shadows.append(shadow)
+	_populate_preview_pages()
 
 
 func get_loaded_page_count() -> int:
 	return _page_rects.size()
 
 
-func _apply_page_layout() -> void:
+func _build_ui() -> void:
+	var dim := ColorRect.new()
+	dim.color = Color(0.04, 0.03, 0.05, 0.94)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(dim)
+
+	_safe_margin = MarginContainer.new()
+	_safe_margin.name = "SafeAreaMargin"
+	_safe_margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_safe_margin.add_theme_constant_override("margin_left", int(SAFE_SIDE))
+	_safe_margin.add_theme_constant_override("margin_right", int(SAFE_SIDE))
+	_safe_margin.add_theme_constant_override("margin_top", int(SAFE_SIDE + SAFE_TOP_EXTRA))
+	_safe_margin.add_theme_constant_override("margin_bottom", int(SAFE_SIDE + SAFE_BOTTOM_EXTRA))
+	add_child(_safe_margin)
+
+	_main_vbox = VBoxContainer.new()
+	_main_vbox.name = "MainVBox"
+	_main_vbox.add_theme_constant_override("separation", 14)
+	_main_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_main_vbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_safe_margin.add_child(_main_vbox)
+
+	var top_bar := HBoxContainer.new()
+	top_bar.name = "TopBar"
+	top_bar.add_theme_constant_override("separation", 12)
+	_main_vbox.add_child(top_bar)
+
+	_title_label = Label.new()
+	_title_label.text = "Anniversary Gift"
+	_title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_title_label.add_theme_font_size_override("font_size", 40)
+	_title_label.add_theme_color_override("font_color", Color(0.96, 0.9, 0.78))
+	top_bar.add_child(_title_label)
+
+	_fit_button = _make_button("Fit Width", _on_fit_pressed)
+	top_bar.add_child(_fit_button)
+	var zoom_out := _make_button("−", func() -> void: _gesture_zoom.adjust(1.0 / 1.15))
+	top_bar.add_child(zoom_out)
+	var zoom_in := _make_button("+", func() -> void: _gesture_zoom.adjust(1.15))
+	top_bar.add_child(zoom_in)
+	_close_button = _make_button("Close", close_viewer)
+	top_bar.add_child(_close_button)
+
+	_loading_label = Label.new()
+	_loading_label.name = "LoadingIndicator"
+	_loading_label.text = "Preparing page previews…"
+	_loading_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_loading_label.add_theme_font_size_override("font_size", 28)
+	_loading_label.add_theme_color_override("font_color", Color(0.86, 0.8, 0.7))
+	_main_vbox.add_child(_loading_label)
+
+	_error_panel = PanelContainer.new()
+	_error_panel.name = "PreviewErrorPanel"
+	_error_panel.visible = false
+	var error_style := StyleBoxFlat.new()
+	error_style.bg_color = Color(0.18, 0.1, 0.1, 0.92)
+	error_style.set_corner_radius_all(14)
+	error_style.content_margin_left = 22
+	error_style.content_margin_right = 22
+	error_style.content_margin_top = 18
+	error_style.content_margin_bottom = 18
+	_error_panel.add_theme_stylebox_override("panel", error_style)
+	_main_vbox.add_child(_error_panel)
+
+	_error_label = Label.new()
+	_error_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_error_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_error_label.add_theme_font_size_override("font_size", 26)
+	_error_label.add_theme_color_override("font_color", Color(0.98, 0.86, 0.8))
+	_error_label.text = (
+		"Page previews unavailable.\n\n"
+		+ "You can still open or share the original PDF below."
+	)
+	_error_panel.add_child(_error_label)
+
+	_scroll = ScrollContainer.new()
+	_scroll.name = "PageScrollContainer"
+	_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	_scroll.visible = false
+	_main_vbox.add_child(_scroll)
+
+	_horizontal_center = CenterContainer.new()
+	_horizontal_center.name = "HorizontalCenter"
+	_horizontal_center.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_scroll.add_child(_horizontal_center)
+
+	_pages_box = VBoxContainer.new()
+	_pages_box.name = "PagesVBox"
+	_pages_box.add_theme_constant_override("separation", int(PAGE_GAP))
+	_pages_box.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_horizontal_center.add_child(_pages_box)
+
+	_status_label = Label.new()
+	_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_status_label.add_theme_font_size_override("font_size", 22)
+	_status_label.add_theme_color_override("font_color", Color(0.82, 0.76, 0.66))
+	_main_vbox.add_child(_status_label)
+
+	var bottom := HBoxContainer.new()
+	bottom.name = "BottomActions"
+	bottom.alignment = BoxContainer.ALIGNMENT_CENTER
+	bottom.add_theme_constant_override("separation", 16)
+	_main_vbox.add_child(bottom)
+
+	_open_button = _make_button("Open Original PDF", _on_open_pressed)
+	_open_button.custom_minimum_size = Vector2(280, 72)
+	bottom.add_child(_open_button)
+
+	_share_button = _make_button("Share PDF", _on_share_pressed)
+	_share_button.custom_minimum_size = Vector2(220, 72)
+	bottom.add_child(_share_button)
+
+
+func _make_button(text: String, callback: Callable) -> Button:
+	var button := Button.new()
+	button.text = text
+	button.custom_minimum_size = Vector2(96, 64)
+	button.add_theme_font_size_override("font_size", 26)
+	var normal := StyleBoxFlat.new()
+	normal.bg_color = Color(0.42, 0.28, 0.16, 0.96)
+	normal.set_corner_radius_all(14)
+	normal.content_margin_left = 18
+	normal.content_margin_right = 18
+	normal.content_margin_top = 12
+	normal.content_margin_bottom = 12
+	button.add_theme_stylebox_override("normal", normal)
+	var hover := normal.duplicate()
+	hover.bg_color = Color(0.52, 0.34, 0.2, 0.98)
+	button.add_theme_stylebox_override("hover", hover)
+	button.add_theme_stylebox_override("pressed", hover)
+	button.pressed.connect(callback)
+	return button
+
+
+func _resolve_page_textures() -> Array[Texture2D]:
+	var textures: Array[Texture2D] = []
+	for texture: Texture2D in PDF_PAGE_TEXTURES:
+		if texture == null:
+			push_error("PDF preview texture preload is null.")
+			continue
+		if texture.get_width() <= 0 or texture.get_height() <= 0:
+			push_error(
+				"PDF preview texture has invalid size %dx%d."
+				% [texture.get_width(), texture.get_height()]
+			)
+			continue
+		textures.append(texture)
+
+	if textures.is_empty() and gift_document_pages != null:
+		for texture: Texture2D in gift_document_pages.pages:
+			if texture != null and texture.get_width() > 0 and texture.get_height() > 0:
+				textures.append(texture)
+	return textures
+
+
+func _clear_preview_pages() -> void:
+	for child in _pages_box.get_children():
+		child.queue_free()
+	_page_panels.clear()
+	_page_rects.clear()
+	_page_textures.clear()
+
+
+func _create_preview_page(page_texture: Texture2D, page_index: int) -> void:
+	var panel := PanelContainer.new()
+	panel.name = "PagePanel_%d" % (page_index + 1)
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.1, 0.08, 0.07, 0.96)
+	style.set_corner_radius_all(10)
+	style.set_border_width_all(1)
+	style.border_color = Color(0.55, 0.42, 0.28, 0.55)
+	style.shadow_color = Color(0, 0, 0, 0.45)
+	style.shadow_size = 10
+	style.shadow_offset = Vector2(0, 4)
+	style.content_margin_left = 6
+	style.content_margin_right = 6
+	style.content_margin_top = 6
+	style.content_margin_bottom = 6
+	panel.add_theme_stylebox_override("panel", style)
+	_pages_box.add_child(panel)
+
+	var page_rect := TextureRect.new()
+	page_rect.name = "PageTexture_%d" % (page_index + 1)
+	page_rect.texture = page_texture
+	page_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	page_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	page_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.add_child(page_rect)
+
+	_page_panels.append(panel)
+	_page_rects.append(page_rect)
+	_page_textures.append(page_texture)
+
+
+func _populate_preview_pages() -> void:
+	_clear_preview_pages()
+	var textures := _resolve_page_textures()
+	for page_index: int in textures.size():
+		var page_texture: Texture2D = textures[page_index]
+		if page_texture == null:
+			push_error("PDF preview texture %d is null." % (page_index + 1))
+			continue
+		_create_preview_page(page_texture, page_index)
+
+	var loaded_count: int = get_loaded_page_count()
+	_loading_label.visible = false
+	_error_panel.visible = loaded_count == 0
+	_scroll.visible = loaded_count > 0
+
+	if OS.is_debug_build():
+		print(
+			"[GiftDocumentViewer] populated %d page control(s); error_visible=%s"
+			% [loaded_count, str(_error_panel.visible)]
+		)
+
+
+func _refresh_safe_area() -> void:
+	if _safe_margin == null or not is_instance_valid(_safe_margin):
+		return
+	var viewport_size := get_viewport_rect().size
+	var safe := DisplayServer.get_display_safe_area()
+	var screen := DisplayServer.screen_get_size()
+	var scale_x := viewport_size.x / float(maxi(screen.x, 1))
+	var scale_y := viewport_size.y / float(maxi(screen.y, 1))
+	var left := maxf(SAFE_SIDE, safe.position.x * scale_x)
+	var top := maxf(SAFE_SIDE + SAFE_TOP_EXTRA, safe.position.y * scale_y)
+	var right := maxf(
+		SAFE_SIDE,
+		(screen.x - (safe.position.x + safe.size.x)) * scale_x
+	)
+	var bottom := maxf(
+		SAFE_SIDE + SAFE_BOTTOM_EXTRA,
+		(screen.y - (safe.position.y + safe.size.y)) * scale_y
+	)
+	_safe_margin.add_theme_constant_override("margin_left", int(left))
+	_safe_margin.add_theme_constant_override("margin_right", int(right))
+	_safe_margin.add_theme_constant_override("margin_top", int(top))
+	_safe_margin.add_theme_constant_override("margin_bottom", int(bottom))
+	if _layout_ready:
+		call_deferred("_apply_page_fit")
+
+
+func _on_viewport_resized() -> void:
+	_refresh_safe_area()
+
+
+func _available_page_width() -> float:
+	var scroll_width := _scroll.size.x
+	if scroll_width <= 1.0:
+		scroll_width = get_viewport_rect().size.x - (SAFE_SIDE * 2.0)
+	return maxf(220.0, scroll_width - HORIZONTAL_PAGE_MARGIN)
+
+
+func _apply_page_fit() -> void:
 	if _page_rects.is_empty():
 		return
-	var available_w: float = maxf(_scroll.size.x - 24.0, 200.0)
-	if available_w <= 200.0:
-		available_w = maxf(get_viewport().get_visible_rect().size.x - 64.0, 200.0)
-
-	# Fit-width scale is relative to native texture width of the first page.
-	var first_tex: Texture2D = _page_rects[0].texture
-	var native_w: float = maxf(first_tex.get_width(), 1.0)
-	_fit_width_scale = available_w / native_w
-
-	var zoom: float = _fit_width_scale if _mode_fit_width else (_fit_width_scale * _user_zoom)
-	zoom = clampf(zoom, MIN_ZOOM * _fit_width_scale * 0.5, MAX_ZOOM)
-
-	var max_w: float = 0.0
-	var total_h: float = 0.0
+	var available_width := _available_page_width() * _zoom
 	for i in _page_rects.size():
-		var tr: TextureRect = _page_rects[i]
-		var tex: Texture2D = tr.texture
-		var tw: float = tex.get_width() * zoom
-		var th: float = tex.get_height() * zoom
-		var wrap: Control = tr.get_parent() as Control
-		wrap.custom_minimum_size = Vector2(tw + 16.0, th + 16.0)
-		wrap.size = wrap.custom_minimum_size
-		tr.position = Vector2(8, 8)
-		tr.size = Vector2(tw, th)
-		var shadow: Panel = _page_shadows[i]
-		shadow.position = Vector2(4, 6)
-		shadow.size = Vector2(tw + 8.0, th + 8.0)
-		max_w = maxf(max_w, wrap.custom_minimum_size.x)
-		total_h += wrap.custom_minimum_size.y
-		if i < _page_rects.size() - 1:
-			total_h += PAGE_GAP
-
-	_pages_box.custom_minimum_size = Vector2(max_w, total_h)
-	_pages_box.size = _pages_box.custom_minimum_size
-	_zoom_root.custom_minimum_size = _pages_box.custom_minimum_size
-	_zoom_root.size = _zoom_root.custom_minimum_size
+		var page_texture := _page_textures[i]
+		var page_rect := _page_rects[i]
+		var panel := _page_panels[i]
+		if page_texture == null:
+			continue
+		var tex_w := float(page_texture.get_width())
+		var tex_h := float(page_texture.get_height())
+		if tex_w <= 0.0 or tex_h <= 0.0:
+			continue
+		var display_height := available_width * tex_h / tex_w
+		page_rect.custom_minimum_size = Vector2(available_width, display_height)
+		panel.custom_minimum_size = Vector2(available_width + 12.0, display_height + 12.0)
+	_pages_box.custom_minimum_size = Vector2(available_width + 12.0, 0)
 
 
-func _on_zoom_changed(scale: float) -> void:
-	_mode_fit_width = false
-	_user_zoom = clampf(scale, MIN_ZOOM, MAX_ZOOM)
-	_apply_page_layout()
+func _on_fit_pressed() -> void:
+	_gesture_zoom.reset(1.0)
+	_zoom = 1.0
+	_apply_page_fit()
 
 
-func _adjust_zoom(factor: float) -> void:
-	if _mode_fit_width:
-		_user_zoom = 1.0
-		_mode_fit_width = false
-	_user_zoom = clampf(_user_zoom * factor, MIN_ZOOM, MAX_ZOOM)
-	_zoom.current_scale = _user_zoom
-	_apply_page_layout()
-
-
-func _reset_zoom() -> void:
-	_mode_fit_width = false
-	_user_zoom = 1.0
-	_zoom.current_scale = 1.0
-	_apply_page_layout()
-
-
-func _apply_fit_width() -> void:
-	_mode_fit_width = true
-	_user_zoom = 1.0
-	_zoom.current_scale = 1.0
-	_apply_page_layout()
-
-
-func _open_pdf() -> void:
-	var result: Dictionary = pdf_helper.open_original_pdf()
-	_status.text = str(result.get("message", ""))
-	if not bool(result.get("ok", false)) and get_loaded_page_count() > 0:
-		_status.text += " The in-app page preview remains available."
-
-
-func _share_pdf() -> void:
-	var result: Dictionary = pdf_helper.share_original_pdf()
-	_status.text = str(result.get("message", ""))
-	if not bool(result.get("ok", false)) and get_loaded_page_count() > 0:
-		_status.text += " The in-app page preview remains available."
-
-
-func close_viewer() -> void:
-	if not _visible_modal:
+func _log_preview_diagnostics() -> void:
+	if not OS.is_debug_build():
 		return
-	_visible_modal = false
-	visible = false
-	_clear_pages()
-	closed.emit()
+	var dims: Array[String] = []
+	for i in PDF_PAGE_TEXTURES.size():
+		var texture := PDF_PAGE_TEXTURES[i]
+		if texture == null:
+			dims.append("page_%d=null" % (i + 1))
+		else:
+			dims.append(
+				"page_%d=%dx%d" % [i + 1, texture.get_width(), texture.get_height()]
+			)
+	print(
+		"[GiftDocumentViewer] textures=%d controls=%d error_visible=%s %s"
+		% [
+			PDF_PAGE_TEXTURES.size(),
+			_page_rects.size(),
+			str(_error_panel.visible),
+			", ".join(dims),
+		]
+	)
 
 
-func _input(event: InputEvent) -> void:
+func _gui_input(event: InputEvent) -> void:
 	if not visible:
 		return
-	if _zoom.handle_input(event):
-		get_viewport().set_input_as_handled()
-		return
-	if event.is_action_pressed("ui_cancel"):
-		close_viewer()
-		get_viewport().set_input_as_handled()
+	if _gesture_zoom.handle_input(event):
+		accept_event()
 
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_GO_BACK_REQUEST and visible:
 		close_viewer()
+	elif what == NOTIFICATION_APPLICATION_FOCUS_IN and visible:
+		_refresh_safe_area()
+	elif what == NOTIFICATION_RESIZED and visible:
+		_refresh_safe_area()
 
 
-func _on_viewport_resized() -> void:
-	if visible and not _page_rects.is_empty():
-		_apply_page_layout()
+func _on_open_pressed() -> void:
+	_status_label.text = "Opening original PDF…"
+	var helper := PdfHelper.new()
+	var result: Dictionary = helper.open_original_pdf()
+	_status_label.text = str(result.get("message", ""))
+
+
+func _on_share_pressed() -> void:
+	_status_label.text = "Preparing share…"
+	var helper := PdfHelper.new()
+	var result: Dictionary = helper.share_original_pdf()
+	_status_label.text = str(result.get("message", ""))
