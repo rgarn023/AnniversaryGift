@@ -10,6 +10,7 @@ var _toast: Label
 var _current_screen: String = ""
 var _inventory_filter: String = "all"
 var _compose_draft: Dictionary = {}
+var _compose_screen: ComposeScrollScreen
 var _password_target: Dictionary = {}
 var _overlay: Control
 
@@ -85,6 +86,7 @@ func _build_chrome() -> void:
 
 
 func _clear_screen() -> void:
+	_compose_screen = null
 	for c in _screen_host.get_children():
 		c.queue_free()
 
@@ -1038,6 +1040,9 @@ func _on_scroll_closed() -> void:
 	if state.is_demo():
 		state.demo.open_message_plaintext = ""
 	match _current_screen:
+		"compose":
+			# Preview returns to the live compose form — do not rebuild/wipe draft.
+			pass
 		"inventory":
 			_show_inventory()
 		"saved":
@@ -1053,23 +1058,7 @@ func _show_compose() -> void:
 		return
 	_current_screen = "compose"
 	_clear_screen()
-	var root := VBoxContainer.new()
-	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	root.offset_left = 32
-	root.offset_right = -32
-	root.offset_top = 24
-	root.offset_bottom = -24
-	root.add_theme_constant_override("separation", 12)
-	_screen_host.add_child(root)
-	var header := HBoxContainer.new()
-	root.add_child(header)
-	var title := Label.new()
-	title.text = "Compose Scroll"
-	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	title.add_theme_font_size_override("font_size", 40)
-	title.add_theme_color_override("font_color", Color(0.98, 0.86, 0.45))
-	header.add_child(title)
-	header.add_child(_make_button("Back", _show_main_chest, Vector2(160, 64)))
+	_compose_screen = null
 
 	var friends: Array = []
 	if state.is_demo():
@@ -1082,122 +1071,77 @@ func _show_compose() -> void:
 			friends = data.get("friends", []) if typeof(data.get("friends")) == TYPE_ARRAY else []
 		else:
 			_show_toast(str(fr.get("error", "Could not load friends.")))
-	var recipient := OptionButton.new()
-	recipient.custom_minimum_size = Vector2(0, 64)
-	for f in friends:
-		if typeof(f) != TYPE_DICTIONARY:
-			continue
-		recipient.add_item("%s (@%s)" % [str(f.get("display_name", "")), str(f.get("username", ""))])
-		recipient.set_item_metadata(recipient.item_count - 1, str(f.get("id", "")))
-	root.add_child(recipient)
 
-	var title_edit := LineEdit.new()
-	title_edit.placeholder_text = "Optional title (max 80)"
-	title_edit.custom_minimum_size = Vector2(0, 60)
-	root.add_child(title_edit)
+	var compose := ComposeScrollScreen.new()
+	compose.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_screen_host.add_child(compose)
+	_compose_screen = compose
+	compose.back_pressed.connect(_show_main_chest)
+	compose.preview_requested.connect(_on_compose_preview)
+	compose.send_requested.connect(_on_compose_send_requested)
+	compose.setup(friends, state.is_private_onboarding_build())
 
-	var message := TextEdit.new()
-	message.placeholder_text = "Write your love note…"
-	message.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	message.custom_minimum_size = Vector2(0, 280)
-	root.add_child(message)
 
-	var count := Label.new()
-	count.add_theme_font_size_override("font_size", 20)
-	count.add_theme_color_override("font_color", Color(0.8, 0.75, 0.85))
-	root.add_child(count)
-	message.text_changed.connect(func() -> void:
-		count.text = "%d / 5000" % message.text.length()
-	)
+func _on_compose_preview(draft: Dictionary) -> void:
+	_compose_draft = draft.duplicate(true)
+	var title := str(draft.get("title", "")).strip_edges()
+	if title.is_empty():
+		title = "A Love Note"
+	var recipient := str(draft.get("recipient_display_name", "Friend"))
+	if recipient.is_empty():
+		recipient = "Friend"
+	var when := "Opens immediately"
+	if not bool(draft.get("open_immediately", true)):
+		var unlock_unix := int(draft.get("unlock_unix", 0))
+		when = "Opens %s" % Time.get_datetime_string_from_unix_time(unlock_unix, false)
+	var pw_note := "Magic password required" if bool(draft.get("has_password", false)) else "No magic password"
+	var meta := "To %s · %s · %s" % [recipient, when, pw_note]
+	var body := str(draft.get("message", ""))
+	await _scroll_viewer.open_message(title, meta, body, false, false)
 
-	var unlock_mins := SpinBox.new()
-	unlock_mins.min_value = 0
-	unlock_mins.max_value = 60 * 24 * 30
-	unlock_mins.value = 0
-	unlock_mins.prefix = "Unlock in minutes: "
-	root.add_child(unlock_mins)
 
-	var tz := Label.new()
-	tz.text = "Timezone: device local (converted to UTC for the server)"
-	tz.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	tz.add_theme_font_size_override("font_size", 20)
-	root.add_child(tz)
-
-	var pw_toggle := CheckBox.new()
-	pw_toggle.text = "Require a Magic Password"
-	root.add_child(pw_toggle)
-	var pw := LineEdit.new()
-	pw.placeholder_text = "Magic password"
-	pw.secret = true
-	pw.visible = false
-	root.add_child(pw)
-	var pw2 := LineEdit.new()
-	pw2.placeholder_text = "Confirm magic password"
-	pw2.secret = true
-	pw2.visible = false
-	root.add_child(pw2)
-	pw_toggle.toggled.connect(func(on: bool) -> void:
-		pw.visible = on
-		pw2.visible = on
-	)
-	var warn := Label.new()
-	warn.text = "If you set a magic password, the app cannot reveal it later. Share it privately."
-	warn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	warn.add_theme_font_size_override("font_size", 20)
-	warn.add_theme_color_override("font_color", Color(1.0, 0.78, 0.55))
-	root.add_child(warn)
-
-	root.add_child(_make_button("Send Scroll", func() -> void:
-		if friends.is_empty():
-			_show_toast("No accepted friends available.")
-			return
-		var rid := str(recipient.get_selected_metadata())
-		var body := message.text
-		if body.strip_edges().is_empty():
-			_show_toast("Message cannot be empty.")
-			return
-		var magic := ""
-		if pw_toggle.button_pressed:
-			magic = pw.text
-			if magic.length() < 4 or magic.length() > 64:
-				_show_toast("Magic password must be 4–64 characters.")
-				return
-			if magic != pw2.text:
-				_show_toast("Magic passwords do not match.")
-				return
-		var result: Dictionary = {}
-		if state.is_demo():
-			var unlock_unix := state.demo.now_unix() + int(unlock_mins.value) * 60
-			result = state.demo.send_scroll(rid, title_edit.text, body, unlock_unix, magic)
-		elif state.is_online():
-			var unlock_at := Time.get_datetime_string_from_unix_time(
-				int(Time.get_unix_time_from_system()) + int(unlock_mins.value) * 60,
-				true
-			) + "Z"
-			var payload := {
-				"recipient_id": rid,
-				"title": title_edit.text.strip_edges(),
-				"message": body,
-				"unlock_at": unlock_at,
-			}
-			if not magic.is_empty():
-				payload["password"] = magic
-			result = await state.scrolls.send_scroll(payload)
-			if bool(result.get("ok", false)):
-				result = {"ok": true}
-			else:
-				result = {"ok": false, "error": str(result.get("error", "Send failed."))}
-		else:
-			_show_toast("Backend is not configured.")
-			return
-		pw.text = ""
-		pw2.text = ""
+func _on_compose_send_requested(draft: Dictionary) -> void:
+	if _compose_screen == null:
+		return
+	_compose_draft = draft.duplicate(true)
+	_compose_screen.set_sending(true)
+	var rid := str(draft.get("recipient_id", ""))
+	var body := str(draft.get("message", ""))
+	var title := str(draft.get("title", "")).strip_edges()
+	var magic := str(draft.get("password", ""))
+	var unlock_unix := int(draft.get("unlock_unix", Time.get_unix_time_from_system()))
+	var result: Dictionary = {}
+	if state.is_demo():
+		result = state.demo.send_scroll(rid, title, body, unlock_unix, magic)
+	elif state.is_online():
+		# Existing send-scroll contract: recipient_id, message, optional title/password/unlock_at (UTC ISO).
+		var unlock_at := Time.get_datetime_string_from_unix_time(unlock_unix, true) + "Z"
+		var payload := {
+			"recipient_id": rid,
+			"title": title,
+			"message": body,
+			"unlock_at": unlock_at,
+		}
+		if not magic.is_empty():
+			payload["password"] = magic
+		result = await state.scrolls.send_scroll(payload)
 		if bool(result.get("ok", false)):
-			_show_toast("Scroll sent.")
-			_show_main_chest()
+			result = {"ok": true}
 		else:
-			_show_toast(str(result.get("error", "Send failed.")))
-	))
+			result = {"ok": false, "error": "Could not send your scroll. Please try again."}
+	else:
+		_compose_screen.restore_after_failed_send()
+		_show_toast("Backend is not configured.")
+		return
+	if bool(result.get("ok", false)):
+		_compose_screen.set_sending(false)
+		_compose_draft.clear()
+		_compose_screen = null
+		_show_toast("Scroll sent.")
+		_show_main_chest()
+	else:
+		_compose_screen.restore_after_failed_send()
+		_show_toast(str(result.get("error", "Could not send your scroll. Please try again.")))
 
 
 func _show_friends() -> void:
@@ -1575,7 +1519,12 @@ func _notification(what: int) -> void:
 			_hide_overlay()
 			return
 		match _current_screen:
-			"inventory", "saved", "compose", "friends", "sent", "profile":
+			"compose":
+				if _compose_screen != null and _compose_screen.handle_back():
+					pass
+				else:
+					_show_main_chest()
+			"inventory", "saved", "friends", "sent", "profile":
 				_show_main_chest()
 			"diagnostics":
 				_show_profile()
