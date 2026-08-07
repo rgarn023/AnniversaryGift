@@ -56,16 +56,30 @@ else
   echo "FAIL: PRIVATE_ONBOARDING_BUILD not true"
   FAIL=1
 fi
-if rg -q 'version/code=2' export_presets.cfg && rg -q '0.1.1-private-onboarding' export_presets.cfg; then
-  echo "PASS: export version code/name bumped for onboarding"
+if rg -q 'version/code=4' export_presets.cfg && rg -q '0.1.3-secure-session' export_presets.cfg; then
+  echo "PASS: export version code/name bumped for secure-session"
 else
   echo "FAIL: export version not bumped"
   FAIL=1
 fi
-if rg -q 'ChestOfLoveNotes-private-onboarding-debug.apk' export_presets.cfg; then
-  echo "PASS: export path targets onboarding APK"
+if rg -q 'ChestOfLoveNotes-secure-session-debug.apk' export_presets.cfg; then
+  echo "PASS: export path targets secure-session APK"
 else
   echo "FAIL: export path incorrect"
+  FAIL=1
+fi
+# Session persistence must not use plaintext user:// token files in client sources.
+if rg -n -g 'scripts/**/*.gd' -e 'user://.*session\.(json|cfg)|user://supabase_session' scripts >/dev/null; then
+  echo "FAIL: plaintext session path referenced in scripts"
+  FAIL=1
+else
+  echo "PASS: no plaintext session path in scripts"
+fi
+if rg -q 'ChestSecureStorage' scripts/network/android_secure_store.gd \
+  && rg -q 'ChestOfLoveNotesSessionKey' android/plugins/chest_secure_storage/ChestSecureStoragePlugin.kt; then
+  echo "PASS: ChestSecureStorage Keystore plugin wired in sources"
+else
+  echo "FAIL: ChestSecureStorage plugin missing"
   FAIL=1
 fi
 if rg -q 'com.charoitegames.chestoflovenotes' export_presets.cfg; then

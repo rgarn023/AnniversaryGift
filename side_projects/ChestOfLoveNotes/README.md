@@ -70,7 +70,7 @@ Copy to `config/backend_config.json` (gitignored) with your project URL + publis
 ## Security limitations (v0.1)
 
 - Demo mode stores fictional message bodies in memory on-device for UI testing only
-- Online token persistence is memory-only in this first pass (Android Keystore plugin planned)
+- Online sessions persist via Android Keystore-backed `ChestSecureStorage` (AES-256-GCM; no plaintext tokens under `user://`)
 - Server-side AES-GCM encryption is **not** end-to-end encryption
 - Push notifications are not included yet (architecture allows adding later)
 

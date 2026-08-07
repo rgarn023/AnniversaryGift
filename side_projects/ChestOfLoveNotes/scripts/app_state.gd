@@ -27,6 +27,7 @@ var cached_friends: Dictionary = {}
 ## Ephemeral revealed Magic Passwords keyed by scroll_id (never persisted).
 var revealed_magic_passwords: Dictionary = {}
 var session_restore_message: String = ""
+var last_persist_warning: String = ""
 
 
 func _init() -> void:
@@ -90,7 +91,7 @@ func clear_private_caches() -> void:
 
 
 func sign_out() -> void:
-	# Clears sensitive state synchronously; remote logout continues in background.
+	## Synchronous local clear of all sensitive state + secure storage.
 	auth.sign_out()
 	membership.clear()
 	profiles.clear()
@@ -99,12 +100,37 @@ func sign_out() -> void:
 	clear_private_caches()
 	pending_confirm_email = ""
 	session_restore_message = ""
+	last_persist_warning = ""
 	demo.clear_sensitive()
+
+
+func sign_out_full() -> void:
+	## Remote logout (best effort) then full local clear.
+	await auth.logout_remote()
+	sign_out()
+
+
+func maybe_warn_persist_failure() -> String:
+	last_persist_warning = ""
+	if not keep_me_signed_in_active():
+		return ""
+	if tokens.keep_me_signed_in and tokens.last_persist_error != "":
+		last_persist_warning = (
+			"Secure sign-in storage is unavailable. "
+			+ "You’ll need to sign in again after closing the app."
+		)
+		return last_persist_warning
+	return ""
+
+
+func keep_me_signed_in_active() -> bool:
+	return tokens.keep_me_signed_in
 
 
 func restore_session_if_possible() -> Dictionary:
 	## Startup restore: secure storage → refresh if needed → membership → profile.
 	session_restore_message = ""
+	tokens.session_refresh_performed = false
 	if not is_online():
 		return {"ok": false, "reason": "not_online"}
 	if not tokens.restore_from_secure_storage():
@@ -133,7 +159,26 @@ func restore_session_if_possible() -> Dictionary:
 	return {
 		"ok": true,
 		"profile_exists": bool(profile_result.get("exists", false)),
+		"session_restored": tokens.session_restored,
+		"session_refresh_performed": tokens.session_refresh_performed,
 	}
+
+
+func revalidate_on_resume() -> Dictionary:
+	## Background resume: refresh session + membership; do not sign out for mere pause.
+	if not is_online() or not tokens.has_session():
+		return {"ok": false, "reason": "not_signed_in"}
+	var fresh: Dictionary = await auth.ensure_fresh_access()
+	if not bool(fresh.get("ok", false)):
+		sign_out()
+		session_restore_message = "Your session has expired. Please sign in again."
+		return {"ok": false, "reason": "refresh_failed", "message": session_restore_message}
+	var claim: Dictionary = await membership.claim_membership()
+	if not bool(claim.get("ok", false)) or not membership.is_member:
+		sign_out()
+		session_restore_message = "Your session has expired. Please sign in again."
+		return {"ok": false, "reason": "membership_denied", "message": session_restore_message}
+	return {"ok": true}
 
 
 func backend_host() -> String:
@@ -155,6 +200,13 @@ func diagnostics_snapshot() -> Dictionary:
 	return {
 		"backend_configured": config.is_configured(),
 		"backend_host": backend_host(),
+		"secure_storage_available": AndroidSecureStore.is_available(),
+		"saved_session_exists": AndroidSecureStore.has_session(),
+		"session_restored": tokens.session_restored,
+		"session_refresh_performed": tokens.session_refresh_performed,
+		"keep_me_signed_in": tokens.keep_me_signed_in,
+		"memory_only": tokens.memory_only,
+		"last_persist_error": tokens.last_persist_error,
 		"signed_in": tokens.has_session(),
 		"email_confirmed": tokens.email_confirmed,
 		"membership_approved": membership.is_member,
@@ -165,4 +217,5 @@ func diagnostics_snapshot() -> Dictionary:
 		"last_safe_error": api.last_safe_error,
 		"private_onboarding_build": BuildFlags.PRIVATE_ONBOARDING_BUILD,
 		"demo_disabled": not is_demo(),
+		"storage_version": AndroidSecureStore.storage_version(),
 	}

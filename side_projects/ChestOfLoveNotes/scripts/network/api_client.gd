@@ -101,6 +101,8 @@ func _single_flight_refresh() -> bool:
 				new_refresh if not new_refresh.is_empty() else tokens.refresh_token,
 				int(Time.get_unix_time_from_system()) + int(data.get("expires_in", 3600))
 			)
+			tokens.persist_if_needed()
+			tokens.session_refresh_performed = true
 			ok = true
 	else:
 		var status := int(result.get("status", 0))

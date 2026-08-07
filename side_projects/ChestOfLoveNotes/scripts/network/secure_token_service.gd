@@ -2,7 +2,10 @@ extends RefCounted
 class_name SecureTokenService
 ## In-memory Supabase session with optional Android Keystore persistence.
 ## Never saves access/refresh tokens as plaintext under user://.
-## Never stores the account password.
+## Never stores the account password or Magic Passwords.
+
+const SESSION_VERSION := 1
+const EXPIRY_SKEW_SEC := 90
 
 var access_token: String = ""
 var refresh_token: String = ""
@@ -14,6 +17,8 @@ var keep_me_signed_in: bool = true
 var memory_only: bool = true
 var limitation_message: String = ""
 var last_persist_error: String = ""
+var session_restored: bool = false
+var session_refresh_performed: bool = false
 
 
 func _init() -> void:
@@ -28,8 +33,8 @@ func _refresh_limitation_message() -> void:
 	elif keep_me_signed_in and not AndroidSecureStore.is_available():
 		memory_only = true
 		limitation_message = (
-			"Secure Android storage is unavailable on this device/build. "
-			+ "Session remains in memory until the app closes."
+			"Secure sign-in storage is unavailable. "
+			+ "You’ll need to sign in again after closing the app."
 		)
 	else:
 		memory_only = true
@@ -67,6 +72,8 @@ func clear(delete_persistent: bool = true) -> void:
 	user_id = ""
 	user_email = ""
 	email_confirmed = false
+	session_restored = false
+	session_refresh_performed = false
 	if delete_persistent:
 		AndroidSecureStore.delete_session()
 
@@ -75,7 +82,7 @@ func has_session() -> bool:
 	return not access_token.is_empty()
 
 
-func is_expired(skew_sec: int = 30) -> bool:
+func is_expired(skew_sec: int = EXPIRY_SKEW_SEC) -> bool:
 	if expires_at_unix <= 0:
 		return false
 	return int(Time.get_unix_time_from_system()) >= (expires_at_unix - skew_sec)
@@ -88,13 +95,13 @@ func authorization_header() -> String:
 
 
 func to_session_dict() -> Dictionary:
+	## Minimal secure payload — never includes account password or Magic Password.
 	return {
+		"version": SESSION_VERSION,
 		"access_token": access_token,
 		"refresh_token": refresh_token,
-		"expires_at_unix": expires_at_unix,
+		"expires_at": expires_at_unix,
 		"user_id": user_id,
-		"user_email": user_email,
-		"email_confirmed": email_confirmed,
 	}
 
 
@@ -104,10 +111,12 @@ func persist_if_needed() -> bool:
 		return false
 	if not AndroidSecureStore.is_available():
 		last_persist_error = "secure_store_unavailable"
+		_refresh_limitation_message()
 		return false
 	if access_token.is_empty() or refresh_token.is_empty():
 		return false
 	var payload := JSON.stringify(to_session_dict())
+	# Defense: never write the JSON payload under user://.
 	var ok := AndroidSecureStore.store_session_json(payload)
 	if not ok:
 		last_persist_error = "secure_store_failed"
@@ -117,6 +126,7 @@ func persist_if_needed() -> bool:
 
 func restore_from_secure_storage() -> bool:
 	clear(false)
+	session_restored = false
 	if not keep_me_signed_in:
 		return false
 	if not AndroidSecureStore.is_available() or not AndroidSecureStore.has_session():
@@ -130,14 +140,19 @@ func restore_from_secure_storage() -> bool:
 		AndroidSecureStore.delete_session()
 		return false
 	var data: Dictionary = parsed
+	var version := int(data.get("version", 0))
+	if version != SESSION_VERSION and version != 0:
+		# Unknown future/corrupt version — reject safely.
+		AndroidSecureStore.delete_session()
+		return false
 	access_token = str(data.get("access_token", ""))
 	refresh_token = str(data.get("refresh_token", ""))
-	expires_at_unix = int(data.get("expires_at_unix", 0))
+	expires_at_unix = int(data.get("expires_at", data.get("expires_at_unix", 0)))
 	user_id = str(data.get("user_id", ""))
-	user_email = str(data.get("user_email", ""))
-	email_confirmed = bool(data.get("email_confirmed", false))
+	# Email/confirmation are refreshed from Supabase after restore; optional legacy fields ignored.
 	if access_token.is_empty() or refresh_token.is_empty():
 		clear(true)
 		return false
+	session_restored = true
 	_refresh_limitation_message()
 	return true

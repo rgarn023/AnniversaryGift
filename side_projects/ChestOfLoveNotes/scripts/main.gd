@@ -54,7 +54,7 @@ func _show_session_loading() -> void:
 	box.size = Vector2(640, 240)
 	_screen_host.add_child(box)
 	var lab := Label.new()
-	lab.text = "Opening Chest of Love Notes…"
+	lab.text = "Restoring secure session…"
 	lab.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	lab.add_theme_font_size_override("font_size", 28)
 	lab.add_theme_color_override("font_color", Color(0.98, 0.86, 0.45))
@@ -62,7 +62,7 @@ func _show_session_loading() -> void:
 
 
 func _on_session_invalidated() -> void:
-	state.sign_out()
+	await state.sign_out_full()
 	_show_toast("Your session has expired. Please sign in again.")
 	_show_welcome()
 
@@ -368,7 +368,7 @@ func _show_check_email() -> void:
 
 func _after_verified_sign_in() -> void:
 	if not state.tokens.has_session() or not state.tokens.email_confirmed:
-		state.sign_out()
+		await state.sign_out_full()
 		_show_toast("Please confirm your email, then sign in.")
 		_show_check_email()
 		return
@@ -377,16 +377,21 @@ func _after_verified_sign_in() -> void:
 		var msg := str(claim.get("error", "This is a private app, and this account is not approved."))
 		if bool(claim.get("forbidden", false)):
 			msg = "This is a private app, and this account is not approved."
-		state.sign_out()
+		await state.sign_out_full()
 		_show_toast(msg)
 		_show_welcome()
 		return
 	var profile_result: Dictionary = await state.profiles.fetch_own_profile()
 	if not bool(profile_result.get("ok", false)):
-		state.sign_out()
+		await state.sign_out_full()
 		_show_toast(str(profile_result.get("error", "Could not load profile.")))
 		_show_welcome()
 		return
+	# Persist after membership+profile success; warn if Keystore unavailable.
+	state.tokens.persist_if_needed()
+	var persist_warn := state.maybe_warn_persist_failure()
+	if not persist_warn.is_empty():
+		_show_toast(persist_warn)
 	if not bool(profile_result.get("exists", false)):
 		_show_profile_setup()
 		return
@@ -439,7 +444,7 @@ func _show_profile_setup() -> void:
 		_show_main_chest()
 	))
 	box.add_child(_make_button("Sign Out", func() -> void:
-		state.sign_out()
+		await state.sign_out_full()
 		_show_welcome()
 	))
 
@@ -452,6 +457,7 @@ func _guard_private_chest() -> bool:
 		_show_welcome()
 		return false
 	if not state.tokens.has_session() or not state.membership.is_member:
+		# Fire-and-forget clear; navigation continues immediately.
 		state.sign_out()
 		_show_toast("This is a private app, and this account is not approved.")
 		_show_welcome()
@@ -1554,7 +1560,7 @@ func _show_profile() -> void:
 		root.add_child(_make_button("Online Diagnostics", _show_diagnostics))
 	root.add_child(_make_button("Sign Out", func() -> void:
 		_clear_reveal_timers()
-		state.sign_out()
+		await state.sign_out_full()
 		if state.is_demo():
 			state.demo.enable()
 		_show_welcome()
@@ -1595,27 +1601,39 @@ func _show_diagnostics() -> void:
 		status.text = (
 			"Backend configuration loaded: %s\n"
 			+ "Backend host: %s\n"
+			+ "Secure Storage Available: %s\n"
+			+ "Saved Session Exists: %s\n"
+			+ "Session Restored: %s\n"
+			+ "Session Refresh Performed: %s\n"
+			+ "Keep Me Signed In: %s\n"
+			+ "Memory-only session: %s\n"
 			+ "Signed in: %s\n"
 			+ "Email confirmed: %s\n"
-			+ "Private membership approved: %s\n"
+			+ "Private Membership Valid: %s\n"
 			+ "Private role: %s\n"
 			+ "Profile exists: %s\n"
+			+ "Last Auth HTTP Status: %s\n"
+			+ "Last Safe Auth Error: %s\n"
 			+ "Last function name: %s\n"
-			+ "Last HTTP status: %s\n"
-			+ "Last safe error message: %s\n"
 			+ "Private Onboarding Build: %s\n"
 			+ "Local Demo Mode disabled: %s"
 		) % [
 			"Yes" if bool(snap.backend_configured) else "No",
 			str(snap.backend_host),
+			"Yes" if bool(snap.secure_storage_available) else "No",
+			"Yes" if bool(snap.saved_session_exists) else "No",
+			"Yes" if bool(snap.session_restored) else "No",
+			"Yes" if bool(snap.session_refresh_performed) else "No",
+			"ON" if bool(snap.keep_me_signed_in) else "OFF",
+			"Yes" if bool(snap.memory_only) else "No",
 			"Yes" if bool(snap.signed_in) else "No",
 			"Yes" if bool(snap.email_confirmed) else "No",
 			"Yes" if bool(snap.membership_approved) else "No",
 			str(snap.private_role) if str(snap.private_role) != "" else "(none)",
 			"Yes" if bool(snap.profile_exists) else "No",
-			str(snap.last_function),
 			str(snap.last_http_status),
 			str(snap.last_safe_error) if str(snap.last_safe_error) != "" else "(none)",
+			str(snap.last_function),
 			"Yes" if bool(snap.private_onboarding_build) else "No",
 			"Yes" if bool(snap.demo_disabled) else "No",
 		]
@@ -1642,7 +1660,7 @@ func _show_diagnostics() -> void:
 		else:
 			_show_toast(str(result.get("error", "Claim failed.")))
 			if bool(result.get("forbidden", false)):
-				state.sign_out()
+				await state.sign_out_full()
 		refresh_status.call()
 	))
 	root.add_child(_make_button("Refresh Profile", func() -> void:
@@ -1660,7 +1678,7 @@ func _show_diagnostics() -> void:
 		refresh_status.call()
 	))
 	root.add_child(_make_button("Sign Out", func() -> void:
-		state.sign_out()
+		await state.sign_out_full()
 		_show_welcome()
 	))
 	root.add_child(_make_button("Back", _show_profile if state.tokens.has_session() else _show_welcome))
@@ -1741,9 +1759,20 @@ func _notification(what: int) -> void:
 
 func _on_app_resumed() -> void:
 	if state.is_online() and state.tokens.has_session():
-		var fresh: Dictionary = await state.auth.ensure_fresh_access()
-		if not bool(fresh.get("ok", false)):
-			_on_session_invalidated()
+		var resumed: Dictionary = await state.revalidate_on_resume()
+		if not bool(resumed.get("ok", false)):
+			_show_toast(str(resumed.get("message", "Your session has expired. Please sign in again.")))
+			_show_welcome()
 			return
+		# Refresh chest / friends / saved metadata when returning to Main Chest.
 		if _current_screen == "main_chest":
+			var chest: Dictionary = await state.scrolls.get_chest()
+			if bool(chest.get("ok", false)) and typeof(chest.get("data")) == TYPE_DICTIONARY:
+				state.cached_chest = chest.data
+			var fr: Dictionary = await state.friends.get_friends()
+			if bool(fr.get("ok", false)) and typeof(fr.get("data")) == TYPE_DICTIONARY:
+				state.cached_friends = fr.data
+			var saved: Dictionary = await state.scrolls.get_saved_scrolls()
+			if bool(saved.get("ok", false)) and typeof(saved.get("data")) == TYPE_DICTIONARY:
+				state.cached_saved = saved.data
 			_show_main_chest()

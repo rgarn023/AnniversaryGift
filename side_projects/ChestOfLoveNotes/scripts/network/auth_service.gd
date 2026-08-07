@@ -152,8 +152,11 @@ func refresh_session() -> Dictionary:
 func ensure_fresh_access() -> Dictionary:
 	if not tokens.has_session() and tokens.refresh_token.is_empty():
 		return {"ok": false, "error": "Not signed in.", "invalid_session": true}
-	if tokens.is_expired() or tokens.access_token.is_empty():
-		return await refresh_session()
+	if tokens.is_expired(SecureTokenService.EXPIRY_SKEW_SEC) or tokens.access_token.is_empty():
+		var refreshed := await refresh_session()
+		if bool(refreshed.get("ok", false)):
+			tokens.session_refresh_performed = true
+		return refreshed
 	return {"ok": true}
 
 
@@ -197,6 +200,14 @@ func resend_confirmation(email: String) -> Dictionary:
 	if not bool(result.get("ok", false)):
 		return {"ok": false, "error": str(result.get("error", "Could not resend confirmation."))}
 	return {"ok": true, "error": ""}
+
+
+func logout_remote() -> void:
+	## Best-effort Supabase logout. Never blocks local sign-out correctness.
+	if not config.is_configured() or tokens.access_token.is_empty():
+		return
+	var url := "%s/auth/v1/logout" % config.supabase_url.rstrip("/")
+	await api.request(url, "POST", {}, true, "", false)
 
 
 func sign_out() -> void:
