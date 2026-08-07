@@ -23,6 +23,10 @@ var cached_saved: Dictionary = {}
 var cached_sent: Dictionary = {}
 var cached_friends: Dictionary = {}
 
+## Local hide list for Sent history (recoverable; not permanent deletion).
+const SENT_HIDDEN_PATH := "user://coln_sent_hidden.json"
+var hidden_sent_ids: Dictionary = {} ## scroll_id -> true
+
 ## Ephemeral revealed Magic Passwords keyed by scroll_id (never persisted).
 var revealed_magic_passwords: Dictionary = {}
 var session_restore_message: String = ""
@@ -89,6 +93,66 @@ func clear_private_caches() -> void:
 	cached_saved.clear()
 	cached_sent.clear()
 	cached_friends.clear()
+	hidden_sent_ids.clear()
+
+
+func load_hidden_sent() -> void:
+	hidden_sent_ids.clear()
+	if not FileAccess.file_exists(SENT_HIDDEN_PATH):
+		return
+	var raw := FileAccess.get_file_as_string(SENT_HIDDEN_PATH)
+	if raw.is_empty():
+		return
+	var parsed: Variant = JSON.parse_string(raw)
+	if typeof(parsed) != TYPE_DICTIONARY:
+		return
+	var uid := tokens.user_id if tokens else ""
+	if uid.is_empty():
+		return
+	var entry: Variant = (parsed as Dictionary).get(uid, [])
+	if typeof(entry) != TYPE_ARRAY:
+		return
+	for id in entry:
+		var sid := str(id)
+		if not sid.is_empty():
+			hidden_sent_ids[sid] = true
+
+
+func persist_hidden_sent() -> void:
+	var uid := tokens.user_id if tokens else ""
+	if uid.is_empty():
+		return
+	var all: Dictionary = {}
+	if FileAccess.file_exists(SENT_HIDDEN_PATH):
+		var raw := FileAccess.get_file_as_string(SENT_HIDDEN_PATH)
+		var parsed: Variant = JSON.parse_string(raw)
+		if typeof(parsed) == TYPE_DICTIONARY:
+			all = parsed
+	var ids: Array = []
+	for k in hidden_sent_ids.keys():
+		ids.append(str(k))
+	all[uid] = ids
+	var f := FileAccess.open(SENT_HIDDEN_PATH, FileAccess.WRITE)
+	if f:
+		f.store_string(JSON.stringify(all))
+		f.close()
+
+
+func is_sent_hidden(scroll_id: String) -> bool:
+	return hidden_sent_ids.has(scroll_id)
+
+
+func hide_sent_scroll_local(scroll_id: String) -> void:
+	if scroll_id.is_empty():
+		return
+	hidden_sent_ids[scroll_id] = true
+	persist_hidden_sent()
+
+
+func unhide_sent_scroll_local(scroll_id: String) -> void:
+	if hidden_sent_ids.has(scroll_id):
+		hidden_sent_ids.erase(scroll_id)
+		persist_hidden_sent()
 
 
 func sign_out() -> void:
@@ -250,18 +314,30 @@ func restore_session_if_possible() -> Dictionary:
 		debug_session_trace["membership_soft_fail_continued"] = true
 		membership.is_member = true
 
+	## Hydrate cached profile before network so UI never flashes empty onboarding.
+	profiles.hydrate_from_cache()
+	load_hidden_sent()
 	var profile_result: Dictionary = await profiles.fetch_own_profile()
 	debug_session_trace["profile_loaded"] = bool(profile_result.get("ok", false))
-	var profile_exists := bool(profile_result.get("exists", false))
-	if not bool(profile_result.get("ok", false)):
+	debug_session_trace["profile_state"] = str(profile_result.get("state", profiles.profile_state))
+	var profile_exists := false
+	if bool(profile_result.get("ok", false)):
+		## Only definitive NOT_CREATED may send the user to Create Your Profile.
+		profile_exists = bool(profile_result.get("exists", false))
+	else:
 		var status2 := int(api.last_http_status)
 		if status2 == 401 or status2 == 403:
 			sign_out()
 			session_restore_message = ""
 			return {"ok": false, "reason": "profile_invalid", "silent": true}
-		## Soft profile load failure: still enter if we have a restored session.
+		## Soft/timeout/null: NEVER treat as missing profile.
 		debug_session_trace["profile_soft_fail_continued"] = true
-		profile_exists = not profiles.profile.is_empty()
+		if profiles.has_known_profile() or bool(profile_result.get("exists", false)):
+			profile_exists = true
+		else:
+			## Optimistic: authenticated session without a definitive miss stays in-app.
+			profile_exists = true
+			debug_session_trace["profile_assumed_exists_soft_fail"] = true
 
 	# Persist rotated tokens + confirmation flags after successful restore.
 	var persisted := tokens.persist_if_needed()
@@ -270,6 +346,7 @@ func restore_session_if_possible() -> Dictionary:
 	return {
 		"ok": true,
 		"profile_exists": profile_exists,
+		"profile_state": str(profile_result.get("state", "")),
 		"session_restored": tokens.session_restored,
 		"session_refresh_performed": tokens.session_refresh_performed,
 	}
@@ -326,7 +403,7 @@ func diagnostics_snapshot() -> Dictionary:
 		"refresh_attempted": bool(trace.get("refresh_attempted", tokens.session_refresh_performed)),
 		"refresh_succeeded": bool(trace.get("refresh_succeeded", false)),
 		"membership_revalidated": bool(trace.get("membership_revalidated", membership.is_member)),
-		"profile_loaded": bool(trace.get("profile_loaded", not profiles.profile.is_empty())),
+		"profile_loaded": bool(trace.get("profile_loaded", profiles.has_known_profile())),
 		"keep_me_signed_in": tokens.keep_me_signed_in,
 		"memory_only": tokens.memory_only,
 		"last_persist_error": tokens.last_persist_error,
@@ -334,7 +411,8 @@ func diagnostics_snapshot() -> Dictionary:
 		"email_confirmed": tokens.email_confirmed,
 		"membership_approved": membership.is_member,
 		"private_role": membership.role,
-		"profile_exists": not profiles.profile.is_empty(),
+		"profile_exists": profiles.has_known_profile(),
+		"profile_state": str(trace.get("profile_state", profiles.profile_state)),
 		"last_function": api.last_function_name,
 		"last_http_status": api.last_http_status,
 		"last_safe_error": api.last_safe_error,

@@ -256,8 +256,8 @@ func _test_demo_disabled_online_build() -> void:
 	var flags := FileAccess.get_file_as_string("res://scripts/build_flags.gd")
 	_assert(flags.contains("PRIVATE_ONBOARDING_BUILD := true"), "Local Demo Mode remains disabled in online test build")
 	var preset := FileAccess.get_file_as_string("res://export_presets.cfg")
-	_assert(preset.contains("ChestOfLoveNotes-targeted-fixes-debug.apk") or preset.contains("mobile-production-polish") or preset.contains("secure-session"), "export targets COLN APK")
-	_assert(preset.contains("version/code=12") or preset.contains("version/code=11"), "versionCode bumped")
+	_assert(preset.contains("ChestOfLoveNotes-profile-compose-sent-chest-fixes-debug.apk") or preset.contains("targeted-fixes") or preset.contains("secure-session"), "export targets COLN APK")
+	_assert(preset.contains("version/code=13") or preset.contains("version/code=12"), "versionCode bumped")
 	_assert(preset.contains("com.charoitegames.chestoflovenotes"), "COLN package retained")
 	_assert(preset.contains("user_data_backup/allow=false"), "export backup disabled")
 
@@ -270,4 +270,4 @@ func _test_anniversary_gift_untouched() -> void:
 		f.close()
 		_assert(text.contains("AnniversaryGift") or text.contains("anniversary"), "Anniversary Gift export remains")
 		_assert(not text.contains("chestoflovenotes"), "Anniversary Gift export not rewritten to COLN package")
-	_assert(BuildFlags.APP_VERSION_CODE >= 12, "COLN versionCode incremented for targeted fixes")
+	_assert(BuildFlags.APP_VERSION_CODE >= 13, "COLN versionCode incremented for profile/compose/sent/chest fixes")

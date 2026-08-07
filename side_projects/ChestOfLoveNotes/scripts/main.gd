@@ -28,9 +28,15 @@ var _auth_busy: bool = false
 var _chest_action_busy: bool = false
 var _friend_action_busy: bool = false
 var _toast_panel: PanelContainer
+var _toast_row: HBoxContainer
+var _toast_action_btn: Button
+var _toast_action: Callable = Callable()
+var _toast_tween: Tween
 var _empty_chest_hint: Label
 var _dev_force_chest_scroll: bool = false
 var _auth_spinner_tween: Tween
+var _sent_show_hidden: bool = false
+var _pending_hide_sent_id: String = ""
 
 
 func _ready() -> void:
@@ -68,10 +74,14 @@ func _startup_navigate() -> void:
 	_log_secure_debug("startup_after_boot")
 	var restore := _pending_restore
 	if bool(restore.get("ok", false)):
-		if bool(restore.get("profile_exists", false)):
+		## Create Your Profile only when backend definitively reports NOT_CREATED.
+		if bool(restore.get("profile_exists", false)) or state.profiles.has_known_profile():
 			await _show_main_chest()
-		else:
+		elif state.profiles.is_definitively_missing():
 			_show_profile_setup()
+		else:
+			## Soft/unknown: stay in-app with cached/loading profile, never false onboarding.
+			await _show_main_chest()
 		_startup_done = true
 		_log_secure_debug("startup_destination_chest")
 		return
@@ -111,6 +121,7 @@ func _log_secure_debug(tag: String) -> void:
 
 
 func _on_session_invalidated() -> void:
+	_clear_compose_draft()
 	await state.sign_out_full()
 	_show_toast("Your session has expired. Please sign in again.")
 	_show_welcome()
@@ -153,7 +164,7 @@ func _build_chrome() -> void:
 	_toast_panel = PanelContainer.new()
 	_toast_panel.visible = false
 	_toast_panel.z_index = 70
-	_toast_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_toast_panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	_toast_panel.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
 	var toast_style := StyleBoxFlat.new()
 	toast_style.bg_color = Color(0.10, 0.06, 0.16, 0.94)
@@ -165,11 +176,23 @@ func _build_chrome() -> void:
 	toast_style.content_margin_top = 10
 	toast_style.content_margin_bottom = 10
 	_toast_panel.add_theme_stylebox_override("panel", toast_style)
+	_toast_row = HBoxContainer.new()
+	_toast_row.add_theme_constant_override("separation", 12)
+	_toast_panel.add_child(_toast_row)
 	_toast = Label.new()
-	_toast.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_toast.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_toast.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	_toast.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	MobileUi.apply_label(_toast, MobileUi.SIZE_BODY, MobileUi.COLOR_TITLE)
-	_toast_panel.add_child(_toast)
+	_toast_row.add_child(_toast)
+	_toast_action_btn = Button.new()
+	_toast_action_btn.text = "Undo"
+	_toast_action_btn.visible = false
+	_toast_action_btn.focus_mode = Control.FOCUS_NONE
+	_toast_action_btn.custom_minimum_size = Vector2(72, 40)
+	MobileUi.style_button(_toast_action_btn, 40)
+	_toast_action_btn.pressed.connect(_on_toast_action_pressed)
+	_toast_row.add_child(_toast_action_btn)
 	add_child(_toast_panel)
 	_position_snackbar()
 
@@ -181,8 +204,24 @@ func _build_chrome() -> void:
 	add_child(_overlay)
 
 
+func _nav_content_inset() -> int:
+	## Bottom padding so scrollable content clears nav + gesture safe area.
+	var safe := SafeAreaHelper.display_insets_viewport()
+	return MobileUi.font_touch(MobileUi.TOUCH_NAV_H) + int(safe.w) + 16
+
+
+func _persist_compose_draft_if_needed() -> void:
+	if _current_screen == "compose" and _compose_screen != null and is_instance_valid(_compose_screen):
+		_compose_draft = _compose_screen.get_draft()
+
+
+func _clear_compose_draft() -> void:
+	_compose_draft.clear()
+
+
 func _clear_screen() -> void:
 	MobileUi.release_text_focus(self)
+	_persist_compose_draft_if_needed()
 	_compose_screen = null
 	_auth_busy = false
 	_chest_action_busy = false
@@ -256,18 +295,45 @@ func _position_snackbar() -> void:
 
 
 func _show_toast(text: String) -> void:
-	## Temporary snackbar above bottom navigation — never permanent page text.
+	_show_snackbar(text, "", Callable())
+
+
+func _show_snackbar(text: String, action_label: String = "", action: Callable = Callable()) -> void:
+	## Temporary snackbar above bottom navigation — optional Undo action.
 	_position_snackbar()
 	_toast.text = text
+	_toast_action = action
+	if _toast_action_btn:
+		_toast_action_btn.visible = not action_label.is_empty() and action.is_valid()
+		_toast_action_btn.text = action_label if not action_label.is_empty() else "Undo"
 	_toast_panel.visible = true
 	_toast_panel.modulate.a = 1.0
-	var tw := create_tween()
-	tw.tween_interval(2.0)
-	tw.tween_property(_toast_panel, "modulate:a", 0.0, 0.28)
-	tw.tween_callback(func() -> void:
+	if _toast_tween != null and is_instance_valid(_toast_tween):
+		_toast_tween.kill()
+	_toast_tween = create_tween()
+	_toast_tween.tween_interval(3.2 if _toast_action_btn and _toast_action_btn.visible else 2.0)
+	_toast_tween.tween_property(_toast_panel, "modulate:a", 0.0, 0.28)
+	_toast_tween.tween_callback(func() -> void:
 		if is_instance_valid(_toast_panel):
 			_toast_panel.visible = false
+		_toast_action = Callable()
+		_pending_hide_sent_id = ""
+		if _toast_action_btn:
+			_toast_action_btn.visible = false
 	)
+
+
+func _on_toast_action_pressed() -> void:
+	var action := _toast_action
+	_toast_action = Callable()
+	if _toast_tween != null and is_instance_valid(_toast_tween):
+		_toast_tween.kill()
+	if is_instance_valid(_toast_panel):
+		_toast_panel.visible = false
+	if _toast_action_btn:
+		_toast_action_btn.visible = false
+	if action.is_valid():
+		action.call()
 
 
 func _begin_nav_transition() -> void:
@@ -574,12 +640,19 @@ func _after_verified_sign_in() -> void:
 		_show_toast(msg)
 		_show_welcome()
 		return
+	state.profiles.hydrate_from_cache()
+	state.load_hidden_sent()
 	var profile_result: Dictionary = await state.profiles.fetch_own_profile()
 	if not bool(profile_result.get("ok", false)):
-		await state.sign_out_full()
-		_show_toast(str(profile_result.get("error", "Could not load profile.")))
-		_show_welcome()
-		return
+		var status := int(state.api.last_http_status)
+		if status == 401 or status == 403:
+			await state.sign_out_full()
+			_show_toast(str(profile_result.get("error", "Could not load profile.")))
+			_show_welcome()
+			return
+		## Soft fail: keep session; use cache / optimistic enter — never false Create Profile.
+		if not state.profiles.has_known_profile():
+			_show_toast("Could not refresh profile right now. Retrying later.")
 	# Hard-require Keystore persistence when Keep Me Signed In is ON.
 	var persist: Dictionary = await state.persist_session_verified()
 	_log_secure_debug("after_signin_persist")
@@ -589,7 +662,7 @@ func _after_verified_sign_in() -> void:
 			warn = "Secure sign-in storage failed. You’ll need to sign in again after closing the app."
 		_show_toast(warn)
 	## Never toast "persisted successfully" — only warn on genuine failure.
-	if not bool(profile_result.get("exists", false)):
+	if state.profiles.is_definitively_missing():
 		_show_profile_setup()
 		return
 	await _show_main_chest()
@@ -686,7 +759,7 @@ func _show_main_chest() -> void:
 	_begin_nav_transition()
 	var margin := MarginContainer.new()
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	MobileUi.apply_safe_margins(margin, MobileUi.font_touch(MobileUi.TOUCH_NAV_H) + 8)
+	MobileUi.apply_safe_margins(margin, _nav_content_inset())
 	_screen_host.add_child(margin)
 	var root := VBoxContainer.new()
 	root.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -1008,7 +1081,7 @@ func _show_inventory() -> void:
 	_clear_screen()
 	var margin := MarginContainer.new()
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	MobileUi.apply_safe_margins(margin)
+	MobileUi.apply_safe_margins(margin, _nav_content_inset())
 	_screen_host.add_child(margin)
 	var root := VBoxContainer.new()
 	root.add_theme_constant_override("separation", 14)
@@ -1145,7 +1218,7 @@ func _show_saved() -> void:
 		return
 	_current_screen = "saved"
 	_clear_screen()
-	var root := _make_screen_root(MobileUi.font_touch(MobileUi.TOUCH_NAV_H) + 8)
+	var root := _make_screen_root(_nav_content_inset())
 	var header := HBoxContainer.new()
 	root.add_child(header)
 	var title := Label.new()
@@ -1464,6 +1537,8 @@ func _on_scroll_closed() -> void:
 func _show_compose() -> void:
 	if not _guard_private_chest():
 		return
+	## Capture draft before screen teardown if we are leaving another compose instance.
+	_persist_compose_draft_if_needed()
 	_current_screen = "compose"
 	_compose_screen = null
 
@@ -1480,18 +1555,25 @@ func _show_compose() -> void:
 		else:
 			fetch_error = str(fr.get("error", "Could not load friends."))
 
+	var draft_to_restore: Dictionary = _compose_draft.duplicate(true)
 	_begin_nav_transition()
 	var compose := ComposeScrollScreen.new()
-	compose.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	var safe := SafeAreaHelper.display_insets_viewport()
-	compose.offset_bottom = -MobileUi.font_touch(MobileUi.TOUCH_NAV_H) - int(safe.w)
+	compose.bottom_chrome_inset = _nav_content_inset()
+	compose.anchor_left = 0.0
+	compose.anchor_top = 0.0
+	compose.anchor_right = 1.0
+	compose.anchor_bottom = 1.0
+	compose.offset_left = 0.0
+	compose.offset_top = 0.0
+	compose.offset_right = 0.0
+	compose.offset_bottom = -float(compose.bottom_chrome_inset)
 	_screen_host.add_child(compose)
 	_compose_screen = compose
 	compose.back_pressed.connect(_show_main_chest)
 	compose.preview_requested.connect(_on_compose_preview)
 	compose.send_requested.connect(_on_compose_send_requested)
 	## Never show "Private Onboarding Build" chip in test APKs.
-	compose.setup(friends, false)
+	compose.setup(friends, false, draft_to_restore)
 	_add_bottom_nav("compose")
 	_finish_nav_transition()
 	if not fetch_error.is_empty():
@@ -1525,7 +1607,11 @@ func _on_compose_send_requested(draft: Dictionary) -> void:
 	var body := str(draft.get("message", ""))
 	var title := str(draft.get("title", "")).strip_edges()
 	var magic := str(draft.get("password", ""))
-	var unlock_unix := int(draft.get("unlock_unix", Time.get_unix_time_from_system()))
+	var open_immediately := bool(draft.get("open_immediately", true))
+	## Immediate mode must not send a stale future unlock time.
+	var unlock_unix := int(Time.get_unix_time_from_system())
+	if not open_immediately:
+		unlock_unix = int(draft.get("unlock_unix", unlock_unix))
 	var result: Dictionary = {}
 	if state.is_demo():
 		result = state.demo.send_scroll(rid, title, body, unlock_unix, magic)
@@ -1551,7 +1637,7 @@ func _on_compose_send_requested(draft: Dictionary) -> void:
 		return
 	if bool(result.get("ok", false)):
 		_compose_screen.set_sending(false)
-		_compose_draft.clear()
+		_clear_compose_draft()
 		_compose_screen = null
 		_show_toast("Scroll sent.")
 		_show_main_chest()
@@ -1588,7 +1674,7 @@ func _show_friends() -> void:
 		me = state.profiles.profile
 
 	_begin_nav_transition()
-	var root := _make_screen_root(MobileUi.font_touch(MobileUi.TOUCH_NAV_H) + 8)
+	var root := _make_screen_root(_nav_content_inset())
 	var header := HBoxContainer.new()
 	root.add_child(header)
 	var title := Label.new()
@@ -1687,10 +1773,12 @@ func _show_sent() -> void:
 	_clear_reveal_timers()
 	state.clear_revealed_passwords()
 	_current_screen = "sent"
+	state.load_hidden_sent()
 	var sent_items: Array = []
 	var fetch_error := ""
 	if state.is_demo():
-		sent_items = state.demo.get_sent_scrolls()
+		## Include locally-hidden demo scrolls so Hidden tab can restore them.
+		sent_items = _demo_sent_including_hidden()
 	elif state.is_online():
 		var sent_result: Dictionary = await state.scrolls.get_sent_scrolls()
 		if bool(sent_result.get("ok", false)):
@@ -1699,9 +1787,23 @@ func _show_sent() -> void:
 			sent_items = data.get("sent_scrolls", []) if typeof(data.get("sent_scrolls")) == TYPE_ARRAY else []
 		else:
 			fetch_error = str(sent_result.get("error", "Could not load sent scrolls."))
+			if typeof(state.cached_sent.get("sent_scrolls")) == TYPE_ARRAY:
+				sent_items = state.cached_sent.get("sent_scrolls", [])
+
+	var visible_items: Array = []
+	var hidden_items: Array = []
+	for s in sent_items:
+		if typeof(s) != TYPE_DICTIONARY:
+			continue
+		var sid0 := str(s.get("id", ""))
+		if state.is_sent_hidden(sid0):
+			hidden_items.append(s)
+		else:
+			visible_items.append(s)
+	var showing: Array = hidden_items if _sent_show_hidden else visible_items
 
 	_begin_nav_transition()
-	var root := _make_screen_root(MobileUi.font_touch(MobileUi.TOUCH_NAV_H) + 8)
+	var root := _make_screen_root(_nav_content_inset())
 	var header := HBoxContainer.new()
 	root.add_child(header)
 	var title := Label.new()
@@ -1712,8 +1814,28 @@ func _show_sent() -> void:
 	header.add_child(_make_button("Back", func() -> void:
 		_clear_reveal_timers()
 		state.clear_revealed_passwords()
+		_sent_show_hidden = false
 		_show_main_chest()
 	, Vector2(100, MobileUi.TOUCH_SECONDARY_H)))
+
+	var tabs := HBoxContainer.new()
+	tabs.add_theme_constant_override("separation", 8)
+	root.add_child(tabs)
+	var active_btn := _make_button("Visible (%d)" % visible_items.size(), func() -> void:
+		_sent_show_hidden = false
+		_show_sent()
+	, Vector2(0, MobileUi.TOUCH_SECONDARY_H))
+	var hidden_btn := _make_button("Hidden (%d)" % hidden_items.size(), func() -> void:
+		_sent_show_hidden = true
+		_show_sent()
+	, Vector2(0, MobileUi.TOUCH_SECONDARY_H))
+	if _sent_show_hidden:
+		active_btn.modulate.a = 0.65
+	else:
+		hidden_btn.modulate.a = 0.65
+	tabs.add_child(active_btn)
+	tabs.add_child(hidden_btn)
+
 	var scroll := _wire_scroll(ScrollContainer.new())
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	root.add_child(scroll)
@@ -1723,82 +1845,100 @@ func _show_sent() -> void:
 	scroll.add_child(list)
 	MobileUi.enable_touch_scroll_on_tree(list)
 
-	if sent_items.is_empty():
+	if showing.is_empty():
 		var empty_wrap := VBoxContainer.new()
 		empty_wrap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		empty_wrap.size_flags_vertical = Control.SIZE_EXPAND_FILL
 		empty_wrap.alignment = BoxContainer.ALIGNMENT_CENTER
-		empty_wrap.add_theme_constant_override("separation", 10)
+		empty_wrap.add_theme_constant_override("separation", 12)
 		list.add_child(empty_wrap)
-		var icon := Label.new()
-		icon.text = "✉"
-		icon.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		MobileUi.apply_label(icon, MobileUi.SIZE_APP_TITLE, MobileUi.COLOR_SECONDARY)
+		var icon := TextureRect.new()
+		icon.custom_minimum_size = Vector2(72, 48)
+		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		icon.modulate = Color(0.98, 0.86, 0.45, 0.9)
+		if ResourceLoader.exists("res://assets/art/scroll/scroll_rolled.png"):
+			icon.texture = load("res://assets/art/scroll/scroll_rolled.png")
 		empty_wrap.add_child(icon)
 		var empty := Label.new()
-		empty.text = "No sent scrolls yet"
+		empty.text = "No hidden scrolls" if _sent_show_hidden else "No sent scrolls yet"
 		empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		MobileUi.apply_label(empty, MobileUi.SIZE_MAJOR_HEADING, MobileUi.COLOR_BODY)
 		empty_wrap.add_child(empty)
 		var hint := Label.new()
-		hint.text = "Scrolls you send will appear here."
+		hint.text = "Hidden scrolls stay recoverable here." if _sent_show_hidden else "Scrolls you send will appear here."
 		hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		MobileUi.apply_label(hint, MobileUi.SIZE_SECONDARY, MobileUi.COLOR_HELPER)
 		empty_wrap.add_child(hint)
 	else:
-		for s in sent_items:
-			if typeof(s) != TYPE_DICTIONARY:
-				continue
-			var panel := _make_card()
-			var col := VBoxContainer.new()
-			col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			col.add_theme_constant_override("separation", MobileUi.GAP_RELATED)
-			panel.add_child(col)
-			var recipient: Dictionary = s.get("recipient", {}) if typeof(s.get("recipient")) == TYPE_DICTIONARY else {}
-			var unlock_at := str(s.get("unlock_at", ""))
-			var unlock_unix := int(s.get("unlock_at_unix", 0))
-			if unlock_unix == 0 and not unlock_at.is_empty():
-				unlock_unix = int(Time.get_unix_time_from_datetime_string(unlock_at))
-			var title_lab := Label.new()
-			title_lab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			title_lab.text = "%s → %s" % [
-				str(s.get("title", "Love Note")),
-				str(s.get("recipient_display_name", recipient.get("display_name", "Friend"))),
-			]
-			MobileUi.apply_label(title_lab, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY, true)
-			col.add_child(title_lab)
-			var status_lab := Label.new()
-			status_lab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			status_lab.text = _format_sent_status(s, unlock_unix, unlock_at)
-			MobileUi.apply_label(status_lab, MobileUi.SIZE_SECONDARY, MobileUi.COLOR_SECONDARY, true)
-			col.add_child(status_lab)
-			var sid := str(s.get("id", ""))
-			var has_pw := bool(s.get("has_password", false))
-			if has_pw:
-				col.add_child(_build_sent_password_reveal_row(sid, s))
-			col.add_child(_make_button("Hide from Sent", func() -> void:
-				if state.is_demo():
-					var result := state.demo.delete_sent_scroll(sid)
-					if bool(result.get("ok", false)):
-						_show_toast("Hidden from Sent history")
-						_show_sent()
-					else:
-						_show_toast(str(result.get("error", "Could not hide sent scroll.")))
-				elif state.is_online():
-					var result: Dictionary = await state.scrolls.delete_sent_scroll(sid)
-					if bool(result.get("ok", false)):
-						_show_toast("Hidden from Sent history")
-						_show_sent()
-					else:
-						_show_toast(str(result.get("error", "Could not hide sent scroll.")))
-				else:
-					_show_toast("Backend is not configured.")
-			, Vector2(0, MobileUi.TOUCH_SECONDARY_H)))
-			list.add_child(panel)
+		for s in showing:
+			list.add_child(_build_sent_item_card(s, _sent_show_hidden))
 	_add_bottom_nav("sent")
 	_finish_nav_transition()
 	if not fetch_error.is_empty():
 		_show_toast(fetch_error)
+
+
+func _demo_sent_including_hidden() -> Array:
+	## Demo get_sent_scrolls filters deleted_at; local hide does not use delete.
+	return state.demo.get_sent_scrolls()
+
+
+func _build_sent_item_card(s: Dictionary, is_hidden_view: bool) -> PanelContainer:
+	var panel := _make_card()
+	var col := VBoxContainer.new()
+	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	col.add_theme_constant_override("separation", MobileUi.GAP_RELATED)
+	panel.add_child(col)
+	var recipient: Dictionary = s.get("recipient", {}) if typeof(s.get("recipient")) == TYPE_DICTIONARY else {}
+	var unlock_at := str(s.get("unlock_at", ""))
+	var unlock_unix := int(s.get("unlock_at_unix", 0))
+	if unlock_unix == 0 and not unlock_at.is_empty():
+		unlock_unix = int(Time.get_unix_time_from_datetime_string(unlock_at))
+	var title_lab := Label.new()
+	title_lab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title_lab.text = "%s → %s" % [
+		str(s.get("title", "Love Note")),
+		str(s.get("recipient_display_name", recipient.get("display_name", "Friend"))),
+	]
+	MobileUi.apply_label(title_lab, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY, true)
+	col.add_child(title_lab)
+	var status_lab := Label.new()
+	status_lab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	status_lab.text = _format_sent_status(s, unlock_unix, unlock_at)
+	MobileUi.apply_label(status_lab, MobileUi.SIZE_SECONDARY, MobileUi.COLOR_SECONDARY, true)
+	col.add_child(status_lab)
+	var sid := str(s.get("id", ""))
+	var has_pw := bool(s.get("has_password", false))
+	if has_pw and not is_hidden_view:
+		col.add_child(_build_sent_password_reveal_row(sid, s))
+	if is_hidden_view:
+		col.add_child(_make_button("Restore", func() -> void:
+			state.unhide_sent_scroll_local(sid)
+			_show_toast("Restored to Sent")
+			_show_sent()
+		, Vector2(0, MobileUi.TOUCH_SECONDARY_H)))
+	else:
+		col.add_child(_make_button("Hide from Sent", func() -> void:
+			_hide_sent_with_undo(sid)
+		, Vector2(0, MobileUi.TOUCH_SECONDARY_H)))
+	return panel
+
+
+func _hide_sent_with_undo(scroll_id: String) -> void:
+	## Local hide is recoverable — do not soft-delete on the server.
+	if scroll_id.is_empty():
+		return
+	state.hide_sent_scroll_local(scroll_id)
+	_pending_hide_sent_id = scroll_id
+	_show_snackbar("Hidden from Sent history", "Undo", func() -> void:
+		state.unhide_sent_scroll_local(scroll_id)
+		_pending_hide_sent_id = ""
+		if _current_screen == "sent":
+			_show_sent()
+	)
+	if _current_screen == "sent":
+		_show_sent()
 
 
 func _build_sent_password_reveal_row(scroll_id: String, item: Dictionary) -> VBoxContainer:
@@ -2032,12 +2172,18 @@ func _show_profile() -> void:
 	if state.is_demo():
 		me = state.demo.get_profile()
 	elif state.is_online() and state.tokens.has_session():
+		## Always start from known/cached profile so soft fetch cannot blank the UI.
+		if state.profiles.profile.is_empty():
+			state.profiles.hydrate_from_cache()
+		me = state.profiles.profile.duplicate(true)
 		var pref: Dictionary = await state.profiles.fetch_own_profile()
 		if bool(pref.get("ok", false)) and bool(pref.get("exists", false)):
 			me = state.profiles.profile
+		elif state.profiles.has_known_profile():
+			me = state.profiles.profile
 
 	_begin_nav_transition()
-	var root := _make_screen_root(MobileUi.font_touch(MobileUi.TOUCH_NAV_H) + 8)
+	var root := _make_screen_root(_nav_content_inset())
 	var title := Label.new()
 	title.text = "Profile"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -2112,6 +2258,7 @@ func _show_profile() -> void:
 		col.add_child(_make_button("Online Diagnostics", _show_diagnostics))
 	col.add_child(_make_button("Sign Out", func() -> void:
 		_clear_reveal_timers()
+		_clear_compose_draft()
 		await state.sign_out_full()
 		if state.is_demo():
 			state.demo.enable()

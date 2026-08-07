@@ -26,6 +26,8 @@ const COL_ERROR := Color(1.0, 0.55, 0.48)
 
 var friends: Array = []
 var private_onboarding_label: bool = false
+## Host sets this so Compose never extends under bottom navigation.
+var bottom_chrome_inset: int = 0
 
 var _safe_margin: MarginContainer
 var _main_vbox: VBoxContainer
@@ -70,19 +72,24 @@ var _title_font: Font
 var _body_font: Font
 
 
-func setup(p_friends: Array, show_onboarding_chip: bool = false) -> void:
+func setup(p_friends: Array, show_onboarding_chip: bool = false, draft: Dictionary = {}) -> void:
 	friends = p_friends
 	private_onboarding_label = show_onboarding_chip
 	_init_default_schedule()
 	_build_ui()
-	_refresh_recipient_row()
-	_refresh_schedule_labels()
-	_refresh_summary()
-	_update_validation()
+	if not draft.is_empty():
+		apply_draft(draft)
+	else:
+		_refresh_recipient_row()
+		_refresh_schedule_labels()
+		_sync_delivery_visibility()
+		_refresh_summary()
+		_update_validation()
 
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_RESIZED or what == NOTIFICATION_WM_SIZE_CHANGED:
+		_apply_chrome_inset()
 		_apply_safe_area()
 		_resize_message_box()
 
@@ -99,6 +106,62 @@ func get_draft() -> Dictionary:
 		"password": _password_value(),
 		"has_password": _pw_toggle.button_pressed if _pw_toggle else false,
 	}
+
+
+func apply_draft(draft: Dictionary) -> void:
+	## Restore Compose fields after navigating away (not after a successful send).
+	if draft.is_empty():
+		return
+	var rid := str(draft.get("recipient_id", ""))
+	_selected_friend = {}
+	if not rid.is_empty():
+		for f in friends:
+			if typeof(f) == TYPE_DICTIONARY and str(f.get("id", "")) == rid:
+				_selected_friend = (f as Dictionary).duplicate(true)
+				break
+		if _selected_friend.is_empty():
+			_selected_friend = {
+				"id": rid,
+				"display_name": str(draft.get("recipient_display_name", "Friend")),
+				"username": str(draft.get("recipient_username", "")),
+			}
+	if _title_edit:
+		_title_edit.text = str(draft.get("title", ""))
+		if _title_count:
+			_title_count.text = "%d / %d" % [_title_edit.text.length(), MAX_TITLE]
+	if _message_edit:
+		_message_edit.text = str(draft.get("message", ""))
+		if _message_count:
+			_message_count.text = "%d / %d" % [_message_edit.text.length(), MAX_MESSAGE]
+	var immediate := bool(draft.get("open_immediately", true))
+	if _open_immediately:
+		_open_immediately.set_pressed_no_signal(immediate)
+	if not immediate:
+		var unlock_unix := int(draft.get("unlock_unix", 0))
+		if unlock_unix > 0:
+			var dt := Time.get_datetime_dict_from_unix_time(unlock_unix)
+			_unlock_date = {
+				"year": int(dt.year),
+				"month": int(dt.month),
+				"day": int(dt.day),
+			}
+			_unlock_hour = int(dt.hour)
+			_unlock_minute = int(dt.minute)
+	if _pw_toggle:
+		var has_pw := bool(draft.get("has_password", false))
+		_pw_toggle.set_pressed_no_signal(has_pw)
+		if _pw_fields:
+			_pw_fields.visible = has_pw
+		var pw := str(draft.get("password", ""))
+		if _pw_edit:
+			_pw_edit.text = pw
+		if _pw2_edit:
+			_pw2_edit.text = pw
+	_refresh_recipient_row()
+	_refresh_schedule_labels()
+	_sync_delivery_visibility()
+	_refresh_summary()
+	_update_validation()
 
 
 func set_sending(active: bool) -> void:
@@ -137,8 +200,17 @@ func _init_default_schedule() -> void:
 func _build_ui() -> void:
 	for c in get_children():
 		c.queue_free()
-	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	## Keep host-applied bottom chrome inset — do not reset offsets to full-bleed.
+	anchor_left = 0.0
+	anchor_top = 0.0
+	anchor_right = 1.0
+	anchor_bottom = 1.0
+	offset_left = 0.0
+	offset_top = 0.0
+	offset_right = 0.0
+	_apply_chrome_inset()
 	mouse_filter = Control.MOUSE_FILTER_STOP
+	clip_contents = true
 	_title_font = _load_font("res://assets/fonts/Cinzel-Bold.ttf")
 	_body_font = _load_font("res://assets/fonts/CormorantGaramond-Regular.ttf")
 
@@ -159,12 +231,14 @@ func _build_ui() -> void:
 
 	_safe_margin = MarginContainer.new()
 	_safe_margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_safe_margin.clip_contents = true
 	add_child(_safe_margin)
 	_apply_safe_area()
 
 	_main_vbox = VBoxContainer.new()
 	_main_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_main_vbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_main_vbox.clip_contents = true
 	_main_vbox.add_theme_constant_override("separation", MobileUi.GAP_RELATED)
 	_safe_margin.add_child(_main_vbox)
 
@@ -173,6 +247,7 @@ func _build_ui() -> void:
 	_scroll = ScrollContainer.new()
 	_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_scroll.clip_contents = true
 	MobileUi.configure_scroll(_scroll)
 	_main_vbox.add_child(_scroll)
 
@@ -180,11 +255,12 @@ func _build_ui() -> void:
 	content_margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	content_margin.add_theme_constant_override("margin_left", 2)
 	content_margin.add_theme_constant_override("margin_right", 2)
-	content_margin.add_theme_constant_override("margin_bottom", 8)
+	content_margin.add_theme_constant_override("margin_bottom", 28)
 	_scroll.add_child(content_margin)
 
 	_form = VBoxContainer.new()
 	_form.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_form.clip_contents = true
 	_form.add_theme_constant_override("separation", MobileUi.GAP_CARDS)
 	content_margin.add_child(_form)
 	MobileUi.enable_touch_scroll_on_tree(_form)
@@ -259,15 +335,28 @@ func _build_header() -> VBoxContainer:
 
 func _build_recipient_card() -> PanelContainer:
 	var card := _make_card()
+	card.clip_contents = true
 	var col := _card_body(card)
+	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	col.clip_contents = true
 	col.add_child(_section_heading("Send To"))
+	## Bound the recipient row so long "Name · @user" labels cannot widen the page.
+	var row_wrap := Control.new()
+	row_wrap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row_wrap.clip_contents = true
+	row_wrap.custom_minimum_size = Vector2(0, MobileUi.font_touch(54))
+	col.add_child(row_wrap)
 	_recipient_btn = Button.new()
+	_recipient_btn.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_recipient_btn.custom_minimum_size = Vector2(0, MobileUi.font_touch(54))
+	_recipient_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_recipient_btn.focus_mode = Control.FOCUS_NONE
 	_recipient_btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	_recipient_btn.clip_text = true
+	_recipient_btn.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	_style_row_button(_recipient_btn)
 	_recipient_btn.pressed.connect(_open_friend_picker)
-	col.add_child(_recipient_btn)
+	row_wrap.add_child(_recipient_btn)
 	_recipient_label = Label.new()
 	_recipient_label.visible = false
 	return card
@@ -350,10 +439,8 @@ func _build_delivery_card() -> PanelContainer:
 	_open_immediately.focus_mode = Control.FOCUS_NONE
 	_open_immediately.add_theme_font_size_override("font_size", 19)
 	_open_immediately.add_theme_color_override("font_color", COL_TEXT)
-	_open_immediately.toggled.connect(func(on: bool) -> void:
-		_delivery_controls.modulate.a = 0.45 if on else 1.0
-		_date_btn.disabled = on
-		_time_btn.disabled = on
+	_open_immediately.toggled.connect(func(_on: bool) -> void:
+		_sync_delivery_visibility()
 		_refresh_summary()
 		_update_validation()
 	)
@@ -361,7 +448,7 @@ func _build_delivery_card() -> PanelContainer:
 
 	_delivery_controls = VBoxContainer.new()
 	_delivery_controls.add_theme_constant_override("separation", 10)
-	_delivery_controls.modulate.a = 0.45
+	_delivery_controls.visible = false
 	col.add_child(_delivery_controls)
 
 	_delivery_controls.add_child(_field_caption("Unlock Date"))
@@ -563,6 +650,7 @@ func _build_bottom_actions() -> PanelContainer:
 func _make_card() -> PanelContainer:
 	var card := PanelContainer.new()
 	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	card.clip_contents = true
 	card.mouse_filter = Control.MOUSE_FILTER_PASS
 	var style := StyleBoxFlat.new()
 	style.bg_color = COL_CARD
@@ -582,6 +670,8 @@ func _make_card() -> PanelContainer:
 
 func _card_body(card: PanelContainer) -> VBoxContainer:
 	var col := VBoxContainer.new()
+	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	col.clip_contents = true
 	col.add_theme_constant_override("separation", 10)
 	card.add_child(col)
 	return col
@@ -638,6 +728,9 @@ func _style_row_button(b: Button) -> void:
 	b.add_theme_color_override("font_color", COL_TEXT)
 	b.add_theme_color_override("font_disabled_color", COL_SUPPORT)
 	b.add_theme_font_size_override("font_size", 19)
+	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	b.clip_text = true
+	b.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 
 
 func _style_line_edit(le: LineEdit) -> void:
@@ -704,9 +797,25 @@ func _style_secondary_button(b: Button) -> void:
 	b.add_theme_color_override("font_color", COL_TEXT)
 
 
+func _apply_chrome_inset() -> void:
+	offset_bottom = -float(maxi(0, bottom_chrome_inset))
+
+
 func _apply_safe_area() -> void:
 	if _safe_margin:
+		## Bottom chrome is handled by bottom_chrome_inset on this Control.
 		SafeAreaHelper.apply_to_margin(_safe_margin, MobileUi.SCREEN_GUTTER, 10, 10)
+
+
+func _sync_delivery_visibility() -> void:
+	var immediate := _open_immediately != null and _open_immediately.button_pressed
+	if _delivery_controls:
+		_delivery_controls.visible = not immediate
+		_delivery_controls.modulate.a = 1.0
+	if _date_btn:
+		_date_btn.disabled = immediate
+	if _time_btn:
+		_time_btn.disabled = immediate
 
 
 func _resize_message_box() -> void:
@@ -721,15 +830,16 @@ func _resize_message_box() -> void:
 func _refresh_recipient_row() -> void:
 	if _recipient_btn == null:
 		return
+	## Short label text — ellipsis handles overflow inside the bounded row.
 	if _selected_friend.is_empty():
-		_recipient_btn.text = "Choose a friend                    ›"
+		_recipient_btn.text = "Choose a friend  ›"
 	else:
 		var name := str(_selected_friend.get("display_name", "Friend"))
 		var user := str(_selected_friend.get("username", ""))
 		if user.is_empty():
-			_recipient_btn.text = "♡  %s                    ›" % name
+			_recipient_btn.text = "%s  ›" % name
 		else:
-			_recipient_btn.text = "♡  %s  ·  @%s                    ›" % [name, user]
+			_recipient_btn.text = "%s · @%s  ›" % [name, user]
 
 
 func _refresh_schedule_labels() -> void:

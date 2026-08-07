@@ -1,8 +1,8 @@
 extends Control
 class_name LoveNotesChest
 ## Cinematic chest open using one consistent canvas family (1200×820).
-## Smooth crossfade between same-canvas frames — no hard sprite cuts, no
-## position/scale jumps. Detached latch/lock overlays stay removed.
+## Discrete nearest-frame sequence (no dual-frame crossfade / ghosting).
+## Shared anchor rect keeps the base planted; scroll emerges only when requested.
 
 signal tapped
 signal open_finished
@@ -17,11 +17,13 @@ const SCROLL_ART := "res://assets/art/scroll/"
 const FRAME_SIZE := Vector2(220, 150)
 
 ## Open amounts → matching frames. Same canvas size/placement for every key.
-const FRAME_KEYS: Array = [0.0, 0.12, 0.28, 0.55, 1.0]
+## Includes ajar for a denser lid path without dissolving two full chests.
+const FRAME_KEYS: Array = [0.0, 0.12, 0.28, 0.42, 0.62, 1.0]
 const FRAME_FILES: Array = [
 	"chest_closed.png",
 	"chest_open_10.png",
 	"chest_open_25.png",
+	"chest_ajar.png",
 	"chest_half.png",
 	"chest_open.png",
 ]
@@ -131,6 +133,8 @@ func _build_visuals() -> void:
 	_scroll_spawn.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_scroll_spawn.z_index = 3
 	_scroll_spawn.visible = false
+	## Front lip (higher z) occludes the lower scroll; do not clip the rise path.
+	_scroll_spawn.clip_contents = false
 	_root_visual.add_child(_scroll_spawn)
 
 	_rolled_scroll = TextureRect.new()
@@ -222,9 +226,11 @@ func _layout_frames() -> void:
 	_sparks.position = _dust.position
 	var scroll_w := area.x * 0.52
 	var scroll_h := scroll_w * 0.30
-	_scroll_spawn.position = Vector2(area.x * 0.5 - scroll_w * 0.5, _anchor_rect.position.y + frame_h * 0.42)
-	_scroll_spawn.size = Vector2(scroll_w, scroll_h)
-	_rolled_scroll.position = Vector2.ZERO
+	## Tall spawn so the scroll can start inside the rim and rise without teleporting.
+	var spawn_h := scroll_h * 2.4
+	var rim_y := _anchor_rect.position.y + frame_h * 0.40
+	_scroll_spawn.position = Vector2(area.x * 0.5 - scroll_w * 0.5, rim_y - scroll_h)
+	_scroll_spawn.size = Vector2(scroll_w, spawn_h)
 	_rolled_scroll.size = Vector2(scroll_w, scroll_h)
 	_rolled_scroll.pivot_offset = Vector2(scroll_w * 0.5, scroll_h * 0.5)
 	if _badge:
@@ -284,38 +290,30 @@ func configure(state: ChestState, show_final_label: bool = false) -> void:
 			pass
 
 
+func _nearest_frame_index(open_amount: float) -> int:
+	var keys: Array = FRAME_KEYS
+	if keys.is_empty():
+		return 0
+	var best := 0
+	var best_d := absf(open_amount - float(keys[0]))
+	for i in range(1, keys.size()):
+		var d := absf(open_amount - float(keys[i]))
+		if d < best_d:
+			best_d = d
+			best = i
+	return clampi(best, 0, maxi(0, _frame_nodes.size() - 1))
+
+
 func _show_frame_state(open_amount: float) -> void:
-	## Smooth crossfade between neighboring same-canvas keyframes.
+	## Discrete nearest-frame playback — only ONE full chest visible at a time.
+	## No alpha crossfade between neighboring frames (avoids ghost/double-chest).
 	_open_amount = clampf(open_amount, 0.0, 1.0)
 	if _frame_nodes.is_empty():
 		return
-	var keys: Array = FRAME_KEYS
-	var lo := 0
-	var hi := keys.size() - 1
-	for i in range(keys.size() - 1):
-		if _open_amount >= float(keys[i]) and _open_amount <= float(keys[i + 1]):
-			lo = i
-			hi = i + 1
-			break
-		if _open_amount > float(keys[i + 1]):
-			lo = i + 1
-			hi = mini(i + 2, keys.size() - 1)
-	var k0 := float(keys[lo])
-	var k1 := float(keys[hi])
-	var t := 0.0 if hi == lo or is_equal_approx(k1, k0) else (_open_amount - k0) / (k1 - k0)
-	t = clampf(t, 0.0, 1.0)
-	## Smoothstep for less mechanical blends.
-	t = t * t * (3.0 - 2.0 * t)
+	var active := _nearest_frame_index(_open_amount)
 	for i in _frame_nodes.size():
-		var a := 0.0
-		if i == lo and i == hi:
-			a = 1.0
-		elif i == lo:
-			a = 1.0 - t
-		elif i == hi:
-			a = t
-		(_frame_nodes[i] as TextureRect).modulate.a = a
-	## Warm amber glow tied to openness.
+		(_frame_nodes[i] as TextureRect).modulate.a = 1.0 if i == active else 0.0
+	## Warm amber glow tied to openness (independent of frame dissolve).
 	var glow_a := 0.0
 	if _open_amount < 0.15:
 		glow_a = _open_amount * 0.55
@@ -528,18 +526,19 @@ func _open_full() -> void:
 
 	HapticHelper.lock_release()
 	_front_lip.modulate.a = 0.40
+	## Stepped lid: hold each discrete frame long enough to read as motion, not dissolve.
 	var lid := create_tween()
-	lid.tween_method(_show_frame_state, 0.0, 1.0, 1.45).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
-	await get_tree().create_timer(0.48).timeout
+	lid.tween_method(_show_frame_state, 0.0, 1.0, 1.65).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
+	await get_tree().create_timer(0.55).timeout
 	if not _skip and not reduced_motion:
 		_emit_burst()
 	await lid.finished
 	if _skip:
 		_apply_finished_state()
 		return
-	## Warm interior glow hold.
+	## Warm interior glow hold — chest fully open before any scroll appears.
 	var hold := create_tween()
-	hold.tween_property(_interior_glow, "modulate:a", 0.88, 0.22).set_trans(Tween.TRANS_SINE)
+	hold.tween_property(_interior_glow, "modulate:a", 0.88, 0.28).set_trans(Tween.TRANS_SINE)
 	await hold.finished
 	if _show_scroll_on_finish and not _skip:
 		await _emerge_scroll()
@@ -550,24 +549,31 @@ func _open_full() -> void:
 
 
 func _emerge_scroll() -> void:
-	## Rise from the open rim — only when a new scroll exists.
+	## Rise from inside the open rim — only when a new scroll exists.
+	## Starts under the front lip, then lifts with a slow physical ease.
 	if _rolled_scroll == null:
 		return
 	_scroll_spawn.visible = true
 	_rolled_scroll.visible = true
 	_rolled_scroll.modulate.a = 0.0
-	_rolled_scroll.scale = Vector2(0.90, 0.90)
-	_rolled_scroll.position = Vector2(0, 22)
-	_front_lip.modulate.a = 0.70
+	_rolled_scroll.scale = Vector2(0.72, 0.72)
+	var start_y := _scroll_spawn.size.y * 0.42
+	var end_y := 4.0
+	_rolled_scroll.position = Vector2(0, start_y)
+	_front_lip.modulate.a = 0.90
+	var glow_up := create_tween()
+	glow_up.tween_property(_interior_glow, "modulate:a", 0.95, 0.45).set_trans(Tween.TRANS_SINE)
 	var tw := create_tween()
 	tw.set_parallel(true)
-	tw.tween_property(_rolled_scroll, "modulate:a", 1.0, 0.38).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-	tw.tween_property(_rolled_scroll, "position:y", -28.0, 0.42).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
-	tw.tween_property(_rolled_scroll, "scale", Vector2.ONE, 0.42).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tw.tween_property(_rolled_scroll, "modulate:a", 1.0, 0.55).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tw.tween_property(_rolled_scroll, "position:y", end_y, 0.90).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	tw.tween_property(_rolled_scroll, "scale", Vector2(1.05, 1.05), 0.90).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	await tw.finished
-	var soft := create_tween()
-	soft.tween_property(_front_lip, "modulate:a", 0.20, 0.14)
-	await soft.finished
+	var settle := create_tween()
+	settle.set_parallel(true)
+	settle.tween_property(_rolled_scroll, "scale", Vector2.ONE, 0.18).set_trans(Tween.TRANS_SINE)
+	settle.tween_property(_front_lip, "modulate:a", 0.18, 0.22)
+	await settle.finished
 
 
 func get_scroll_global_center() -> Vector2:
@@ -594,7 +600,7 @@ func _apply_finished_state() -> void:
 		_scroll_spawn.visible = true
 		_rolled_scroll.visible = true
 		_rolled_scroll.modulate.a = 1.0
-		_rolled_scroll.position = Vector2(0, -28)
+		_rolled_scroll.position = Vector2(0, 4.0)
 		_rolled_scroll.scale = Vector2.ONE
 	else:
 		hide_rolled_scroll()

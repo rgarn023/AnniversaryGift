@@ -123,16 +123,19 @@ func _test_logical_viewport() -> void:
 
 
 func _test_chest_frames() -> void:
-	for f in ["chest_closed.png", "chest_open_10.png", "chest_open_25.png", "chest_half.png", "chest_open.png"]:
+	for f in ["chest_closed.png", "chest_open_10.png", "chest_open_25.png", "chest_ajar.png", "chest_half.png", "chest_open.png"]:
 		_assert(FileAccess.file_exists("res://assets/art/chest/%s" % f), "frame exists: " + f)
 	var chest_src := FileAccess.get_file_as_string("res://scripts/chest/treasure_chest.gd")
 	_assert(chest_src.contains("FRAME_KEYS"), "multi-frame keys present")
 	_assert(chest_src.contains("chest_closed.png"), "closed frame wired")
 	_assert(chest_src.contains("chest_open_10.png"), "10% frame wired")
 	_assert(chest_src.contains("chest_open_25.png"), "25% frame wired")
+	_assert(chest_src.contains("chest_ajar.png"), "ajar frame wired")
 	_assert(chest_src.contains("chest_half.png"), "half frame wired")
 	_assert(chest_src.contains("chest_open.png"), "open frame wired")
-	_assert(chest_src.contains("3.0 - 2.0 * t"), "smooth crossfade between frames")
+	_assert(chest_src.contains("_nearest_frame_index"), "discrete nearest-frame playback")
+	_assert(chest_src.contains("only ONE full chest"), "no dual-frame crossfade ghosting")
+	_assert(not chest_src.contains("3.0 - 2.0 * t"), "smoothstep crossfade removed")
 	_assert(chest_src.contains("play_empty_feedback"), "empty-chest helper present")
 	_assert(chest_src.contains("play_open_empty_pulse"), "empty open pulse present")
 	_assert(chest_src.contains("_emerge_scroll"), "scroll emergence path present")
@@ -152,7 +155,9 @@ func _test_chest_frames() -> void:
 	_assert(main_src.contains("No new scrolls today"), "empty open message present")
 	_assert(main_src.contains("_begin_nav_transition"), "prepared page transitions")
 	_assert(main_src.contains("Hidden from Sent history"), "sent hide uses snackbar text")
+	_assert(main_src.contains("_hide_sent_with_undo"), "sent hide undo path")
 	_assert(main_src.contains("No sent scrolls yet"), "sent empty state present")
+	_assert(main_src.contains("scroll_rolled.png"), "sent empty uses vector scroll icon")
 	_assert(main_src.contains("Signing In…"), "sign-in loading label present")
 	_assert(main_src.contains("SHOW_ONBOARDING_BANNER") or main_src.contains("BuildFlags.SHOW_ONBOARDING_BANNER"), "onboarding banner gated off")
 
@@ -190,10 +195,10 @@ func _test_plugin_commit() -> void:
 
 
 func _test_build_version() -> void:
-	_assert(BuildFlags.APP_VERSION_CODE >= 12, "versionCode >= 12")
+	_assert(BuildFlags.APP_VERSION_CODE >= 13, "versionCode >= 13")
 	var preset := FileAccess.get_file_as_string("res://export_presets.cfg")
-	_assert(preset.contains("ChestOfLoveNotes-targeted-fixes-debug.apk"), "export APK name")
-	_assert(preset.contains("version/code=12"), "export versionCode 12")
+	_assert(preset.contains("ChestOfLoveNotes-profile-compose-sent-chest-fixes-debug.apk"), "export APK name")
+	_assert(preset.contains("version/code=13"), "export versionCode 13")
 	_assert(BuildFlags.PRIVATE_ONBOARDING_BUILD == true, "private onboarding still enabled")
 	_assert(BuildFlags.SHOW_ONBOARDING_BANNER == false, "onboarding banner hidden in APKs")
 	_assert(FileAccess.file_exists("res://assets/icons/app_icon_1024.png"), "app icon present")

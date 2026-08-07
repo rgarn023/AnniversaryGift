@@ -94,6 +94,15 @@ func _test_validation_and_draft() -> void:
 	_assert(str(draft.password) == "secret", "draft password value present")
 	# UTC unlock formatting for API remains host responsibility using unlock_unix.
 	_assert(int(draft.unlock_unix) > 0, "draft unlock_unix computed")
+	compose._open_immediately.button_pressed = true
+	compose._sync_delivery_visibility()
+	_assert(compose._delivery_controls.visible == false, "Open Immediately hides schedule controls")
+	var compose2 := ComposeScrollScreen.new()
+	root.add_child(compose2)
+	compose2.setup([{"id": "f1", "display_name": "Mandy", "username": "mandy"}], false, draft)
+	await process_frame
+	_assert(str(compose2.get_draft().recipient_id) == "f1", "apply_draft restores recipient across recreate")
+	_assert(compose._recipient_btn.clip_text, "recipient button ellipsizes long names")
 	root.queue_free()
 
 
