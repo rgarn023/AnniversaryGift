@@ -174,7 +174,7 @@ func _build_ui() -> void:
 	_main_vbox = VBoxContainer.new()
 	_main_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_main_vbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_main_vbox.add_theme_constant_override("separation", 10)
+	_main_vbox.add_theme_constant_override("separation", MobileUi.GAP_RELATED)
 	_safe_margin.add_child(_main_vbox)
 
 	_main_vbox.add_child(_build_header())
@@ -182,7 +182,7 @@ func _build_ui() -> void:
 	_scroll = ScrollContainer.new()
 	_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	MobileUi.configure_scroll(_scroll)
 	_main_vbox.add_child(_scroll)
 
 	var content_margin := MarginContainer.new()
@@ -194,8 +194,9 @@ func _build_ui() -> void:
 
 	_form = VBoxContainer.new()
 	_form.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_form.add_theme_constant_override("separation", 14)
+	_form.add_theme_constant_override("separation", MobileUi.GAP_CARDS)
 	content_margin.add_child(_form)
+	MobileUi.enable_touch_scroll_on_tree(_form)
 
 	_form.add_child(_build_recipient_card())
 	_form.add_child(_build_title_card())
@@ -239,14 +240,14 @@ func _build_header() -> VBoxContainer:
 
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 12)
-	row.custom_minimum_size = Vector2(0, 56)
+	row.custom_minimum_size = Vector2(0, MobileUi.font_touch(48))
 	wrap.add_child(row)
 
 	var back := Button.new()
 	back.text = "←"
-	back.custom_minimum_size = Vector2(52, 52)
+	back.custom_minimum_size = Vector2(MobileUi.font_touch(48), MobileUi.font_touch(48))
 	back.focus_mode = Control.FOCUS_NONE
-	back.add_theme_font_size_override("font_size", 26)
+	back.add_theme_font_size_override("font_size", MobileUi.font(MobileUi.SIZE_SCREEN_TITLE))
 	_style_icon_button(back)
 	back.pressed.connect(func() -> void: back_pressed.emit())
 	row.add_child(back)
@@ -255,7 +256,7 @@ func _build_header() -> VBoxContainer:
 	heading.text = "Compose Scroll"
 	heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	heading.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	heading.add_theme_font_size_override("font_size", 30)
+	heading.add_theme_font_size_override("font_size", MobileUi.font(MobileUi.SIZE_SCREEN_TITLE))
 	heading.add_theme_color_override("font_color", COL_GOLD)
 	if _title_font:
 		heading.add_theme_font_override("font", _title_font)
@@ -268,7 +269,7 @@ func _build_recipient_card() -> PanelContainer:
 	var col := _card_body(card)
 	col.add_child(_section_heading("Send To"))
 	_recipient_btn = Button.new()
-	_recipient_btn.custom_minimum_size = Vector2(0, 64)
+	_recipient_btn.custom_minimum_size = Vector2(0, MobileUi.font_touch(54))
 	_recipient_btn.focus_mode = Control.FOCUS_NONE
 	_recipient_btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	_style_row_button(_recipient_btn)
@@ -296,7 +297,7 @@ func _build_title_card() -> PanelContainer:
 	_title_edit = LineEdit.new()
 	_title_edit.placeholder_text = "Give your scroll a title..."
 	_title_edit.max_length = MAX_TITLE
-	_title_edit.custom_minimum_size = Vector2(0, 56)
+	_title_edit.custom_minimum_size = Vector2(0, MobileUi.font_touch(MobileUi.INPUT_H))
 	_title_edit.add_theme_font_size_override("font_size", 19)
 	_style_line_edit(_title_edit)
 	_title_edit.text_changed.connect(func(_t: String) -> void:
@@ -322,7 +323,7 @@ func _build_message_card() -> PanelContainer:
 	_message_edit.placeholder_text = "Write your love note..."
 	_message_edit.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
 	_message_edit.scroll_fit_content_height = false
-	_message_edit.custom_minimum_size = Vector2(0, 280)
+	_message_edit.custom_minimum_size = Vector2(0, 200)
 	_message_edit.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	_message_edit.add_theme_font_size_override("font_size", 19)
 	_style_text_edit(_message_edit)
@@ -537,28 +538,28 @@ func _build_bottom_actions() -> PanelContainer:
 	style.border_width_top = 1
 	style.content_margin_left = 12
 	style.content_margin_right = 12
-	style.content_margin_top = 12
-	style.content_margin_bottom = 10
+	style.content_margin_top = 8
+	style.content_margin_bottom = 8
 	_bottom_area.add_theme_stylebox_override("panel", style)
 
 	var col := VBoxContainer.new()
-	col.add_theme_constant_override("separation", 10)
+	col.add_theme_constant_override("separation", 8)
 	_bottom_area.add_child(col)
 
 	_preview_btn = Button.new()
 	_preview_btn.text = "Preview Scroll"
-	_preview_btn.custom_minimum_size = Vector2(0, 56)
+	_preview_btn.custom_minimum_size = Vector2(0, MobileUi.font_touch(MobileUi.TOUCH_SECONDARY_H))
 	_preview_btn.focus_mode = Control.FOCUS_NONE
-	_preview_btn.add_theme_font_size_override("font_size", 19)
+	_preview_btn.add_theme_font_size_override("font_size", MobileUi.font(MobileUi.SIZE_BUTTON))
 	_style_secondary_button(_preview_btn)
 	_preview_btn.pressed.connect(_on_preview_pressed)
 	col.add_child(_preview_btn)
 
 	_send_btn = Button.new()
 	_send_btn.text = "Send Scroll"
-	_send_btn.custom_minimum_size = Vector2(0, 64)
+	_send_btn.custom_minimum_size = Vector2(0, MobileUi.font_touch(MobileUi.TOUCH_PRIMARY_H))
 	_send_btn.focus_mode = Control.FOCUS_NONE
-	_send_btn.add_theme_font_size_override("font_size", 19)
+	_send_btn.add_theme_font_size_override("font_size", MobileUi.font(MobileUi.SIZE_BUTTON))
 	_style_primary_button(_send_btn)
 	_send_btn.pressed.connect(_on_send_pressed)
 	col.add_child(_send_btn)
@@ -568,15 +569,16 @@ func _build_bottom_actions() -> PanelContainer:
 func _make_card() -> PanelContainer:
 	var card := PanelContainer.new()
 	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	card.mouse_filter = Control.MOUSE_FILTER_PASS
 	var style := StyleBoxFlat.new()
 	style.bg_color = COL_CARD
 	style.border_color = COL_GOLD_MUTED
 	style.set_border_width_all(1)
-	style.set_corner_radius_all(18)
-	style.content_margin_left = 18
-	style.content_margin_right = 18
-	style.content_margin_top = 16
-	style.content_margin_bottom = 16
+	style.set_corner_radius_all(14)
+	style.content_margin_left = MobileUi.CARD_PAD
+	style.content_margin_right = MobileUi.CARD_PAD
+	style.content_margin_top = 12
+	style.content_margin_bottom = 12
 	style.shadow_color = Color(0, 0, 0, 0.35)
 	style.shadow_size = 6
 	style.shadow_offset = Vector2(0, 3)
@@ -710,14 +712,15 @@ func _style_secondary_button(b: Button) -> void:
 
 func _apply_safe_area() -> void:
 	if _safe_margin:
-		SafeAreaHelper.apply_to_margin(_safe_margin, 22, 14, 14)
+		SafeAreaHelper.apply_to_margin(_safe_margin, MobileUi.SCREEN_GUTTER, 10, 10)
 
 
 func _resize_message_box() -> void:
 	if _message_edit == null:
 		return
 	var vp_h := get_viewport().get_visible_rect().size.y
-	var h := clampf(vp_h * 0.28, 220.0, 340.0)
+	## Compact Compose density: ~180–230 logical px message field.
+	var h := clampf(vp_h * 0.22, 180.0, 230.0)
 	_message_edit.custom_minimum_size = Vector2(0, h)
 
 
@@ -896,11 +899,13 @@ func _open_friend_picker() -> void:
 
 	var list_scroll := ScrollContainer.new()
 	list_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	MobileUi.configure_scroll(list_scroll)
 	col.add_child(list_scroll)
 	var list := VBoxContainer.new()
 	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	list.add_theme_constant_override("separation", 10)
+	list.add_theme_constant_override("separation", MobileUi.GAP_CARDS)
 	list_scroll.add_child(list)
+	MobileUi.enable_touch_scroll_on_tree(list)
 
 	if friends.is_empty():
 		var empty := Label.new()

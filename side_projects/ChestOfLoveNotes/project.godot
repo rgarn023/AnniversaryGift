@@ -8,11 +8,12 @@ config_version=5
 
 config/name="Chest of Love Notes"
 config/description="Send animated scroll love notes to friends with scheduled unlock times."
-config/version="0.1.6-mobile-native-complete-fix"
+config/version="0.1.7-mobile-correction-complete"
 run/main_scene="res://scenes/Main.tscn"
 config/features=PackedStringArray("4.7", "Mobile")
+## Dark cosmic splash only — no chest, no "Charoite Games Presents" text.
 boot_splash/bg_color=Color(0.05, 0.03, 0.12, 1)
-boot_splash/image="res://assets/art/charoite_boot_splash.png"
+boot_splash/image="res://assets/branding/charoite_system_splash_dark.png"
 boot_splash/fullsize=true
 boot_splash/use_filter=true
 config/icon="res://assets/icons/app_icon_1024.png"

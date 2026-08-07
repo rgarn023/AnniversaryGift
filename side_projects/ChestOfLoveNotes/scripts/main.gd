@@ -18,6 +18,9 @@ var _reveal_timers: Dictionary = {}
 
 var _boot_duration_sec: float = 0.0
 var _pending_restore: Dictionary = {}
+## Ignore APPLICATION_RESUMED / FOCUS_IN until cold-start navigation completes.
+## Resume revalidation previously raced restore and wiped a valid session.
+var _startup_done: bool = false
 
 
 func _ready() -> void:
@@ -39,6 +42,7 @@ func _ready() -> void:
 
 func _startup_navigate() -> void:
 	## Charoite Games cold boot (≥5s). Session restore runs during the hold.
+	_startup_done = false
 	var boot := CharoiteBoot.new()
 	boot.z_index = 80
 	add_child(boot)
@@ -59,10 +63,14 @@ func _startup_navigate() -> void:
 			_show_main_chest()
 		else:
 			_show_profile_setup()
+		_startup_done = true
+		_log_secure_debug("startup_destination_chest")
 		return
 	if not str(restore.get("message", "")).is_empty():
 		_show_toast(str(restore.message))
 	_show_welcome()
+	_startup_done = true
+	_log_secure_debug("startup_destination_login")
 
 
 func _log_secure_debug(tag: String) -> void:
@@ -71,17 +79,20 @@ func _log_secure_debug(tag: String) -> void:
 	var snap: Dictionary = state.diagnostics_snapshot()
 	# Safe YES/NO only — never tokens/passwords/session JSON.
 	print(
-		"[COLN-SECURE:%s] plugin=%s available=%s has_session=%s decrypt=%s refresh_attempted=%s refresh_ok=%s membership=%s profile=%s"
+		"[COLN-SECURE:%s] backend=%s plugin=%s available=%s keep=%s has_session=%s decrypt=%s refresh_attempted=%s refresh_ok=%s membership=%s profile=%s signed_in=%s"
 		% [
 			tag,
+			"YES" if bool(snap.get("backend_configured", false)) else "NO",
 			"YES" if bool(snap.get("secure_plugin_found", false)) else "NO",
 			"YES" if bool(snap.get("secure_storage_available", false)) else "NO",
+			"ON" if bool(snap.get("keep_me_signed_in", false)) else "OFF",
 			"YES" if bool(snap.get("saved_session_exists", false)) else "NO",
 			"YES" if bool(snap.get("session_decrypt_ok", false)) else "NO",
 			"YES" if bool(snap.get("refresh_attempted", false)) else "NO",
 			"YES" if bool(snap.get("refresh_succeeded", false)) else "NO",
 			"YES" if bool(snap.get("membership_revalidated", false)) else "NO",
 			"YES" if bool(snap.get("profile_loaded", false)) else "NO",
+			"YES" if bool(snap.get("signed_in", false)) else "NO",
 		]
 	)
 
@@ -185,7 +196,7 @@ func _make_screen_root(extra_bottom: int = 0) -> VBoxContainer:
 	_screen_host.add_child(margin)
 	var root := VBoxContainer.new()
 	root.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	root.add_theme_constant_override("separation", 14)
+	root.add_theme_constant_override("separation", MobileUi.GAP_CARDS)
 	margin.add_child(root)
 	return root
 
@@ -194,7 +205,13 @@ func _make_card() -> PanelContainer:
 	var card := PanelContainer.new()
 	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	card.add_theme_stylebox_override("panel", MobileUi.card_style())
+	card.mouse_filter = Control.MOUSE_FILTER_PASS
 	return card
+
+
+func _wire_scroll(scroll: ScrollContainer, horizontal: bool = false) -> ScrollContainer:
+	MobileUi.configure_scroll(scroll, horizontal)
+	return scroll
 
 
 func _show_toast(text: String) -> void:
@@ -275,9 +292,8 @@ func _show_auth(sign_up: bool) -> void:
 	_current_screen = "auth_signup" if sign_up else "auth_signin"
 	_clear_screen()
 	var root := _make_screen_root()
-	var scroll := ScrollContainer.new()
+	var scroll := _wire_scroll(ScrollContainer.new())
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	root.add_child(scroll)
 	var card := _make_card()
 	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -616,8 +632,8 @@ func _show_main_chest() -> void:
 	_chest = LoveNotesChest.new()
 	_chest.reduced_motion = state.reduced_motion
 	_chest.set_anchors_preset(Control.PRESET_CENTER)
-	# ~65% of ~390 logical width — dominant home focal point.
-	var chest_side := 260
+	# ~220 logical px on ~390 width — balanced Standard density (not oversized).
+	var chest_side := 220
 	_chest.custom_minimum_size = Vector2(chest_side, chest_side)
 	_chest.size = Vector2(chest_side, chest_side)
 	_chest.position = Vector2(-chest_side * 0.5, -chest_side * 0.38)
@@ -813,10 +829,8 @@ func _show_inventory() -> void:
 	header.add_child(_make_button("Back", _show_main_chest, Vector2(160, MobileUi.TOUCH_PRIMARY_H)))
 
 	# Large filter chips (horizontally scrollable)
-	var chip_scroll := ScrollContainer.new()
-	chip_scroll.custom_minimum_size.y = MobileUi.font_touch(56)
-	chip_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
-	chip_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	var chip_scroll := _wire_scroll(ScrollContainer.new(), true)
+	chip_scroll.custom_minimum_size.y = MobileUi.font_touch(MobileUi.FILTER_CHIP_H + 8)
 	root.add_child(chip_scroll)
 	var filters := HBoxContainer.new()
 	filters.add_theme_constant_override("separation", 10)
@@ -837,13 +851,14 @@ func _show_inventory() -> void:
 		filters.add_child(chip)
 	filters.add_child(_make_button("Saved", _show_saved, Vector2(140, 52)))
 
-	var scroll := ScrollContainer.new()
+	var scroll := _wire_scroll(ScrollContainer.new())
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	root.add_child(scroll)
 	var list := VBoxContainer.new()
 	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	list.add_theme_constant_override("separation", 12)
+	list.add_theme_constant_override("separation", MobileUi.GAP_CARDS)
 	scroll.add_child(list)
+	MobileUi.enable_touch_scroll_on_tree(list)
 
 	var items: Array[Dictionary] = []
 	if state.is_demo():
@@ -941,13 +956,14 @@ func _show_saved() -> void:
 	title.add_theme_color_override("font_color", Color(0.98, 0.86, 0.45))
 	header.add_child(title)
 	header.add_child(_make_button("Back", _show_inventory, Vector2(160, 64)))
-	var scroll := ScrollContainer.new()
+	var scroll := _wire_scroll(ScrollContainer.new())
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	root.add_child(scroll)
 	var list := VBoxContainer.new()
 	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	list.add_theme_constant_override("separation", 12)
+	list.add_theme_constant_override("separation", MobileUi.GAP_CARDS)
 	scroll.add_child(list)
+	MobileUi.enable_touch_scroll_on_tree(list)
 	var items: Array[Dictionary] = []
 	if state.is_demo():
 		items = state.demo.get_saved_scrolls()
@@ -1336,27 +1352,20 @@ func _show_friends() -> void:
 		return
 	_current_screen = "friends"
 	_clear_screen()
-	var root := VBoxContainer.new()
-	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	root.offset_left = 32
-	root.offset_right = -32
-	root.offset_top = 24
-	root.offset_bottom = -24
-	root.add_theme_constant_override("separation", 12)
-	_screen_host.add_child(root)
+	var root := _make_screen_root(MobileUi.font_touch(MobileUi.TOUCH_NAV_H) + 8)
 	var header := HBoxContainer.new()
 	root.add_child(header)
 	var title := Label.new()
 	title.text = "Friends"
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	title.add_theme_font_size_override("font_size", 40)
-	title.add_theme_color_override("font_color", Color(0.98, 0.86, 0.45))
+	MobileUi.apply_label(title, MobileUi.SIZE_SCREEN_TITLE, MobileUi.COLOR_TITLE, false)
 	header.add_child(title)
-	header.add_child(_make_button("Back", _show_main_chest, Vector2(160, 64)))
+	header.add_child(_make_button("Back", _show_main_chest, Vector2(100, MobileUi.TOUCH_SECONDARY_H)))
 
 	var search := LineEdit.new()
 	search.placeholder_text = "Exact username or friend code"
-	search.custom_minimum_size = Vector2(0, 60)
+	search.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	MobileUi.style_line_edit(search)
 	root.add_child(search)
 	root.add_child(_make_button("Add Friend", func() -> void:
 		var result: Dictionary = {}
@@ -1365,15 +1374,20 @@ func _show_friends() -> void:
 		elif state.is_online():
 			result = await state.friends.send_friend_request_query(search.text)
 		_show_toast("Friend request sent." if bool(result.get("ok", false)) else str(result.get("error", "Failed")))
-	))
+	, Vector2(0, MobileUi.TOUCH_PRIMARY_H)))
 
+	var scroll := _wire_scroll(ScrollContainer.new())
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	root.add_child(scroll)
 	var list := VBoxContainer.new()
-	list.add_theme_constant_override("separation", 8)
-	root.add_child(list)
+	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	list.add_theme_constant_override("separation", MobileUi.GAP_CARDS)
+	scroll.add_child(list)
+	MobileUi.enable_touch_scroll_on_tree(list)
+
 	var section := Label.new()
 	section.text = "Accepted friends"
-	section.add_theme_font_size_override("font_size", 28)
-	section.add_theme_color_override("font_color", Color(0.9, 0.85, 0.95))
+	MobileUi.apply_label(section, MobileUi.SIZE_SECTION, MobileUi.COLOR_SECONDARY, false)
 	list.add_child(section)
 	var friends: Array = []
 	var me: Dictionary = {}
@@ -1392,22 +1406,19 @@ func _show_friends() -> void:
 	for f in friends:
 		if typeof(f) != TYPE_DICTIONARY:
 			continue
+		var card := _make_card()
+		card.custom_minimum_size.y = MobileUi.font_touch(MobileUi.ROW_H)
 		var row := Label.new()
 		row.text = "%s  ·  @%s  ·  %s" % [
 			str(f.get("display_name", "")),
 			str(f.get("username", "")),
 			str(f.get("friend_code", "")),
 		]
-		row.add_theme_font_size_override("font_size", 24)
-		row.add_theme_color_override("font_color", Color(0.95, 0.9, 0.85))
-		list.add_child(row)
-	var code := Label.new()
-	code.text = "Your friend code: %s" % str(me.get("friend_code", ""))
-	code.add_theme_font_size_override("font_size", 24)
-	code.add_theme_color_override("font_color", Color(1.0, 0.85, 0.5))
-	root.add_child(code)
-
-
+		row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		MobileUi.apply_label(row, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY, true)
+		card.add_child(row)
+		list.add_child(card)
+	list.add_child(_settings_long_value_card("Your friend code", str(me.get("friend_code", "—")), true))
 	_add_bottom_nav("friends")
 
 
@@ -1419,27 +1430,28 @@ func _show_sent() -> void:
 	state.clear_revealed_passwords()
 	_current_screen = "sent"
 	_clear_screen()
-	var root := VBoxContainer.new()
-	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	root.offset_left = 32
-	root.offset_right = -32
-	root.offset_top = 24
-	root.offset_bottom = -24
-	root.add_theme_constant_override("separation", 12)
-	_screen_host.add_child(root)
+	var root := _make_screen_root(MobileUi.font_touch(MobileUi.TOUCH_NAV_H) + 8)
 	var header := HBoxContainer.new()
 	root.add_child(header)
 	var title := Label.new()
 	title.text = "Sent Scrolls"
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	title.add_theme_font_size_override("font_size", 40)
-	title.add_theme_color_override("font_color", Color(0.98, 0.86, 0.45))
+	MobileUi.apply_label(title, MobileUi.SIZE_SCREEN_TITLE, MobileUi.COLOR_TITLE, false)
 	header.add_child(title)
 	header.add_child(_make_button("Back", func() -> void:
 		_clear_reveal_timers()
 		state.clear_revealed_passwords()
 		_show_main_chest()
-	, Vector2(160, 64)))
+	, Vector2(100, MobileUi.TOUCH_SECONDARY_H)))
+	var scroll := _wire_scroll(ScrollContainer.new())
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	root.add_child(scroll)
+	var list := VBoxContainer.new()
+	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	list.add_theme_constant_override("separation", MobileUi.GAP_CARDS)
+	scroll.add_child(list)
+	MobileUi.enable_touch_scroll_on_tree(list)
+
 	var sent_items: Array = []
 	if state.is_demo():
 		sent_items = state.demo.get_sent_scrolls()
@@ -1454,23 +1466,16 @@ func _show_sent() -> void:
 	if sent_items.is_empty():
 		var empty := Label.new()
 		empty.text = "No sent scrolls."
-		empty.add_theme_font_size_override("font_size", 28)
-		empty.add_theme_color_override("font_color", Color(0.85, 0.8, 0.9))
-		root.add_child(empty)
+		MobileUi.apply_label(empty, MobileUi.SIZE_BODY, MobileUi.COLOR_HELPER)
+		list.add_child(empty)
 	else:
 		for s in sent_items:
 			if typeof(s) != TYPE_DICTIONARY:
 				continue
-			var panel := PanelContainer.new()
-			var style := StyleBoxFlat.new()
-			style.bg_color = Color(0.12, 0.08, 0.16, 0.92)
-			style.set_corner_radius_all(14)
-			style.content_margin_left = 16
-			style.content_margin_right = 16
-			style.content_margin_top = 12
-			style.content_margin_bottom = 12
-			panel.add_theme_stylebox_override("panel", style)
+			var panel := _make_card()
 			var col := VBoxContainer.new()
+			col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			col.add_theme_constant_override("separation", MobileUi.GAP_RELATED)
 			panel.add_child(col)
 			var recipient: Dictionary = s.get("recipient", {}) if typeof(s.get("recipient")) == TYPE_DICTIONARY else {}
 			var unlock_at := str(s.get("unlock_at", ""))
@@ -1478,15 +1483,14 @@ func _show_sent() -> void:
 			if unlock_unix == 0 and not unlock_at.is_empty():
 				unlock_unix = int(Time.get_unix_time_from_datetime_string(unlock_at))
 			var row := Label.new()
-			row.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			row.text = "%s → %s · opens %s · opened=%d" % [
 				str(s.get("title", "")),
 				str(s.get("recipient_display_name", recipient.get("display_name", ""))),
 				Time.get_datetime_string_from_unix_time(unlock_unix, false) if unlock_unix > 0 else unlock_at,
 				int(s.get("opened_count", 0)),
 			]
-			row.add_theme_font_size_override("font_size", 22)
-			row.add_theme_color_override("font_color", Color(0.9, 0.85, 0.95))
+			MobileUi.apply_label(row, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY, true)
 			col.add_child(row)
 			var sid := str(s.get("id", ""))
 			var has_pw := bool(s.get("has_password", false))
@@ -1509,8 +1513,8 @@ func _show_sent() -> void:
 						_show_toast(str(result.get("error", "Could not hide sent scroll.")))
 				else:
 					_show_toast("Backend is not configured.")
-			, Vector2(240, 56)))
-			root.add_child(panel)
+			, Vector2(0, MobileUi.TOUCH_SECONDARY_H)))
+			list.add_child(panel)
 	_add_bottom_nav("sent")
 
 
@@ -1638,16 +1642,20 @@ func _clear_reveal_timers() -> void:
 
 
 func _settings_row(label_text: String, value_control: Control) -> PanelContainer:
+	## Label stays compact; value expands so long email/codes never wrap one-char-wide.
 	var card := _make_card()
 	var row := HBoxContainer.new()
-	row.custom_minimum_size.y = MobileUi.font_touch(56)
+	row.custom_minimum_size.y = MobileUi.font_touch(MobileUi.ROW_H)
 	row.add_theme_constant_override("separation", 10)
 	card.add_child(row)
 	var lab := Label.new()
 	lab.text = label_text
-	lab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	MobileUi.apply_label(lab, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY)
+	lab.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	lab.custom_minimum_size.x = 108
+	MobileUi.apply_label(lab, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY, false)
 	row.add_child(lab)
+	value_control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	value_control.size_flags_stretch_ratio = 1.6
 	row.add_child(value_control)
 	return card
 
@@ -1656,8 +1664,41 @@ func _settings_value_label(text: String) -> Label:
 	var v := Label.new()
 	v.text = text
 	v.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	MobileUi.apply_label(v, MobileUi.SIZE_SECONDARY, MobileUi.COLOR_SECONDARY)
+	v.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	## Prefer single-line readable presentation; ellipsis if truly too long.
+	MobileUi.apply_label(v, MobileUi.SIZE_SECONDARY, MobileUi.COLOR_SECONDARY, false)
 	return v
+
+
+func _settings_long_value_card(label_text: String, value_text: String, copyable: bool = false) -> PanelContainer:
+	## Vertical layout for email / friend code — full horizontal width, no 1-char columns.
+	var card := _make_card()
+	var col := VBoxContainer.new()
+	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	col.add_theme_constant_override("separation", 6)
+	card.add_child(col)
+	var lab := Label.new()
+	lab.text = label_text
+	MobileUi.apply_label(lab, MobileUi.SIZE_HELPER, MobileUi.COLOR_HELPER, false)
+	col.add_child(lab)
+	var row := HBoxContainer.new()
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_theme_constant_override("separation", 8)
+	col.add_child(row)
+	var value := Label.new()
+	value.text = value_text
+	value.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	value.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	MobileUi.apply_label(value, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY, true)
+	row.add_child(value)
+	if copyable and value_text != "" and value_text != "—":
+		var copy_btn := _make_button("Copy", func() -> void:
+			DisplayServer.clipboard_set(value_text)
+			_show_toast("Copied")
+		, Vector2(88, 44))
+		copy_btn.size_flags_horizontal = Control.SIZE_SHRINK_END
+		row.add_child(copy_btn)
+	return card
 
 
 func _show_profile() -> void:
@@ -1672,14 +1713,14 @@ func _show_profile() -> void:
 		title.add_theme_font_override("font", _title_font())
 	root.add_child(title)
 
-	var scroll := ScrollContainer.new()
+	var scroll := _wire_scroll(ScrollContainer.new())
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	root.add_child(scroll)
 	var col := VBoxContainer.new()
 	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	col.add_theme_constant_override("separation", 10)
+	col.add_theme_constant_override("separation", MobileUi.GAP_CARDS)
 	scroll.add_child(col)
+	MobileUi.enable_touch_scroll_on_tree(col)
 
 	var me: Dictionary = {}
 	if state.is_demo():
@@ -1695,8 +1736,8 @@ func _show_profile() -> void:
 	col.add_child(section)
 	col.add_child(_settings_row("Display Name", _settings_value_label(str(me.get("display_name", "—")))))
 	col.add_child(_settings_row("Username", _settings_value_label("@" + str(me.get("username", "—")))))
-	col.add_child(_settings_row("Email", _settings_value_label(str(state.tokens.user_email if state.tokens.user_email != "" else "—"))))
-	col.add_child(_settings_row("Friend Code", _settings_value_label(str(me.get("friend_code", "—")))))
+	col.add_child(_settings_long_value_card("Email", str(state.tokens.user_email if state.tokens.user_email != "" else "—"), false))
+	col.add_child(_settings_long_value_card("Friend Code", str(me.get("friend_code", "—")), true))
 	var access := "Active" if state.membership.is_member or state.is_demo() else "—"
 	col.add_child(_settings_row("Private Access", _settings_value_label(access)))
 
@@ -1934,9 +1975,18 @@ func _notification(what: int) -> void:
 
 
 func _on_app_resumed() -> void:
+	## Cold-start window: do not race secure session restore with resume revalidation.
+	if not _startup_done:
+		return
 	if state.is_online() and state.tokens.has_session():
 		var resumed: Dictionary = await state.revalidate_on_resume()
 		if not bool(resumed.get("ok", false)):
+			var reason := str(resumed.get("reason", ""))
+			## Soft/network failures keep the user in-app; only hard auth failures kick to Login.
+			if reason in ["refresh_soft_fail", "membership_soft_fail", "not_signed_in"]:
+				if reason != "not_signed_in":
+					_show_toast(str(resumed.get("message", "Could not refresh session.")))
+				return
 			_show_toast(str(resumed.get("message", "Your session has expired. Please sign in again.")))
 			_show_welcome()
 			return

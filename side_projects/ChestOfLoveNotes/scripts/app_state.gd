@@ -223,6 +223,7 @@ func restore_session_if_possible() -> Dictionary:
 
 
 func revalidate_on_resume() -> Dictionary:
+	## Soft/network failures must NOT wipe a valid Keystore session or force Login.
 	if not is_online() or not tokens.has_session():
 		return {"ok": false, "reason": "not_signed_in"}
 	var fresh: Dictionary = await auth.ensure_fresh_access()
@@ -230,13 +231,16 @@ func revalidate_on_resume() -> Dictionary:
 		if bool(fresh.get("invalid_session", false)):
 			sign_out()
 			session_restore_message = "Your session has expired. Please sign in again."
-			return {"ok": false, "reason": "refresh_failed", "message": session_restore_message}
+			return {"ok": false, "reason": "refresh_invalid", "message": session_restore_message}
 		return {"ok": false, "reason": "refresh_soft_fail", "message": "Could not refresh session."}
 	var claim: Dictionary = await membership.claim_membership()
 	if not bool(claim.get("ok", false)) or not membership.is_member:
-		sign_out()
-		session_restore_message = "Your session has expired. Please sign in again."
-		return {"ok": false, "reason": "membership_denied", "message": session_restore_message}
+		## Only definitive allowlist denial signs the user out.
+		if bool(claim.get("forbidden", false)):
+			sign_out()
+			session_restore_message = "This is a private app, and this account is not approved."
+			return {"ok": false, "reason": "membership_denied", "message": session_restore_message}
+		return {"ok": false, "reason": "membership_soft_fail", "message": "Could not verify membership."}
 	tokens.persist_if_needed()
 	return {"ok": true}
 

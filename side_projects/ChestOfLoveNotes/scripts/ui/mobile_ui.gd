@@ -12,29 +12,34 @@ const SETTINGS_PATH := "user://coln_settings.cfg"
 const PREF_TEXT_SIZE := "text_size"
 const PREF_REDUCED_MOTION := "reduced_motion"
 
-## Base sizes in logical mobile units (viewport ~390×844). Standard = 1.0.
-const SIZE_APP_TITLE := 30
-const SIZE_SCREEN_TITLE := 28
-const SIZE_MAJOR_HEADING := 22
-const SIZE_SECTION := 20
-const SIZE_BODY := 18
-const SIZE_SECONDARY := 16
-const SIZE_HELPER := 15
-const SIZE_BUTTON := 18
-const SIZE_STAT_NUMBER := 26
-const SIZE_STAT_LABEL := 15
-const SIZE_NAV_LABEL := 14
-const SIZE_BADGE := 15
-const SIZE_WELCOME := 18
+## Balanced Standard sizes for ~390×844 logical mobile units (not oversized tablet-a11y).
+const SIZE_APP_TITLE := 27
+const SIZE_SCREEN_TITLE := 24
+const SIZE_MAJOR_HEADING := 20
+const SIZE_SECTION := 18
+const SIZE_BODY := 17
+const SIZE_SECONDARY := 15
+const SIZE_HELPER := 14
+const SIZE_BUTTON := 17
+const SIZE_STAT_NUMBER := 22
+const SIZE_STAT_LABEL := 14
+const SIZE_NAV_LABEL := 13
+const SIZE_BADGE := 14
+const SIZE_WELCOME := 17
+const SIZE_INPUT := 17
 
 const TOUCH_MIN := 48
-const TOUCH_PRIMARY_H := 60
-const TOUCH_CTA_H := 62
-const TOUCH_NAV_H := 76
-const INPUT_H := 56
-const ROW_H := 64
-const CARD_PAD := 16
-const SCREEN_GUTTER := 16
+const TOUCH_PRIMARY_H := 54
+const TOUCH_CTA_H := 56
+const TOUCH_SECONDARY_H := 50
+const TOUCH_NAV_H := 68
+const INPUT_H := 50
+const ROW_H := 56
+const FILTER_CHIP_H := 42
+const CARD_PAD := 14
+const SCREEN_GUTTER := 18
+const GAP_RELATED := 9
+const GAP_CARDS := 12
 
 const COLOR_TITLE := Color(0.98, 0.86, 0.45)
 const COLOR_BODY := Color(0.96, 0.92, 0.86)
@@ -48,6 +53,13 @@ const COLOR_NAV_SELECTED := Color(0.98, 0.86, 0.45)
 const COLOR_NAV_IDLE := Color(0.78, 0.72, 0.86)
 const COLOR_BTN := Color(0.42, 0.16, 0.28, 1.0)
 const COLOR_BTN_BORDER := Color(0.72, 0.48, 0.28, 0.9)
+
+## Controls that must keep STOP so taps/focus still work during scroll gestures.
+const _SCROLL_STOP_TYPES := [
+	"Button", "LineEdit", "TextEdit", "CheckBox", "CheckButton",
+	"OptionButton", "Slider", "HSlider", "VSlider", "SpinBox",
+	"ItemList", "Tree", "CodeEdit", "LinkButton",
+]
 
 static var _text_size: TextSize = TextSize.STANDARD
 static var _reduced_motion: bool = false
@@ -148,22 +160,27 @@ static func _save() -> void:
 	cfg.save(SETTINGS_PATH)
 
 
-static func apply_label(lab: Label, base_size: int, color: Color = COLOR_BODY) -> void:
+static func apply_label(lab: Label, base_size: int, color: Color = COLOR_BODY, allow_wrap: bool = true) -> void:
 	lab.add_theme_font_size_override("font_size", font(base_size))
 	lab.add_theme_color_override("font_color", color)
-	lab.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	if allow_wrap:
+		lab.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	else:
+		lab.autowrap_mode = TextServer.AUTOWRAP_OFF
+		lab.clip_text = true
+		lab.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 
 
 static func card_style() -> StyleBoxFlat:
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = COLOR_CARD
 	sb.border_color = COLOR_CARD_BORDER
-	sb.set_border_width_all(2)
-	sb.set_corner_radius_all(18)
-	sb.content_margin_left = 16
-	sb.content_margin_right = 16
-	sb.content_margin_top = 14
-	sb.content_margin_bottom = 14
+	sb.set_border_width_all(1)
+	sb.set_corner_radius_all(14)
+	sb.content_margin_left = CARD_PAD
+	sb.content_margin_right = CARD_PAD
+	sb.content_margin_top = 12
+	sb.content_margin_bottom = 12
 	return sb
 
 
@@ -172,11 +189,11 @@ static func button_style() -> StyleBoxFlat:
 	sb.bg_color = COLOR_BTN
 	sb.border_color = COLOR_BTN_BORDER
 	sb.set_border_width_all(2)
-	sb.set_corner_radius_all(16)
-	sb.content_margin_left = 14
-	sb.content_margin_right = 14
-	sb.content_margin_top = 10
-	sb.content_margin_bottom = 10
+	sb.set_corner_radius_all(14)
+	sb.content_margin_left = 12
+	sb.content_margin_right = 12
+	sb.content_margin_top = 8
+	sb.content_margin_bottom = 8
 	return sb
 
 
@@ -199,15 +216,90 @@ static func font_touch(base_h: int) -> int:
 
 static func style_line_edit(edit: LineEdit) -> void:
 	edit.custom_minimum_size.y = font_touch(INPUT_H)
-	edit.add_theme_font_size_override("font_size", font(SIZE_BODY))
+	edit.add_theme_font_size_override("font_size", font(SIZE_INPUT))
 	edit.add_theme_color_override("font_color", COLOR_BODY)
 	edit.add_theme_color_override("font_placeholder_color", COLOR_HELPER)
 
 
 static func style_text_edit(edit: TextEdit) -> void:
-	edit.add_theme_font_size_override("font_size", font(SIZE_BODY))
+	edit.add_theme_font_size_override("font_size", font(SIZE_INPUT))
 	edit.add_theme_color_override("font_color", COLOR_BODY)
 
 
 static func apply_safe_margins(margin: MarginContainer, extra_bottom: int = 0) -> void:
-	SafeAreaHelper.apply_to_margin(margin, 18, 12, 12 + extra_bottom)
+	SafeAreaHelper.apply_to_margin(margin, SCREEN_GUTTER, 10, 10 + extra_bottom)
+
+
+static func configure_scroll(scroll: ScrollContainer, horizontal: bool = false) -> void:
+	## Native finger-drag scrolling: content follows touch; scrollbar is a thin indicator.
+	if horizontal:
+		scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+		scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	else:
+		scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+		scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	## Small deadzone so intentional swipes start quickly without eating taps.
+	scroll.scroll_deadzone = 12
+	scroll.follow_focus = true
+	_style_scrollbars(scroll)
+	## After children exist, make non-interactive surfaces pass drag to ScrollContainer.
+	scroll.child_entered_tree.connect(func(node: Node) -> void:
+		if node is Control:
+			call_deferred("_pass_drag_through", node as Control)
+	)
+	for child in scroll.get_children():
+		if child is Control:
+			_pass_drag_through(child as Control)
+
+
+static func _style_scrollbars(scroll: ScrollContainer) -> void:
+	var vbar := scroll.get_v_scroll_bar()
+	if vbar:
+		vbar.custom_minimum_size.x = 5
+		var grabber := StyleBoxFlat.new()
+		grabber.bg_color = Color(0.92, 0.86, 0.98, 0.42)
+		grabber.set_corner_radius_all(3)
+		grabber.content_margin_left = 1
+		grabber.content_margin_right = 1
+		vbar.add_theme_stylebox_override("grabber", grabber)
+		vbar.add_theme_stylebox_override("grabber_highlight", grabber)
+		vbar.add_theme_stylebox_override("grabber_pressed", grabber)
+		var track := StyleBoxFlat.new()
+		track.bg_color = Color(1, 1, 1, 0.06)
+		track.set_corner_radius_all(3)
+		vbar.add_theme_stylebox_override("scroll", track)
+		## Wider invisible hit area so the thin bar remains usable if dragged.
+		vbar.mouse_filter = Control.MOUSE_FILTER_STOP
+		vbar.custom_minimum_size.x = 18
+		## Visual width stays thin via stylebox; expand hit with empty margins.
+		grabber.content_margin_left = 6
+		grabber.content_margin_right = 6
+	var hbar := scroll.get_h_scroll_bar()
+	if hbar:
+		hbar.custom_minimum_size.y = 5
+
+
+static func _pass_drag_through(node: Control) -> void:
+	## Panels/labels/containers STOP by default and steal touch-drags from ScrollContainer.
+	if _should_keep_stop(node):
+		node.mouse_filter = Control.MOUSE_FILTER_STOP
+	else:
+		if node.mouse_filter == Control.MOUSE_FILTER_STOP:
+			node.mouse_filter = Control.MOUSE_FILTER_PASS
+	for child in node.get_children():
+		if child is Control:
+			_pass_drag_through(child as Control)
+
+
+static func _should_keep_stop(node: Control) -> bool:
+	var n := node.get_class()
+	if n in _SCROLL_STOP_TYPES:
+		return true
+	## Explicitly interactive subclasses / custom buttons.
+	if node is BaseButton or node is Range or node is TextEdit or node is LineEdit:
+		return true
+	return false
+
+
+static func enable_touch_scroll_on_tree(root: Control) -> void:
+	_pass_drag_through(root)

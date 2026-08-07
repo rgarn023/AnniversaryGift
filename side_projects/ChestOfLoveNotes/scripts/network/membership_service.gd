@@ -10,6 +10,10 @@ var role: String = ""
 var status: String = ""
 var last_deny_message: String = ""
 
+## Single-flight: concurrent resume + cold-restore must not clear membership mid-claim.
+var _claim_inflight: bool = false
+var _claim_result: Dictionary = {}
+
 
 func _init(p_api: ApiClient, p_tokens: SecureTokenService) -> void:
 	api = p_api
@@ -24,7 +28,20 @@ func clear() -> void:
 
 
 func claim_membership() -> Dictionary:
-	clear()
+	if _claim_inflight:
+		var tree := Engine.get_main_loop() as SceneTree
+		while _claim_inflight and tree != null:
+			await tree.process_frame
+		return _claim_result.duplicate(true)
+	_claim_inflight = true
+	_claim_result = await _claim_membership_inner()
+	_claim_inflight = false
+	return _claim_result.duplicate(true)
+
+
+func _claim_membership_inner() -> Dictionary:
+	## Do not clear membership at the start — concurrent callers previously saw
+	## is_member=false and treated soft failures as hard denials.
 	if not tokens.has_session():
 		return {"ok": false, "error": "Not signed in.", "forbidden": false}
 	# Do not send caller-selected user_id — Edge Function uses JWT.
@@ -34,6 +51,7 @@ func claim_membership() -> Dictionary:
 		var err := str(result.get("error", "Membership claim failed."))
 		var forbidden := status_code == 403 or err.to_lower().contains("not invited") or err.to_lower().contains("not approved") or err.to_lower().contains("allowlist")
 		if forbidden:
+			clear()
 			last_deny_message = "This is a private app, and this account is not approved."
 			err = last_deny_message
 		return {"ok": false, "error": err, "forbidden": forbidden, "status": status_code}
