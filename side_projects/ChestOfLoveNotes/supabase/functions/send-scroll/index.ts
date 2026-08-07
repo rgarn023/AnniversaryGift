@@ -113,6 +113,10 @@ Deno.serve(async (req) => {
       if (!locationName) {
         locationName = "a set place";
       }
+      // Until location_address column is migrated everywhere, fold address into name for display.
+      if (locationAddress && !locationName.includes(locationAddress)) {
+        locationName = `${locationName} — ${locationAddress}`.slice(0, 120);
+      }
       locationLat = lat;
       locationLng = lng;
       locationRadiusM = Math.round(radius);
@@ -149,10 +153,10 @@ Deno.serve(async (req) => {
         has_password: hasPassword,
         has_location_lock: hasLocationLock,
         location_name: locationName,
-        location_address: locationAddress,
         location_lat: locationLat,
         location_lng: locationLng,
         location_radius_m: locationRadiusM,
+        // location_address column is additive (migration 20260807233000); omit until applied.
       })
       .select(
         "id, sender_id, recipient_id, title, unlock_at, has_password, has_location_lock, location_name, created_at",
