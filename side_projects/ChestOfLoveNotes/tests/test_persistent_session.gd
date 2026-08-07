@@ -66,7 +66,7 @@ func _test_encrypt_before_persist() -> void:
 	_assert(not AndroidSecureStore._test_ciphertext.contains("access-plain-xyz"), "No plaintext access token in stored blob encoding check")
 	# Stored blob is opaque base64 of JSON — decode only inside load path.
 	var loaded := AndroidSecureStore.load_session_json()
-	_assert(loaded.contains("\"version\":1") or loaded.contains("\"version\": 1"), "session payload includes version")
+	_assert(loaded.contains("\"version\":2") or loaded.contains("\"version\": 2"), "session payload includes version 2")
 	_assert(loaded.contains("refresh-plain-xyz"), "secure load returns session JSON in memory only")
 	_assert(not loaded.contains("password"), "Password is never stored in session storage")
 	_assert(not loaded.contains("magic"), "Magic Password is never stored in session storage")
@@ -75,7 +75,8 @@ func _test_encrypt_before_persist() -> void:
 	var payload: Dictionary = tokens.to_session_dict()
 	_assert(payload.has("expires_at"), "payload uses expires_at")
 	_assert(not payload.has("password"), "payload omits password")
-	_assert(int(payload.get("version", 0)) == 1, "payload version is 1")
+	_assert(int(payload.get("version", 0)) == 2, "payload version is 2")
+	_assert(payload.has("email_confirmed"), "payload includes email_confirmed")
 
 
 func _test_keep_me_signed_in_setting() -> void:
@@ -255,8 +256,8 @@ func _test_demo_disabled_online_build() -> void:
 	var flags := FileAccess.get_file_as_string("res://scripts/build_flags.gd")
 	_assert(flags.contains("PRIVATE_ONBOARDING_BUILD := true"), "Local Demo Mode remains disabled in online test build")
 	var preset := FileAccess.get_file_as_string("res://export_presets.cfg")
-	_assert(preset.contains("ChestOfLoveNotes-mobile-production-polish-debug.apk") or preset.contains("secure-session") or preset.contains("mobile-correction"), "export targets COLN APK")
-	_assert(preset.contains("version/code=11") or preset.contains("version/code=10"), "versionCode bumped")
+	_assert(preset.contains("ChestOfLoveNotes-targeted-fixes-debug.apk") or preset.contains("mobile-production-polish") or preset.contains("secure-session"), "export targets COLN APK")
+	_assert(preset.contains("version/code=12") or preset.contains("version/code=11"), "versionCode bumped")
 	_assert(preset.contains("com.charoitegames.chestoflovenotes"), "COLN package retained")
 	_assert(preset.contains("user_data_backup/allow=false"), "export backup disabled")
 
@@ -269,4 +270,4 @@ func _test_anniversary_gift_untouched() -> void:
 		f.close()
 		_assert(text.contains("AnniversaryGift") or text.contains("anniversary"), "Anniversary Gift export remains")
 		_assert(not text.contains("chestoflovenotes"), "Anniversary Gift export not rewritten to COLN package")
-	_assert(BuildFlags.APP_VERSION_CODE >= 11, "COLN versionCode incremented for mobile production polish")
+	_assert(BuildFlags.APP_VERSION_CODE >= 12, "COLN versionCode incremented for targeted fixes")

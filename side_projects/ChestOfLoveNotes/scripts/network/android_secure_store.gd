@@ -54,20 +54,42 @@ static func is_available() -> bool:
 	return true
 
 
-static func await_ready(tree: SceneTree, timeout_sec: float = 2.5) -> bool:
-	## Cold-start Android plugins can lag singleton registration by a few frames.
+static func log_secure(tag: String) -> void:
+	## Internal Android diagnosis only — never prints tokens/passwords/JSON.
+	if not OS.is_debug_build():
+		return
+	if OS.get_name() != "Android" and not _test_backend_enabled:
+		return
+	var plugin := Engine.has_singleton(PLUGIN_NAME) if OS.get_name() == "Android" else _test_backend_enabled
+	print(
+		"[COLN-SECURE:%s] plugin=%s available=%s has_session=%s"
+		% [
+			tag,
+			"YES" if plugin else "NO",
+			"YES" if is_available() else "NO",
+			"YES" if has_session() else "NO",
+		]
+	)
+
+
+static func await_ready(tree: SceneTree, timeout_sec: float = 5.0) -> bool:
+	## Cold-start Android plugins can lag singleton registration by many frames.
 	if _test_backend_enabled:
 		return not _test_force_unavailable
 	if OS.get_name() != "Android":
 		return is_available()
 	if tree == null:
 		return is_available()
+	log_secure("await_ready_begin")
 	var deadline := Time.get_ticks_msec() + int(timeout_sec * 1000.0)
 	while Time.get_ticks_msec() < deadline:
 		if is_available():
+			log_secure("await_ready_ok")
 			return true
 		await tree.process_frame
-	return is_available()
+	var ready := is_available()
+	log_secure("await_ready_timeout" if not ready else "await_ready_late_ok")
+	return ready
 
 
 static func storage_version() -> int:

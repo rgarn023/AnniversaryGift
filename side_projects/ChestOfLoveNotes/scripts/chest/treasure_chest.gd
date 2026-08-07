@@ -60,8 +60,9 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	clip_contents = false
 	custom_minimum_size = Vector2(FRAME_SIZE.x, FRAME_SIZE.x)
-	modulate.a = 0.0
-	visible = false
+	## Appear fully prepared with the parent screen — no staggered fade-in.
+	modulate.a = 1.0
+	visible = true
 	_preload_textures()
 	_build_visuals()
 	_ready_visuals = true
@@ -77,9 +78,6 @@ func _ready() -> void:
 	resized.connect(_layout_frames)
 	_layout_frames()
 	_show_frame_state(0.0)
-	visible = true
-	var fade := create_tween()
-	fade.tween_property(self, "modulate:a", 1.0, 0.28).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 
 
 func _preload_textures() -> void:
@@ -154,11 +152,12 @@ func _build_visuals() -> void:
 	_highlight.modulate = Color(1, 1, 1, 0.28)
 	_root_visual.add_child(_highlight)
 
-	_dust = _make_particles(Color(0.90, 0.78, 0.48, 0.55), 6, Vector2(0, -1), 18.0)
-	_dust.z_index = 10
+	## Restrained interior dust — never screen-covering.
+	_dust = _make_particles(Color(0.90, 0.78, 0.48, 0.42), 3, Vector2(0, -1), 12.0)
+	_dust.z_index = 3
 	_root_visual.add_child(_dust)
-	_sparks = _make_particles(Color(1.0, 0.84, 0.48, 0.75), 4, Vector2(0, -1), 32.0)
-	_sparks.z_index = 11
+	_sparks = _make_particles(Color(1.0, 0.84, 0.48, 0.55), 2, Vector2(0, -1), 20.0)
+	_sparks.z_index = 3
 	_root_visual.add_child(_sparks)
 
 	_badge = Label.new()
@@ -187,17 +186,17 @@ func _make_particles(color: Color, amount: int, dir: Vector2, speed: float) -> C
 	var p := CPUParticles2D.new()
 	p.emitting = false
 	p.amount = amount
-	p.lifetime = 0.95
+	p.lifetime = 0.55
 	p.one_shot = true
-	p.explosiveness = 0.18
-	p.local_coords = false
+	p.explosiveness = 0.12
+	p.local_coords = true
 	p.direction = dir
-	p.spread = 28.0
-	p.initial_velocity_min = speed * 0.15
-	p.initial_velocity_max = speed * 0.55
-	p.gravity = Vector2(0, 12)
-	p.scale_amount_min = 0.45
-	p.scale_amount_max = 0.9
+	p.spread = 18.0
+	p.initial_velocity_min = speed * 0.12
+	p.initial_velocity_max = speed * 0.40
+	p.gravity = Vector2(0, 18)
+	p.scale_amount_min = 0.28
+	p.scale_amount_max = 0.55
 	p.color = color
 	return p
 
@@ -221,6 +220,13 @@ func _layout_frames() -> void:
 	_place_rect(_front_lip, Rect2(_anchor_rect.position.x, _anchor_rect.position.y + frame_h * 0.55, _anchor_rect.size.x, frame_h * 0.45))
 	_dust.position = Vector2(area.x * 0.5, _anchor_rect.position.y + frame_h * 0.42)
 	_sparks.position = _dust.position
+	var scroll_w := area.x * 0.52
+	var scroll_h := scroll_w * 0.30
+	_scroll_spawn.position = Vector2(area.x * 0.5 - scroll_w * 0.5, _anchor_rect.position.y + frame_h * 0.42)
+	_scroll_spawn.size = Vector2(scroll_w, scroll_h)
+	_rolled_scroll.position = Vector2.ZERO
+	_rolled_scroll.size = Vector2(scroll_w, scroll_h)
+	_rolled_scroll.pivot_offset = Vector2(scroll_w * 0.5, scroll_h * 0.5)
 	if _badge:
 		_badge.position = Vector2(area.x * 0.72, top + frame_h * 0.08)
 		_badge.size = Vector2(40, 40)
@@ -382,39 +388,39 @@ func play_press_feedback() -> void:
 
 
 func play_empty_feedback() -> void:
-	## Subtle jiggle/pulse — never the full cinematic open.
+	## Kept for tests/compatibility — prefer full open + empty message in UI.
+	await play_open_empty_pulse()
+
+
+func play_open_empty_pulse() -> void:
+	## Already-open empty chest: subtle glow/pulse only (no full cinematic replay).
 	if animating:
 		return
 	animating = true
 	_input_locked = true
 	HapticHelper.light_tap()
-	var base_rot := 0.0
-	var tw := create_tween()
-	tw.tween_property(_root_visual, "rotation", deg_to_rad(-4.0), 0.06).set_trans(Tween.TRANS_SINE)
-	tw.tween_property(_root_visual, "rotation", deg_to_rad(4.0), 0.08).set_trans(Tween.TRANS_SINE)
-	tw.tween_property(_root_visual, "rotation", deg_to_rad(-2.5), 0.07).set_trans(Tween.TRANS_SINE)
-	tw.tween_property(_root_visual, "rotation", base_rot, 0.10).set_trans(Tween.TRANS_SINE)
-	var pulse := create_tween()
-	pulse.tween_method(_apply_centered_zoom, 1.0, 1.04, 0.12).set_trans(Tween.TRANS_SINE)
-	pulse.tween_method(_apply_centered_zoom, 1.04, 1.0, 0.18).set_trans(Tween.TRANS_SINE)
 	var glow := create_tween()
-	glow.tween_property(_interior_glow, "modulate:a", 0.35, 0.12)
-	glow.tween_property(_interior_glow, "modulate:a", 0.10, 0.22)
-	await tw.finished
-	_root_visual.rotation = 0.0
-	_apply_centered_zoom(1.0)
+	glow.tween_property(_interior_glow, "modulate:a", 0.78, 0.14).set_trans(Tween.TRANS_SINE)
+	glow.tween_property(_interior_glow, "modulate:a", 0.55, 0.22).set_trans(Tween.TRANS_SINE)
+	var pulse := create_tween()
+	pulse.tween_method(_apply_centered_zoom, _cinematic_zoom, 1.10, 0.12).set_trans(Tween.TRANS_SINE)
+	pulse.tween_method(_apply_centered_zoom, 1.10, 1.08, 0.16).set_trans(Tween.TRANS_SINE)
+	await glow.finished
 	animating = false
 	_input_locked = false
 
 
 func play_open_animation(short: bool = false, emerge_scroll: bool = false) -> void:
-	## emerge_scroll is ignored — cinematic holds then transitions; no flying scroll.
+	## emerge_scroll: only true when a new scroll actually exists.
 	if animating or chest_state == ChestState.OPENING or chest_state == ChestState.CLOSING:
+		return
+	if chest_state == ChestState.OPENED and not emerge_scroll:
+		await play_open_empty_pulse()
 		return
 	animating = true
 	_input_locked = true
 	_skip = false
-	_show_scroll_on_finish = false
+	_show_scroll_on_finish = emerge_scroll
 	chest_state = ChestState.OPENING
 	play_press_feedback()
 	if reduced_motion or short:
@@ -496,7 +502,10 @@ func _open_short() -> void:
 	tw.tween_method(_show_frame_state, 0.0, 1.0, 0.42).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	tw.tween_method(_apply_centered_zoom, 1.0, 1.06, 0.42).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	await tw.finished
-	await get_tree().create_timer(0.12).timeout
+	if _show_scroll_on_finish and not _skip:
+		await _emerge_scroll()
+	else:
+		await get_tree().create_timer(0.12).timeout
 
 
 func _open_full() -> void:
@@ -528,15 +537,42 @@ func _open_full() -> void:
 	if _skip:
 		_apply_finished_state()
 		return
-	## Brief cinematic hold with warm light — no flying scroll.
+	## Warm interior glow hold.
 	var hold := create_tween()
 	hold.tween_property(_interior_glow, "modulate:a", 0.88, 0.22).set_trans(Tween.TRANS_SINE)
 	await hold.finished
-	await get_tree().create_timer(0.28).timeout
+	if _show_scroll_on_finish and not _skip:
+		await _emerge_scroll()
+		scroll_emerged.emit(get_scroll_global_center())
+	else:
+		await get_tree().create_timer(0.22).timeout
 	_front_lip.modulate.a = 0.0
 
 
+func _emerge_scroll() -> void:
+	## Rise from the open rim — only when a new scroll exists.
+	if _rolled_scroll == null:
+		return
+	_scroll_spawn.visible = true
+	_rolled_scroll.visible = true
+	_rolled_scroll.modulate.a = 0.0
+	_rolled_scroll.scale = Vector2(0.90, 0.90)
+	_rolled_scroll.position = Vector2(0, 22)
+	_front_lip.modulate.a = 0.70
+	var tw := create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(_rolled_scroll, "modulate:a", 1.0, 0.38).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tw.tween_property(_rolled_scroll, "position:y", -28.0, 0.42).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	tw.tween_property(_rolled_scroll, "scale", Vector2.ONE, 0.42).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	await tw.finished
+	var soft := create_tween()
+	soft.tween_property(_front_lip, "modulate:a", 0.20, 0.14)
+	await soft.finished
+
+
 func get_scroll_global_center() -> Vector2:
+	if _rolled_scroll and is_instance_valid(_rolled_scroll) and _rolled_scroll.visible:
+		return _rolled_scroll.global_position + _rolled_scroll.size * 0.5
 	return global_position + size * 0.5
 
 
@@ -554,7 +590,14 @@ func _apply_finished_state() -> void:
 	_show_frame_state(1.0)
 	_apply_centered_zoom(1.08 if not reduced_motion else 1.04)
 	_front_lip.modulate.a = 0.0
-	hide_rolled_scroll()
+	if _show_scroll_on_finish and _rolled_scroll:
+		_scroll_spawn.visible = true
+		_rolled_scroll.visible = true
+		_rolled_scroll.modulate.a = 1.0
+		_rolled_scroll.position = Vector2(0, -28)
+		_rolled_scroll.scale = Vector2.ONE
+	else:
+		hide_rolled_scroll()
 
 
 func _emit_burst() -> void:

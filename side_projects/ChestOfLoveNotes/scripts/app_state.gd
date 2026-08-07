@@ -124,18 +124,25 @@ func persist_session_verified() -> Dictionary:
 	## Call after successful sign-in + membership. Hard-checks Keystore write.
 	var tree := Engine.get_main_loop() as SceneTree
 	if tree != null and OS.get_name() == "Android" and tokens.keep_me_signed_in:
-		await AndroidSecureStore.await_ready(tree, 2.5)
+		await AndroidSecureStore.await_ready(tree, 5.0)
 	var ok := tokens.persist_if_needed()
 	## Round-trip verify: reload ciphertext markers, not just has_session().
 	var has := AndroidSecureStore.has_session()
 	var reload_ok := false
 	if ok and has and tokens.keep_me_signed_in:
 		var probe := AndroidSecureStore.load_session_json()
-		reload_ok = not probe.is_empty() and probe.contains("refresh_token")
+		reload_ok = (
+			not probe.is_empty()
+			and probe.contains("refresh_token")
+			and probe.contains("access_token")
+		)
 	debug_session_trace = _plugin_trace()
 	debug_session_trace["persist_ok"] = ok
 	debug_session_trace["has_session_after_persist"] = has
 	debug_session_trace["persist_roundtrip_ok"] = reload_ok
+	AndroidSecureStore.log_secure(
+		"persist_verified_ok" if (ok and has and reload_ok) else "persist_verified_fail"
+	)
 	if tokens.keep_me_signed_in and (not ok or not has or not reload_ok):
 		return {
 			"ok": false,
@@ -164,8 +171,9 @@ func restore_session_if_possible() -> Dictionary:
 	tokens.session_refresh_performed = false
 	var tree := Engine.get_main_loop() as SceneTree
 	if tree != null and OS.get_name() == "Android":
-		await AndroidSecureStore.await_ready(tree, 2.5)
+		await AndroidSecureStore.await_ready(tree, 5.0)
 	debug_session_trace = _plugin_trace()
+	AndroidSecureStore.log_secure("restore_begin")
 	if not is_online():
 		return {"ok": false, "reason": "not_online", "silent": true}
 	if not tokens.keep_me_signed_in:
@@ -174,9 +182,11 @@ func restore_session_if_possible() -> Dictionary:
 		for k in tokens.debug_restore_trace.keys():
 			debug_session_trace[k] = tokens.debug_restore_trace[k]
 		## No ciphertext / plugin not ready / decrypt empty → silent login.
+		AndroidSecureStore.log_secure("restore_no_session")
 		return {"ok": false, "reason": "no_session", "silent": true}
 	debug_session_trace["decrypt_ok"] = tokens.last_decrypt_ok
 	debug_session_trace["session_restored"] = true
+	debug_session_trace["email_confirmed_persisted"] = tokens.email_confirmed
 
 	var needed_refresh := tokens.is_expired() or tokens.access_token.is_empty()
 	var fresh: Dictionary = await auth.ensure_fresh_access()
@@ -188,6 +198,7 @@ func restore_session_if_possible() -> Dictionary:
 			tokens.clear(true) # definitive auth failure
 			## Expired sessions clear quietly and show login — not a scary startup error.
 			session_restore_message = ""
+			AndroidSecureStore.log_secure("restore_refresh_invalid")
 			return {"ok": false, "reason": "refresh_invalid", "silent": true}
 		## Soft/network failure: keep Keystore. If access token still usable, continue;
 		## otherwise clear memory only and silently show login (no false verify toast).
@@ -196,6 +207,7 @@ func restore_session_if_possible() -> Dictionary:
 		else:
 			tokens.clear(false)
 			session_restore_message = ""
+			AndroidSecureStore.log_secure("restore_refresh_soft_fail")
 			return {"ok": false, "reason": "refresh_soft_fail", "silent": true}
 
 	var user_result: Dictionary = await auth.refresh_user()
@@ -205,13 +217,26 @@ func restore_session_if_possible() -> Dictionary:
 		if status == 401 or status == 403:
 			tokens.clear(true)
 			session_restore_message = ""
+			AndroidSecureStore.log_secure("restore_user_invalid")
 			return {"ok": false, "reason": "user_invalid", "silent": true}
-		## Soft/network: tokens already refreshed — continue into the app.
+		## Soft/network: tokens already usable — continue. Do NOT treat unknown
+		## email_confirmed as unconfirmed (that previously wiped Keystore).
 		debug_session_trace["user_soft_fail_continued"] = true
-	if not tokens.email_confirmed:
-		tokens.clear(true)
-		session_restore_message = "Please confirm your email, then sign in."
-		return {"ok": false, "reason": "email_unconfirmed", "message": session_restore_message, "silent": false}
+		AndroidSecureStore.log_secure("restore_user_soft_fail_continued")
+	else:
+		## Only wipe for definitive unconfirmed after a successful /auth/user.
+		if not tokens.email_confirmed:
+			tokens.clear(true)
+			## Explicit backend signal only — do not sticky-banner the login form.
+			session_restore_message = ""
+			AndroidSecureStore.log_secure("restore_email_unconfirmed")
+			return {
+				"ok": false,
+				"reason": "email_unconfirmed",
+				"message": "",
+				"needs_confirmation": true,
+				"silent": true,
+			}
 
 	var claim: Dictionary = await membership.claim_membership()
 	debug_session_trace["membership_revalidated"] = bool(claim.get("ok", false)) and membership.is_member
@@ -238,9 +263,10 @@ func restore_session_if_possible() -> Dictionary:
 		debug_session_trace["profile_soft_fail_continued"] = true
 		profile_exists = not profiles.profile.is_empty()
 
-	# Persist rotated tokens after successful restore (verified write when possible).
+	# Persist rotated tokens + confirmation flags after successful restore.
 	var persisted := tokens.persist_if_needed()
 	debug_session_trace["repersist_ok"] = persisted
+	AndroidSecureStore.log_secure("restore_success")
 	return {
 		"ok": true,
 		"profile_exists": profile_exists,

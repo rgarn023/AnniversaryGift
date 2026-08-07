@@ -1,13 +1,15 @@
 extends Control
 class_name CharoiteBoot
-## Cold-start Charoite Games brand presentation (≥5 seconds).
+## Cold-start Charoite Games brand presentation (~1.5–2.0 seconds).
 ## ONE centered official CG logo. No chest, no "Presents", no duplicate labels.
+## Official logo artwork is never rewritten — display only crops near-black margins
+## in memory so the mark sits cleanly on a matching black field.
 
 signal finished
 
-const MIN_DURATION_SEC := 5.0
-const FADE_IN_SEC := 0.6
-const FADE_OUT_SEC := 0.6
+const MIN_DURATION_SEC := 1.75
+const FADE_IN_SEC := 0.28
+const FADE_OUT_SEC := 0.28
 ## Official CG monogram — source of truth when present on disk (kept byte-identical).
 const OFFICIAL_CG := "res://assets/branding/charoite_games_cg_logo.png"
 ## Interim single mark if official file is not yet packaged (never use PRESENTS splash).
@@ -50,18 +52,55 @@ func _load_official_texture() -> Texture2D:
 	if err != OK:
 		push_warning("CharoiteBoot: could not decode official CG logo bytes")
 		return null
+	## In-memory trim of near-black letterbox so the JPEG rectangle doesn't
+	## read as a floating dark card on the purple app chrome underneath.
+	img = _trim_near_black_margins(img)
 	return ImageTexture.create_from_image(img)
 
 
+func _trim_near_black_margins(img: Image) -> Image:
+	if img == null or img.get_width() < 8 or img.get_height() < 8:
+		return img
+	var w := img.get_width()
+	var h := img.get_height()
+	var threshold := 18
+	var min_x := w
+	var min_y := h
+	var max_x := -1
+	var max_y := -1
+	## Sample every few pixels for speed on large logos.
+	var step := maxi(1, int(mini(w, h) / 180.0))
+	for y in range(0, h, step):
+		for x in range(0, w, step):
+			var c := img.get_pixel(x, y)
+			if c.r * 255.0 > threshold or c.g * 255.0 > threshold or c.b * 255.0 > threshold:
+				min_x = mini(min_x, x)
+				min_y = mini(min_y, y)
+				max_x = maxi(max_x, x)
+				max_y = maxi(max_y, y)
+	if max_x <= min_x or max_y <= min_y:
+		return img
+	## Expand a little so we don't clip glow, then clamp.
+	var pad := int(maxi(w, h) * 0.02)
+	min_x = maxi(0, min_x - pad)
+	min_y = maxi(0, min_y - pad)
+	max_x = mini(w - 1, max_x + pad)
+	max_y = mini(h - 1, max_y + pad)
+	var cw := max_x - min_x + 1
+	var ch := max_y - min_y + 1
+	if cw < w * 0.35 or ch < h * 0.35:
+		return img
+	return img.get_region(Rect2i(min_x, min_y, cw, ch))
+
+
 func _build() -> void:
+	## Pure black plane matching the official logo field — eliminates the
+	## "dark rectangle on purple" mismatch when boot sits over app chrome.
 	var bg := ColorRect.new()
-	bg.color = Color(0.02, 0.01, 0.05, 1.0)
+	bg.color = Color(0.0, 0.0, 0.0, 1.0)
 	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(bg)
-
-	## Solid black/cosmic plane only — no second brand mark / wordmark / chest.
-	## Official logo already includes its own black field + glow.
 
 	_logo = TextureRect.new()
 	var tex: Texture2D = _load_official_texture()
