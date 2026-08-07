@@ -13,6 +13,7 @@ var _compose_draft: Dictionary = {}
 var _compose_screen: ComposeScrollScreen
 var _password_target: Dictionary = {}
 var _overlay: Control
+var _reveal_timers: Dictionary = {}
 
 
 func _ready() -> void:
@@ -24,6 +25,45 @@ func _ready() -> void:
 	_scroll_viewer.set_reduced_motion(state.reduced_motion)
 	_scroll_viewer.closed.connect(_on_scroll_closed)
 	add_child(_scroll_viewer)
+	if state.api:
+		state.api.session_invalidated.connect(_on_session_invalidated)
+	await _startup_navigate()
+
+
+func _startup_navigate() -> void:
+	if state.is_online():
+		_show_session_loading()
+		var restore: Dictionary = await state.restore_session_if_possible()
+		if bool(restore.get("ok", false)):
+			if bool(restore.get("profile_exists", false)):
+				_show_main_chest()
+			else:
+				_show_profile_setup()
+			return
+		if not str(restore.get("message", "")).is_empty():
+			_show_toast(str(restore.message))
+	_show_welcome()
+
+
+func _show_session_loading() -> void:
+	_current_screen = "loading"
+	_clear_screen()
+	var box := VBoxContainer.new()
+	box.set_anchors_preset(Control.PRESET_CENTER)
+	box.position = Vector2(-320, -120)
+	box.size = Vector2(640, 240)
+	_screen_host.add_child(box)
+	var lab := Label.new()
+	lab.text = "Opening Chest of Love Notes…"
+	lab.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lab.add_theme_font_size_override("font_size", 28)
+	lab.add_theme_color_override("font_color", Color(0.98, 0.86, 0.45))
+	box.add_child(lab)
+
+
+func _on_session_invalidated() -> void:
+	state.sign_out()
+	_show_toast("Your session has expired. Please sign in again.")
 	_show_welcome()
 
 
@@ -1224,6 +1264,9 @@ func _show_friends() -> void:
 func _show_sent() -> void:
 	if not _guard_private_chest():
 		return
+	# Leaving/rebuilding Sent clears any previously revealed passwords from memory.
+	_clear_reveal_timers()
+	state.clear_revealed_passwords()
 	_current_screen = "sent"
 	_clear_screen()
 	var root := VBoxContainer.new()
@@ -1242,7 +1285,11 @@ func _show_sent() -> void:
 	title.add_theme_font_size_override("font_size", 40)
 	title.add_theme_color_override("font_color", Color(0.98, 0.86, 0.45))
 	header.add_child(title)
-	header.add_child(_make_button("Back", _show_main_chest, Vector2(160, 64)))
+	header.add_child(_make_button("Back", func() -> void:
+		_clear_reveal_timers()
+		state.clear_revealed_passwords()
+		_show_main_chest()
+	, Vector2(160, 64)))
 	var sent_items: Array = []
 	if state.is_demo():
 		sent_items = state.demo.get_sent_scrolls()
@@ -1282,17 +1329,19 @@ func _show_sent() -> void:
 			unlock_unix = int(Time.get_unix_time_from_datetime_string(unlock_at))
 		var row := Label.new()
 		row.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		row.text = "%s → %s · unlock_unix=%d · password=%s · opened=%d" % [
+		row.text = "%s → %s · opens %s · opened=%d" % [
 			str(s.get("title", "")),
 			str(s.get("recipient_display_name", recipient.get("display_name", ""))),
-			unlock_unix,
-			"yes" if bool(s.get("has_password", false)) else "no",
+			Time.get_datetime_string_from_unix_time(unlock_unix, false) if unlock_unix > 0 else unlock_at,
 			int(s.get("opened_count", 0)),
 		]
 		row.add_theme_font_size_override("font_size", 22)
 		row.add_theme_color_override("font_color", Color(0.9, 0.85, 0.95))
 		col.add_child(row)
 		var sid := str(s.get("id", ""))
+		var has_pw := bool(s.get("has_password", false))
+		if has_pw:
+			col.add_child(_build_sent_password_reveal_row(sid, s))
 		col.add_child(_make_button("Hide from Sent", func() -> void:
 			if state.is_demo():
 				var result := state.demo.delete_sent_scroll(sid)
@@ -1312,6 +1361,129 @@ func _show_sent() -> void:
 				_show_toast("Backend is not configured.")
 		, Vector2(240, 56)))
 		root.add_child(panel)
+
+
+func _build_sent_password_reveal_row(scroll_id: String, item: Dictionary) -> VBoxContainer:
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 8)
+	var caption := Label.new()
+	caption.text = "Magic Password"
+	caption.add_theme_font_size_override("font_size", 18)
+	caption.add_theme_color_override("font_color", Color(0.98, 0.86, 0.45))
+	box.add_child(caption)
+	var value := Label.new()
+	value.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	value.add_theme_font_size_override("font_size", 22)
+	value.add_theme_color_override("font_color", Color(0.95, 0.9, 0.85))
+	box.add_child(value)
+	var actions := HBoxContainer.new()
+	actions.add_theme_constant_override("separation", 8)
+	box.add_child(actions)
+	var reveal_btn := _make_button("Reveal Password", func() -> void: pass, Vector2(220, 56))
+	var copy_btn := _make_button("Copy", func() -> void: pass, Vector2(140, 56))
+	var hide_btn := _make_button("Hide", func() -> void: pass, Vector2(140, 56))
+	actions.add_child(reveal_btn)
+	actions.add_child(copy_btn)
+	actions.add_child(hide_btn)
+
+	var refresh_row := func() -> void:
+		var revealed := str(state.revealed_magic_passwords.get(scroll_id, ""))
+		if revealed.is_empty():
+			value.text = "••••••••"
+			reveal_btn.visible = true
+			copy_btn.visible = false
+			hide_btn.visible = false
+		else:
+			value.text = revealed
+			reveal_btn.visible = false
+			copy_btn.visible = true
+			hide_btn.visible = true
+	refresh_row.call()
+
+	reveal_btn.pressed.connect(func() -> void:
+		_confirm_reveal_password(scroll_id, item, refresh_row)
+	)
+	copy_btn.pressed.connect(func() -> void:
+		var revealed := str(state.revealed_magic_passwords.get(scroll_id, ""))
+		if revealed.is_empty():
+			return
+		DisplayServer.clipboard_set(revealed)
+		_show_toast("Magic Password copied")
+	)
+	hide_btn.pressed.connect(func() -> void:
+		_hide_revealed_password(scroll_id)
+		refresh_row.call()
+	)
+	return box
+
+
+func _confirm_reveal_password(scroll_id: String, item: Dictionary, refresh_row: Callable) -> void:
+	_show_modal_panel(
+		"Reveal Password?",
+		[
+			"Reveal the Magic Password for this scroll?",
+			"Title: %s" % str(item.get("title", "A Love Note")),
+		],
+		"Reveal",
+		func() -> void:
+			_hide_overlay()
+			SensitiveReveal.request_sensitive_reveal(func() -> void:
+				await _reveal_sent_password(scroll_id, refresh_row)
+			)
+	)
+
+
+func _reveal_sent_password(scroll_id: String, refresh_row: Callable) -> void:
+	var password := ""
+	if state.is_demo():
+		for s in state.demo.scrolls:
+			if str(s.get("id", "")) == scroll_id:
+				password = str(s.get("_demo_password", ""))
+				break
+		if password.is_empty():
+			_show_toast("No Magic Password is available for this scroll.")
+			return
+	elif state.is_online():
+		var result: Dictionary = await state.scrolls.reveal_sent_scroll_password(scroll_id)
+		if not bool(result.get("ok", false)):
+			_show_toast(str(result.get("error", "Could not reveal Magic Password.")))
+			return
+		var data: Dictionary = result.get("data", {}) if typeof(result.get("data")) == TYPE_DICTIONARY else {}
+		password = str(data.get("magic_password", ""))
+		if password.is_empty():
+			_show_toast("Could not reveal Magic Password.")
+			return
+	else:
+		_show_toast("Backend is not configured.")
+		return
+	state.revealed_magic_passwords[scroll_id] = password
+	password = ""
+	refresh_row.call()
+	_arm_reveal_timeout(scroll_id, refresh_row)
+
+
+func _arm_reveal_timeout(scroll_id: String, refresh_row: Callable) -> void:
+	if _reveal_timers.has(scroll_id):
+		var old: SceneTreeTimer = _reveal_timers[scroll_id]
+		# Previous timer will no-op if password already cleared.
+	var timer := get_tree().create_timer(30.0)
+	_reveal_timers[scroll_id] = timer
+	await timer.timeout
+	if str(state.revealed_magic_passwords.get(scroll_id, "")) != "":
+		_hide_revealed_password(scroll_id)
+		if refresh_row.is_valid():
+			refresh_row.call()
+
+
+func _hide_revealed_password(scroll_id: String) -> void:
+	if state.revealed_magic_passwords.has(scroll_id):
+		state.revealed_magic_passwords[scroll_id] = ""
+		state.revealed_magic_passwords.erase(scroll_id)
+	_reveal_timers.erase(scroll_id)
+
+
+func _clear_reveal_timers() -> void:
+	_reveal_timers.clear()
 
 
 func _show_profile() -> void:
@@ -1358,9 +1530,30 @@ func _show_profile() -> void:
 	info.add_theme_font_size_override("font_size", 26)
 	info.add_theme_color_override("font_color", Color(0.92, 0.88, 0.96))
 	root.add_child(info)
+	if state.is_online():
+		var keep_row := HBoxContainer.new()
+		keep_row.custom_minimum_size = Vector2(0, 56)
+		root.add_child(keep_row)
+		var keep_lab := Label.new()
+		keep_lab.text = "Keep Me Signed In"
+		keep_lab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		keep_lab.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		keep_lab.add_theme_font_size_override("font_size", 22)
+		keep_lab.add_theme_color_override("font_color", Color(0.92, 0.88, 0.96))
+		keep_row.add_child(keep_lab)
+		var keep_toggle := CheckButton.new()
+		keep_toggle.button_pressed = state.tokens.keep_me_signed_in
+		keep_toggle.custom_minimum_size = Vector2(72, 48)
+		keep_toggle.focus_mode = Control.FOCUS_NONE
+		keep_toggle.toggled.connect(func(on: bool) -> void:
+			state.tokens.set_keep_me_signed_in(on)
+			_show_toast("Keep Me Signed In is %s" % ("ON" if on else "OFF"))
+		)
+		keep_row.add_child(keep_toggle)
 	if OS.is_debug_build():
 		root.add_child(_make_button("Online Diagnostics", _show_diagnostics))
 	root.add_child(_make_button("Sign Out", func() -> void:
+		_clear_reveal_timers()
 		state.sign_out()
 		if state.is_demo():
 			state.demo.enable()
@@ -1524,7 +1717,11 @@ func _notification(what: int) -> void:
 					pass
 				else:
 					_show_main_chest()
-			"inventory", "saved", "friends", "sent", "profile":
+			"sent":
+				_clear_reveal_timers()
+				state.clear_revealed_passwords()
+				_show_main_chest()
+			"inventory", "saved", "friends", "profile":
 				_show_main_chest()
 			"diagnostics":
 				_show_profile()
@@ -1534,7 +1731,19 @@ func _notification(what: int) -> void:
 				_show_welcome()
 			_:
 				pass
+	elif what == NOTIFICATION_APPLICATION_PAUSED or what == NOTIFICATION_APPLICATION_FOCUS_OUT:
+		# Clear revealed Magic Passwords when the app backgrounds.
+		_clear_reveal_timers()
+		state.clear_revealed_passwords()
 	elif what == NOTIFICATION_APPLICATION_FOCUS_IN or what == NOTIFICATION_APPLICATION_RESUMED:
-		if _current_screen == "main_chest" and state.is_demo():
-			# Refresh counts/state after resume.
-			pass
+		call_deferred("_on_app_resumed")
+
+
+func _on_app_resumed() -> void:
+	if state.is_online() and state.tokens.has_session():
+		var fresh: Dictionary = await state.auth.ensure_fresh_access()
+		if not bool(fresh.get("ok", false)):
+			_on_session_invalidated()
+			return
+		if _current_screen == "main_chest":
+			_show_main_chest()

@@ -29,7 +29,7 @@ scan_client() {
   fi
 }
 
-scan_client 'SERVICE_ROLE|service_role_key|MESSAGE_ENCRYPTION_KEY\s*=\s*["'\''][^"'\'']+' 'no embedded service/encryption secrets in client'
+scan_client 'SERVICE_ROLE|service_role_key|MESSAGE_ENCRYPTION_KEY\s*=\s*["'\''][^"'\'']+|MAGIC_PASSWORD_RECOVERY_KEY\s*=\s*["'\''][^"'\'']+' 'no embedded service/encryption secrets in client'
 scan_client 'eyJhbGciOi' 'no JWT-like literals in client'
 scan_client 'password\s*[:=]\s*["'\''][^"'\'']{6,}["'\'']' 'no hardcoded password assignments in client'
 scan_client '@(gmail|yahoo|hotmail|outlook)\.com' 'no consumer email addresses in client'

@@ -1,11 +1,13 @@
 extends RefCounted
 class_name AuthService
-## Live Supabase email/password auth. Never logs passwords or tokens.
+## Live Supabase email/password auth with single-flight refresh + secure persist.
+## Never logs passwords or tokens. Never stores the account password.
 
 var api: ApiClient
 var config: BackendConfig
 var tokens: SecureTokenService
 var _resend_cooldown_until: int = 0
+var _is_refreshing: bool = false
 
 
 func _init(p_api: ApiClient, p_config: BackendConfig, p_tokens: SecureTokenService) -> void:
@@ -34,8 +36,6 @@ func sign_up(email: String, password: String, confirm_password: String) -> Dicti
 			"status": int(result.get("status", 0)),
 		}
 	var data: Variant = result.get("data", {})
-	# Supabase may return a user with empty identities when email confirmation is required,
-	# or a session when confirmation is disabled.
 	var has_session := false
 	if typeof(data) == TYPE_DICTIONARY:
 		var d: Dictionary = data
@@ -80,47 +80,79 @@ func sign_in(email: String, password: String) -> Dictionary:
 	)
 	var user_result := await refresh_user()
 	if not bool(user_result.get("ok", false)):
-		tokens.clear()
+		tokens.clear(true)
 		return {"ok": false, "error": str(user_result.get("error", "Could not load user."))}
 	if not tokens.email_confirmed:
-		tokens.clear()
+		tokens.clear(true)
 		return {
 			"ok": false,
 			"error": "Please confirm your email before signing in.",
 			"needs_confirmation": true,
 		}
+	tokens.persist_if_needed()
 	return {"ok": true, "error": "", "user_id": tokens.user_id}
 
 
 func refresh_session() -> Dictionary:
+	## Single-flight refresh with refresh-token rotation persistence.
 	if tokens.refresh_token.is_empty():
-		return {"ok": false, "error": "No refresh token in memory."}
+		return {"ok": false, "error": "No refresh token in memory.", "invalid_session": true}
+	if _is_refreshing:
+		while _is_refreshing:
+			await Engine.get_main_loop().process_frame
+		if tokens.has_session() and not tokens.is_expired():
+			return {"ok": true}
+		return {"ok": false, "error": "Session refresh failed.", "invalid_session": true}
+
+	_is_refreshing = true
 	var url := "%s/auth/v1/token?grant_type=refresh_token" % config.supabase_url.rstrip("/")
+	var used_refresh := tokens.refresh_token
 	var result: Dictionary = await api.request(
 		url,
 		"POST",
-		{"refresh_token": tokens.refresh_token},
+		{"refresh_token": used_refresh},
+		false,
+		"",
 		false
 	)
-	if not bool(result.get("ok", false)):
-		return {"ok": false, "error": str(result.get("error", "Session refresh failed."))}
-	var data: Dictionary = result.data if typeof(result.get("data")) == TYPE_DICTIONARY else {}
-	var access := str(data.get("access_token", ""))
-	if access.is_empty():
-		return {"ok": false, "error": "Refresh did not return an access token."}
-	tokens.set_session(
-		access,
-		str(data.get("refresh_token", tokens.refresh_token)),
-		int(Time.get_unix_time_from_system()) + int(data.get("expires_in", 3600))
-	)
-	await refresh_user()
-	return {"ok": true}
+	var out: Dictionary = {"ok": false, "error": "Session refresh failed.", "invalid_session": false}
+	if bool(result.get("ok", false)):
+		var data: Dictionary = result.data if typeof(result.get("data")) == TYPE_DICTIONARY else {}
+		var access := str(data.get("access_token", ""))
+		var new_refresh := str(data.get("refresh_token", ""))
+		if access.is_empty():
+			out = {"ok": false, "error": "Refresh did not return an access token.", "invalid_session": true}
+		else:
+			# Always replace with newly returned refresh token when present (rotation).
+			if new_refresh.is_empty():
+				new_refresh = used_refresh
+			tokens.set_session(
+				access,
+				new_refresh,
+				int(Time.get_unix_time_from_system()) + int(data.get("expires_in", 3600))
+			)
+			await refresh_user()
+			tokens.persist_if_needed()
+			out = {"ok": true}
+	else:
+		var status := int(result.get("status", 0))
+		var invalid := status == 400 or status == 401 or status == 403
+		out = {
+			"ok": false,
+			"error": str(result.get("error", "Session refresh failed.")),
+			"invalid_session": invalid,
+		}
+		if invalid:
+			tokens.clear(true)
+
+	_is_refreshing = false
+	return out
 
 
 func ensure_fresh_access() -> Dictionary:
-	if not tokens.has_session():
-		return {"ok": false, "error": "Not signed in."}
-	if tokens.is_expired():
+	if not tokens.has_session() and tokens.refresh_token.is_empty():
+		return {"ok": false, "error": "Not signed in.", "invalid_session": true}
+	if tokens.is_expired() or tokens.access_token.is_empty():
 		return await refresh_session()
 	return {"ok": true}
 
@@ -129,7 +161,7 @@ func refresh_user() -> Dictionary:
 	if not tokens.has_session():
 		return {"ok": false, "error": "Not signed in."}
 	var url := "%s/auth/v1/user" % config.supabase_url.rstrip("/")
-	var result: Dictionary = await api.request(url, "GET", {}, true)
+	var result: Dictionary = await api.request(url, "GET", {}, true, "", false)
 	if not bool(result.get("ok", false)):
 		return {"ok": false, "error": str(result.get("error", "Could not load user."))}
 	var data: Dictionary = result.data if typeof(result.get("data")) == TYPE_DICTIONARY else {}
@@ -168,4 +200,6 @@ func resend_confirmation(email: String) -> Dictionary:
 
 
 func sign_out() -> void:
-	tokens.clear()
+	## Clears in-memory tokens and Android Keystore-backed session storage.
+	## Account password is never stored and therefore never wiped from disk here.
+	tokens.clear(true)

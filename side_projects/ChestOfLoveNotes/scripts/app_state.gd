@@ -24,9 +24,15 @@ var cached_sent: Dictionary = {}
 var cached_friends: Dictionary = {}
 
 
+## Ephemeral revealed Magic Passwords keyed by scroll_id (never persisted).
+var revealed_magic_passwords: Dictionary = {}
+var session_restore_message: String = ""
+
+
 func _init() -> void:
 	api = ApiClient.new(config, tokens)
 	auth = AuthService.new(api, config, tokens)
+	api.auth = auth
 	membership = MembershipService.new(api, tokens)
 	profiles = ProfileService.new(api, tokens)
 	scrolls = ScrollService.new(api)
@@ -72,6 +78,10 @@ func clear_open_message() -> void:
 	open_message_plaintext = ""
 
 
+func clear_revealed_passwords() -> void:
+	revealed_magic_passwords.clear()
+
+
 func clear_private_caches() -> void:
 	cached_chest.clear()
 	cached_saved.clear()
@@ -80,13 +90,50 @@ func clear_private_caches() -> void:
 
 
 func sign_out() -> void:
+	# Clears sensitive state synchronously; remote logout continues in background.
 	auth.sign_out()
 	membership.clear()
 	profiles.clear()
 	clear_open_message()
+	clear_revealed_passwords()
 	clear_private_caches()
 	pending_confirm_email = ""
+	session_restore_message = ""
 	demo.clear_sensitive()
+
+
+func restore_session_if_possible() -> Dictionary:
+	## Startup restore: secure storage → refresh if needed → membership → profile.
+	session_restore_message = ""
+	if not is_online():
+		return {"ok": false, "reason": "not_online"}
+	if not tokens.restore_from_secure_storage():
+		return {"ok": false, "reason": "no_session"}
+	var fresh: Dictionary = await auth.ensure_fresh_access()
+	if not bool(fresh.get("ok", false)):
+		tokens.clear(true)
+		session_restore_message = "Your session has expired. Please sign in again."
+		return {"ok": false, "reason": "refresh_failed", "message": session_restore_message}
+	var user_result: Dictionary = await auth.refresh_user()
+	if not bool(user_result.get("ok", false)) or not tokens.email_confirmed:
+		tokens.clear(true)
+		session_restore_message = "Your session has expired. Please sign in again."
+		return {"ok": false, "reason": "user_invalid", "message": session_restore_message}
+	var claim: Dictionary = await membership.claim_membership()
+	if not bool(claim.get("ok", false)) or not membership.is_member:
+		sign_out()
+		session_restore_message = "This is a private app, and this account is not approved."
+		return {"ok": false, "reason": "membership_denied", "message": session_restore_message}
+	var profile_result: Dictionary = await profiles.fetch_own_profile()
+	if not bool(profile_result.get("ok", false)):
+		sign_out()
+		session_restore_message = "Your session has expired. Please sign in again."
+		return {"ok": false, "reason": "profile_failed", "message": session_restore_message}
+	tokens.persist_if_needed()
+	return {
+		"ok": true,
+		"profile_exists": bool(profile_result.get("exists", false)),
+	}
 
 
 func backend_host() -> String:

@@ -6,13 +6,16 @@ class_name ApiClient
 ## Never uses the publishable key as a user Bearer token.
 
 signal request_finished(ok: bool, status: int, data: Variant, error: String)
+signal session_invalidated
 
 var config: BackendConfig
 var tokens: SecureTokenService
+var auth: AuthService = null
 var timeout_sec: float = 25.0
 var last_function_name: String = ""
 var last_http_status: int = 0
 var last_safe_error: String = ""
+var _is_refreshing: bool = false
 
 
 func _init(p_config: BackendConfig = null, p_tokens: SecureTokenService = null) -> void:
@@ -27,7 +30,7 @@ func call_edge_function(function_name: String, body: Dictionary = {}, method: St
 	if not await _ensure_user_bearer_ready():
 		return _fail("Not signed in.", 401)
 	var url := "%s/functions/v1/%s" % [config.supabase_url.rstrip("/"), function_name]
-	return await request(url, method, body, true)
+	return await request(url, method, body, true, "", true)
 
 
 func rest_get(path: String, query: String = "") -> Dictionary:
@@ -39,7 +42,7 @@ func rest_get(path: String, query: String = "") -> Dictionary:
 	var url := "%s/rest/v1/%s" % [config.supabase_url.rstrip("/"), path.lstrip("/")]
 	if not query.is_empty():
 		url += "?" + query
-	return await request(url, "GET", {}, true)
+	return await request(url, "GET", {}, true, "", true)
 
 
 func rest_post(path: String, body: Dictionary, prefer: String = "return=representation") -> Dictionary:
@@ -49,7 +52,7 @@ func rest_post(path: String, body: Dictionary, prefer: String = "return=represen
 	if not await _ensure_user_bearer_ready():
 		return _fail("Not signed in.", 401)
 	var url := "%s/rest/v1/%s" % [config.supabase_url.rstrip("/"), path.lstrip("/")]
-	return await request(url, "POST", body, true, prefer)
+	return await request(url, "POST", body, true, prefer, true)
 
 
 func rest_rpc(fn_name: String, args: Dictionary = {}) -> Dictionary:
@@ -59,38 +62,78 @@ func rest_rpc(fn_name: String, args: Dictionary = {}) -> Dictionary:
 	if not await _ensure_user_bearer_ready():
 		return _fail("Not signed in.", 401)
 	var url := "%s/rest/v1/rpc/%s" % [config.supabase_url.rstrip("/"), fn_name]
-	return await request(url, "POST", args, true)
+	return await request(url, "POST", args, true, "", true)
 
 
 func _ensure_user_bearer_ready() -> bool:
-	if tokens == null or not tokens.has_session():
+	if tokens == null:
 		return false
-	if tokens.is_expired() and not tokens.refresh_token.is_empty():
-		var url := "%s/auth/v1/token?grant_type=refresh_token" % config.supabase_url.rstrip("/")
-		var result: Dictionary = await request(
-			url,
-			"POST",
-			{"refresh_token": tokens.refresh_token},
-			false
-		)
-		if not bool(result.get("ok", false)):
-			return false
+	if tokens.has_session() and not tokens.is_expired():
+		return tokens.access_token != config.supabase_publishable_key
+	if tokens.refresh_token.is_empty():
+		return false
+	var refreshed := await _single_flight_refresh()
+	return refreshed and tokens.has_session() and tokens.access_token != config.supabase_publishable_key
+
+
+func _single_flight_refresh() -> bool:
+	if auth != null:
+		var result: Dictionary = await auth.refresh_session()
+		if bool(result.get("invalid_session", false)):
+			session_invalidated.emit()
+		return bool(result.get("ok", false))
+	# Fallback refresh without AuthService (should rarely run).
+	if _is_refreshing:
+		while _is_refreshing:
+			await Engine.get_main_loop().process_frame
+		return tokens.has_session() and not tokens.is_expired()
+	_is_refreshing = true
+	var url := "%s/auth/v1/token?grant_type=refresh_token" % config.supabase_url.rstrip("/")
+	var result: Dictionary = await request(url, "POST", {"refresh_token": tokens.refresh_token}, false, "", false)
+	var ok := false
+	if bool(result.get("ok", false)):
 		var data: Dictionary = result.data if typeof(result.get("data")) == TYPE_DICTIONARY else {}
 		var access := str(data.get("access_token", ""))
-		if access.is_empty():
-			return false
-		# Never treat the publishable key as a user access token.
-		if access == config.supabase_publishable_key:
-			return false
-		tokens.set_session(
-			access,
-			str(data.get("refresh_token", tokens.refresh_token)),
-			int(Time.get_unix_time_from_system()) + int(data.get("expires_in", 3600))
-		)
-	return tokens.has_session() and tokens.access_token != config.supabase_publishable_key
+		var new_refresh := str(data.get("refresh_token", tokens.refresh_token))
+		if not access.is_empty() and access != config.supabase_publishable_key:
+			tokens.set_session(
+				access,
+				new_refresh if not new_refresh.is_empty() else tokens.refresh_token,
+				int(Time.get_unix_time_from_system()) + int(data.get("expires_in", 3600))
+			)
+			ok = true
+	else:
+		var status := int(result.get("status", 0))
+		if status == 400 or status == 401 or status == 403:
+			tokens.clear(true)
+			session_invalidated.emit()
+	_is_refreshing = false
+	return ok
 
 
 func request(
+	url: String,
+	method: String,
+	body: Dictionary,
+	authed: bool,
+	prefer: String = "",
+	allow_auth_retry: bool = false
+) -> Dictionary:
+	var first: Dictionary = await _raw_request(url, method, body, authed, prefer)
+	if (
+		allow_auth_retry
+		and authed
+		and not bool(first.get("ok", false))
+		and int(first.get("status", 0)) == 401
+		and not tokens.refresh_token.is_empty()
+	):
+		var refreshed := await _single_flight_refresh()
+		if refreshed:
+			return await _raw_request(url, method, body, authed, prefer)
+	return first
+
+
+func _raw_request(
 	url: String,
 	method: String,
 	body: Dictionary,
@@ -108,12 +151,12 @@ func request(
 	if not prefer.is_empty():
 		headers.append("Prefer: %s" % prefer)
 	if authed:
-		var auth := tokens.authorization_header()
-		if auth.is_empty():
+		var auth_header := tokens.authorization_header()
+		if auth_header.is_empty():
 			http.queue_free()
 			return _fail("Not signed in.", 401)
 		# Must be the signed-in user JWT — never the publishable key.
-		headers.append("Authorization: %s" % auth)
+		headers.append("Authorization: %s" % auth_header)
 	else:
 		# Unauthenticated Auth endpoints still need apikey; optional anon bearer for GoTrue.
 		headers.append("Authorization: Bearer %s" % config.supabase_publishable_key)

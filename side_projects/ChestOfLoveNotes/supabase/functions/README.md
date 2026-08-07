@@ -17,6 +17,7 @@ TypeScript Deno functions for friend graph + encrypted scrolls.
 | `update-scroll-favorite` | Recipient favorite toggle via `set_recipient_scroll_favorite` |
 | `delete-received-scroll` | Soft-delete recipient copy only |
 | `delete-sent-scroll` | Soft-delete sender history only |
+| `reveal-sent-scroll-password` | Sender-only Magic Password recovery (decrypts `scroll_sender_secrets`) |
 | `claim-private-membership` | Claim private allowlist membership |
 | `delete-account` | `{ confirm: true }` hard-deletes auth user (cascade) |
 | `search-profiles` | Public profile fields only (no email) |
@@ -28,7 +29,11 @@ Set via `supabase secrets set` (never commit real values):
 
 ```bash
 supabase secrets set MESSAGE_ENCRYPTION_KEY="<base64-or-hex-32-bytes>"
+supabase secrets set MAGIC_PASSWORD_RECOVERY_KEY="<base64-or-hex-32-bytes>"
 ```
+
+`MAGIC_PASSWORD_RECOVERY_KEY` is **separate** from `MESSAGE_ENCRYPTION_KEY`.
+It encrypts the sender-recoverable Magic Password copy only.
 
 Supabase injects automatically in hosted / local edge runtime:
 
@@ -36,10 +41,11 @@ Supabase injects automatically in hosted / local edge runtime:
 - `SUPABASE_ANON_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY`
 
-Generate a local encryption key:
+Generate local encryption keys:
 
 ```bash
-openssl rand -base64 32
+openssl rand -base64 32   # MESSAGE_ENCRYPTION_KEY
+openssl rand -base64 32   # MAGIC_PASSWORD_RECOVERY_KEY (different value)
 ```
 
 Password hashing uses **bcrypt** as a Deno-compatible fallback. Prefer **Argon2id** in production if you swap the hasher in `_shared/crypto.ts`.

@@ -1,8 +1,12 @@
 /**
- * Message encryption + password hashing helpers.
+ * Message encryption + password hashing + sender password-recovery helpers.
  *
- * Encryption: AES-256-GCM with MESSAGE_ENCRYPTION_KEY
+ * Message encryption: AES-256-GCM with MESSAGE_ENCRYPTION_KEY
  *   - Key must be 32 bytes, provided as base64 or hex via env.
+ *
+ * Magic-password recovery encryption: AES-256-GCM with MAGIC_PASSWORD_RECOVERY_KEY
+ *   - Separate 32-byte server secret. Never reuse MESSAGE_ENCRYPTION_KEY.
+ *   - Used only to let the authenticated sender reveal their own password later.
  *
  * Password hashing:
  *   - Preferred: Argon2id (when available in the runtime).
@@ -18,10 +22,10 @@ import bcrypt from "npm:bcryptjs@2.4.3";
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-function parseEncryptionKey(): Uint8Array<ArrayBuffer> {
-  const raw = Deno.env.get("MESSAGE_ENCRYPTION_KEY");
+function parseKeyFromEnv(envName: string): Uint8Array<ArrayBuffer> {
+  const raw = Deno.env.get(envName);
   if (!raw) {
-    throw new Error("MESSAGE_ENCRYPTION_KEY is not set");
+    throw new Error(`${envName} is not set`);
   }
 
   // Prefer base64 (44 chars for 32 bytes) else hex (64 chars).
@@ -35,9 +39,17 @@ function parseEncryptionKey(): Uint8Array<ArrayBuffer> {
   }
 
   if (key.length !== 32) {
-    throw new Error("MESSAGE_ENCRYPTION_KEY must decode to 32 bytes");
+    throw new Error(`${envName} must decode to 32 bytes`);
   }
   return key;
+}
+
+function parseEncryptionKey(): Uint8Array<ArrayBuffer> {
+  return parseKeyFromEnv("MESSAGE_ENCRYPTION_KEY");
+}
+
+function parseRecoveryKey(): Uint8Array<ArrayBuffer> {
+  return parseKeyFromEnv("MAGIC_PASSWORD_RECOVERY_KEY");
 }
 
 function bytesToBase64(bytes: Uint8Array): string {
@@ -123,4 +135,56 @@ export async function verifyPassword(
   } catch {
     return false;
   }
+}
+
+export interface RecoverablePasswordPayload {
+  ciphertext: string; // base64
+  iv: string; // base64 12-byte IV
+  encryption_version: string;
+}
+
+/** Encrypt a Magic Password for sender recovery only (separate key). */
+export async function encryptMagicPasswordForSender(
+  password: string,
+): Promise<RecoverablePasswordPayload> {
+  const keyBytes = parseRecoveryKey();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    asBufferSource(keyBytes),
+    { name: "AES-GCM" },
+    false,
+    ["encrypt"],
+  );
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const cipherBuf = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv: asBufferSource(iv) },
+    key,
+    encoder.encode(password),
+  );
+  return {
+    ciphertext: bytesToBase64(new Uint8Array(cipherBuf)),
+    iv: bytesToBase64(iv),
+    encryption_version: "1",
+  };
+}
+
+/** Decrypt a sender-recoverable Magic Password. Never log the result. */
+export async function decryptMagicPasswordForSender(
+  ciphertextB64: string,
+  ivB64: string,
+): Promise<string> {
+  const keyBytes = parseRecoveryKey();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    asBufferSource(keyBytes),
+    { name: "AES-GCM" },
+    false,
+    ["decrypt"],
+  );
+  const plainBuf = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: asBufferSource(base64ToBytes(ivB64)) },
+    key,
+    asBufferSource(base64ToBytes(ciphertextB64)),
+  );
+  return decoder.decode(plainBuf);
 }

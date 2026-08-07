@@ -53,3 +53,10 @@ func delete_sent_scroll(scroll_id: String) -> Dictionary:
 	return await api.call_edge_function("delete-sent-scroll", {
 		"scroll_id": scroll_id,
 	}, "POST")
+
+
+func reveal_sent_scroll_password(scroll_id: String) -> Dictionary:
+	## Sender-only Magical Password recovery. Never log the returned password.
+	return await api.call_edge_function("reveal-sent-scroll-password", {
+		"scroll_id": scroll_id,
+	}, "POST")

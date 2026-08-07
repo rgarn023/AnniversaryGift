@@ -1,7 +1,8 @@
 extends RefCounted
 class_name SecureTokenService
-## In-memory session only for the temporary private onboarding build.
-## Never persists tokens to disk / user:// as plaintext.
+## In-memory Supabase session with optional Android Keystore persistence.
+## Never saves access/refresh tokens as plaintext under user://.
+## Never stores the account password.
 
 var access_token: String = ""
 var refresh_token: String = ""
@@ -9,32 +10,65 @@ var expires_at_unix: int = 0
 var user_id: String = ""
 var user_email: String = ""
 var email_confirmed: bool = false
+var keep_me_signed_in: bool = true
 var memory_only: bool = true
-var limitation_message: String = (
-	"Secure persistent token storage is not yet wired. "
-	+ "Sessions remain in memory for this build and clear when the app closes."
-)
+var limitation_message: String = ""
+var last_persist_error: String = ""
+
+
+func _init() -> void:
+	keep_me_signed_in = AndroidSecureStore.get_keep_me_signed_in()
+	_refresh_limitation_message()
+
+
+func _refresh_limitation_message() -> void:
+	if AndroidSecureStore.is_available() and keep_me_signed_in:
+		memory_only = false
+		limitation_message = "Session is protected by Android Keystore-backed storage."
+	elif keep_me_signed_in and not AndroidSecureStore.is_available():
+		memory_only = true
+		limitation_message = (
+			"Secure Android storage is unavailable on this device/build. "
+			+ "Session remains in memory until the app closes."
+		)
+	else:
+		memory_only = true
+		limitation_message = "Keep Me Signed In is off. Session clears when the app closes."
+
+
+func set_keep_me_signed_in(enabled: bool) -> void:
+	keep_me_signed_in = enabled
+	AndroidSecureStore.set_keep_me_signed_in(enabled)
+	_refresh_limitation_message()
+	if enabled:
+		persist_if_needed()
+	else:
+		AndroidSecureStore.delete_session()
 
 
 func set_session(access: String, refresh: String, expires_at: int = 0) -> void:
 	access_token = access
 	refresh_token = refresh
 	expires_at_unix = expires_at
+	persist_if_needed()
 
 
 func set_user(p_user_id: String, p_email: String, p_confirmed: bool) -> void:
 	user_id = p_user_id
 	user_email = p_email
 	email_confirmed = p_confirmed
+	persist_if_needed()
 
 
-func clear() -> void:
+func clear(delete_persistent: bool = true) -> void:
 	access_token = ""
 	refresh_token = ""
 	expires_at_unix = 0
 	user_id = ""
 	user_email = ""
 	email_confirmed = false
+	if delete_persistent:
+		AndroidSecureStore.delete_session()
 
 
 func has_session() -> bool:
@@ -51,3 +85,59 @@ func authorization_header() -> String:
 	if access_token.is_empty():
 		return ""
 	return "Bearer %s" % access_token
+
+
+func to_session_dict() -> Dictionary:
+	return {
+		"access_token": access_token,
+		"refresh_token": refresh_token,
+		"expires_at_unix": expires_at_unix,
+		"user_id": user_id,
+		"user_email": user_email,
+		"email_confirmed": email_confirmed,
+	}
+
+
+func persist_if_needed() -> bool:
+	last_persist_error = ""
+	if not keep_me_signed_in:
+		return false
+	if not AndroidSecureStore.is_available():
+		last_persist_error = "secure_store_unavailable"
+		return false
+	if access_token.is_empty() or refresh_token.is_empty():
+		return false
+	var payload := JSON.stringify(to_session_dict())
+	var ok := AndroidSecureStore.store_session_json(payload)
+	if not ok:
+		last_persist_error = "secure_store_failed"
+	_refresh_limitation_message()
+	return ok
+
+
+func restore_from_secure_storage() -> bool:
+	clear(false)
+	if not keep_me_signed_in:
+		return false
+	if not AndroidSecureStore.is_available() or not AndroidSecureStore.has_session():
+		return false
+	var raw := AndroidSecureStore.load_session_json()
+	if raw.is_empty():
+		AndroidSecureStore.delete_session()
+		return false
+	var parsed: Variant = JSON.parse_string(raw)
+	if typeof(parsed) != TYPE_DICTIONARY:
+		AndroidSecureStore.delete_session()
+		return false
+	var data: Dictionary = parsed
+	access_token = str(data.get("access_token", ""))
+	refresh_token = str(data.get("refresh_token", ""))
+	expires_at_unix = int(data.get("expires_at_unix", 0))
+	user_id = str(data.get("user_id", ""))
+	user_email = str(data.get("user_email", ""))
+	email_confirmed = bool(data.get("email_confirmed", false))
+	if access_token.is_empty() or refresh_token.is_empty():
+		clear(true)
+		return false
+	_refresh_limitation_message()
+	return true

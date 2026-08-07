@@ -509,7 +509,7 @@ func _build_password_card() -> PanelContainer:
 	pw2_row.add_child(_pw2_show)
 
 	var warn := Label.new()
-	warn.text = "Important: The app cannot show you this password later. Share it privately."
+	warn.text = "Important: Share this password privately. You can reveal it later from your Sent Scrolls."
 	warn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	warn.add_theme_font_size_override("font_size", 14)
 	warn.add_theme_color_override("font_color", COL_WARN)

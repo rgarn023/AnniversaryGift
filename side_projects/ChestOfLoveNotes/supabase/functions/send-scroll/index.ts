@@ -2,7 +2,11 @@ import { handleCors, jsonResponse } from "../_shared/cors.ts";
 import { requireUser, callerId, requirePrivateMember } from "../_shared/auth.ts";
 import { createServiceClient } from "../_shared/supabase.ts";
 import { AppError, errorResponse, requireFields } from "../_shared/errors.ts";
-import { encryptMessage, hashPassword } from "../_shared/crypto.ts";
+import {
+  encryptMagicPasswordForSender,
+  encryptMessage,
+  hashPassword,
+} from "../_shared/crypto.ts";
 
 interface Body {
   recipient_id: string;
@@ -47,6 +51,9 @@ Deno.serve(async (req) => {
 
     let passwordHash: string | null = null;
     let hasPassword = false;
+    let recoveryCipher: { ciphertext: string; iv: string; encryption_version: string } | null =
+      null;
+    let magicPassword: string | null = null;
     if (body.password != null && body.password !== "") {
       if (
         body.password.length < MIN_PASSWORD ||
@@ -58,7 +65,10 @@ Deno.serve(async (req) => {
           400,
         );
       }
-      passwordHash = await hashPassword(body.password);
+      magicPassword = body.password;
+      // Keep hash for recipient verification AND encrypted recovery for sender.
+      passwordHash = await hashPassword(magicPassword);
+      recoveryCipher = await encryptMagicPasswordForSender(magicPassword);
       hasPassword = true;
     }
 
@@ -124,6 +134,32 @@ Deno.serve(async (req) => {
         .eq("id", scroll.id);
       throw new AppError("insert_failed", "Could not store encrypted message", 500);
     }
+
+    // Sender-only recoverable Magic Password (never plaintext; never logged).
+    if (hasPassword && recoveryCipher) {
+      const { error: secretErr } = await service.from("scroll_sender_secrets").insert({
+        scroll_id: scroll.id,
+        sender_id: me,
+        encrypted_magic_password: recoveryCipher.ciphertext,
+        encryption_iv: recoveryCipher.iv,
+        encryption_version: recoveryCipher.encryption_version,
+      });
+      if (secretErr) {
+        console.error(secretErr);
+        await service
+          .from("scrolls")
+          .update({ deleted_at: new Date().toISOString() })
+          .eq("id", scroll.id);
+        throw new AppError(
+          "insert_failed",
+          "Could not store sender password recovery record",
+          500,
+        );
+      }
+    }
+    // Drop temporary plaintext as soon as practical.
+    magicPassword = null;
+    recoveryCipher = null;
 
     // Create recipient + sender state rows (idempotent; no duplicates).
     const { error: stateErr } = await service.rpc("ensure_scroll_party_states", {
