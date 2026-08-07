@@ -1798,7 +1798,7 @@ func _format_friendly_datetime(unix_ts: int) -> String:
 		return ""
 	var dt := Time.get_datetime_dict_from_unix_time(unix_ts)
 	var months := ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-	var month := months[clampi(int(dt.month) - 1, 0, 11)]
+	var month: String = months[clampi(int(dt.month) - 1, 0, 11)]
 	var hour := int(dt.hour)
 	var minute := int(dt.minute)
 	var ampm := "AM" if hour < 12 else "PM"
