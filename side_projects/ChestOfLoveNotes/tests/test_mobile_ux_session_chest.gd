@@ -139,14 +139,19 @@ func _test_chest_frames() -> void:
 
 func _test_startup_charoite() -> void:
 	_assert(FileAccess.file_exists("res://assets/branding/charoite_system_splash_dark.png"), "dark splash asset")
+	_assert(FileAccess.file_exists("res://assets/branding/charoite_games_cg_logo.png"), "official CG logo packaged")
 	_assert(FileAccess.file_exists("res://scripts/ui/charoite_boot.gd"), "CharoiteBoot script")
 	var boot_src := FileAccess.get_file_as_string("res://scripts/ui/charoite_boot.gd")
 	_assert(boot_src.contains("MIN_DURATION_SEC := 5.0"), "boot minimum 5 seconds")
 	_assert(boot_src.contains("charoite_games_cg_logo.png"), "official CG logo path preferred")
+	_assert(boot_src.contains("_load_official_texture"), "loads official logo bytes without recompress")
+	_assert(boot_src.contains("load_jpg_from_buffer") or boot_src.contains("load_png_from_buffer"), "decodes kept official bytes")
 	_assert(not boot_src.contains('_label.text = "Charoite Games"'), "no duplicate text label")
 	_assert(not boot_src.contains("var _label"), "no studio text Label node")
 	_assert(not boot_src.to_lower().contains("chest_closed"), "boot scene has no chest art")
 	_assert(not boot_src.contains("charoite_boot_splash.png"), "PRESENTS splash not used in CharoiteBoot")
+	var import_src := FileAccess.get_file_as_string("res://assets/branding/charoite_games_cg_logo.png.import")
+	_assert(import_src.contains('importer="keep"'), "official logo kept as raw bytes")
 	var main_src := FileAccess.get_file_as_string("res://scripts/main.gd")
 	_assert(main_src.contains("Text Size"), "Text Size setting in Profile")
 	_assert(main_src.contains("Reduced Motion"), "Reduced Motion setting in Profile")
@@ -162,10 +167,10 @@ func _test_plugin_commit() -> void:
 
 
 func _test_build_version() -> void:
-	_assert(BuildFlags.APP_VERSION_CODE >= 9, "versionCode >= 9")
+	_assert(BuildFlags.APP_VERSION_CODE >= 10, "versionCode >= 10")
 	var preset := FileAccess.get_file_as_string("res://export_presets.cfg")
 	_assert(preset.contains("ChestOfLoveNotes-mobile-correction-complete-debug.apk"), "export APK name")
-	_assert(preset.contains("version/code=9"), "export versionCode 9")
+	_assert(preset.contains("version/code=10"), "export versionCode 10")
 	_assert(BuildFlags.PRIVATE_ONBOARDING_BUILD == true, "private onboarding still enabled")
 
 

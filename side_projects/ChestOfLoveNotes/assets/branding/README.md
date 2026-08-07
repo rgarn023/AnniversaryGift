@@ -1,13 +1,14 @@
 # Branding assets
 
 - `charoite_games_cg_logo.png` — OFFICIAL Charoite Games CG monogram (source of truth).
-  Must be the exact provided artwork; do not redraw or regenerate.
-  When this file is present, CharoiteBoot uses it exclusively for the ≥5s studio presentation.
-- `charoite_system_splash_dark.png` — dark cosmic background for Godot/Android system splash
-  (no text, no chest, not a full studio presentation).
+  Exact provided artwork; do not redraw, regenerate, recolor, resize, or recompress.
+  CharoiteBoot loads these raw bytes for the ≥5s studio presentation (single logo only).
+- `charoite_games_cg_logo_splash_derived.png` — derived square mark for Android launcher /
+  system-splash icon paths only. Generated from the official logo; never replaces the source.
+- `charoite_system_splash_dark.png` — dark cosmic / black plane for the engine boot_splash
+  image (no text, no chest, not a second studio presentation).
 - `charoite_dark_square.png` — solid dark square helper.
-- `android_splash_mark_interim.png` — temporary non-chest launcher/splash mark used only until
-  the official CG logo binary is packaged. Do not treat as the studio logo.
+- `android_splash_mark_interim.png` — legacy interim mark (superseded by CG-derived splash).
 
-Until the official CG logo file is packaged, CharoiteBoot falls back to the existing
-wordmark only (single presentation; no "Presents" label and no duplicate text Label).
+CharoiteBoot shows ONE official CG logo against black. No "Presents" label, no wordmark
+duplicate, and no chest graphic during startup.

@@ -8,11 +8,12 @@ signal finished
 const MIN_DURATION_SEC := 5.0
 const FADE_IN_SEC := 0.6
 const FADE_OUT_SEC := 0.6
-## Official CG monogram — source of truth when present on disk.
+## Official CG monogram — source of truth when present on disk (kept byte-identical).
 const OFFICIAL_CG := "res://assets/branding/charoite_games_cg_logo.png"
 ## Interim single mark if official file is not yet packaged (never use PRESENTS splash).
 const FALLBACK_WORDMARK := "res://assets/art/brand/charoite_games_wordmark.png"
-const DARK_BG := "res://assets/branding/charoite_system_splash_dark.png"
+## Portrait official mark fits ~72% of the 390-wide logical viewport.
+const LOGO_DISPLAY := Vector2(280, 372)
 
 var _started_usec: int = 0
 var _logo: TextureRect
@@ -28,38 +29,54 @@ func _ready() -> void:
 	_play()
 
 
+func _load_official_texture() -> Texture2D:
+	## Official asset is kept as raw bytes (may be JPEG content with a .png name).
+	## Load via buffer so the source file is never rewritten/recompressed.
+	if not FileAccess.file_exists(OFFICIAL_CG):
+		return null
+	var fa := FileAccess.open(OFFICIAL_CG, FileAccess.READ)
+	if fa == null:
+		return null
+	var buf: PackedByteArray = fa.get_buffer(fa.get_length())
+	fa.close()
+	if buf.is_empty():
+		return null
+	var img := Image.new()
+	var err := img.load_jpg_from_buffer(buf)
+	if err != OK:
+		err = img.load_png_from_buffer(buf)
+	if err != OK:
+		err = img.load_webp_from_buffer(buf)
+	if err != OK:
+		push_warning("CharoiteBoot: could not decode official CG logo bytes")
+		return null
+	return ImageTexture.create_from_image(img)
+
+
 func _build() -> void:
 	var bg := ColorRect.new()
-	bg.color = Color(0.05, 0.03, 0.12, 1.0)
+	bg.color = Color(0.02, 0.01, 0.05, 1.0)
 	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(bg)
 
-	if ResourceLoader.exists(DARK_BG):
-		var stars := TextureRect.new()
-		stars.texture = load(DARK_BG)
-		stars.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-		stars.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		stars.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
-		stars.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		add_child(stars)
+	## Solid black/cosmic plane only — no second brand mark / wordmark / chest.
+	## Official logo already includes its own black field + glow.
 
 	_logo = TextureRect.new()
-	var logo_path := ""
-	if ResourceLoader.exists(OFFICIAL_CG):
-		logo_path = OFFICIAL_CG
+	var tex: Texture2D = _load_official_texture()
+	if tex != null:
+		_logo.texture = tex
 		_used_official = true
 	elif ResourceLoader.exists(FALLBACK_WORDMARK):
-		logo_path = FALLBACK_WORDMARK
+		_logo.texture = load(FALLBACK_WORDMARK)
 		_used_official = false
-	if logo_path != "":
-		_logo.texture = load(logo_path)
 	_logo.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	_logo.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	_logo.custom_minimum_size = Vector2(280, 280)
-	_logo.size = Vector2(280, 280)
+	_logo.custom_minimum_size = LOGO_DISPLAY
+	_logo.size = LOGO_DISPLAY
 	_logo.set_anchors_preset(Control.PRESET_CENTER)
-	_logo.position = Vector2(-140, -140)
+	_logo.position = Vector2(-LOGO_DISPLAY.x * 0.5, -LOGO_DISPLAY.y * 0.5)
 	_logo.modulate.a = 0.0
 	_logo.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_logo)
