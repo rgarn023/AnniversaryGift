@@ -12,21 +12,20 @@ signal scroll_emerged(global_pos: Vector2)
 enum ChestState { LOCKED_SILHOUETTE, AVAILABLE, OPENING, OPENED, READY }
 
 const ART := "res://assets/art/chest/"
-const FRAME_ART := "res://assets/art/chest/opening_frames/"
 const SCROLL_ART := "res://assets/art/scroll/"
 ## Logical chest footprint in ~390-wide mobile space (~60% width).
 const FRAME_SIZE := Vector2(260, 178)
 
-## Curated transparent frames only (black-bg intermediates removed from playback).
-## Same camera family: closed → early open → ajar → half → open.
+## Curated transparent frames (black-bg 75%/90% frames removed from playback).
+## closed → early open → ajar → half → open.
 const FRAME_KEYS: Array = [0.0, 0.12, 0.28, 0.45, 0.70, 1.0]
 const FRAME_FILES: Array = [
-	"frame_00_closed.png",
-	"frame_01_open10.png",
-	"frame_02_open25.png",
-	"frame_03_ajar.png",
-	"frame_04_half.png",
-	"frame_05_open.png",
+	"chest_closed.png",
+	"chest_open_10.png",
+	"chest_open_25.png",
+	"chest_ajar.png",
+	"chest_half.png",
+	"chest_open.png",
 ]
 
 @export var reduced_motion: bool = false
@@ -87,10 +86,7 @@ func _ready() -> void:
 func _preload_textures() -> void:
 	_frame_textures.clear()
 	for fname in FRAME_FILES:
-		var path := FRAME_ART + str(fname)
-		if not ResourceLoader.exists(path):
-			path = ART + str(fname)
-		_frame_textures.append(_load_tex(path))
+		_frame_textures.append(_load_tex(ART + str(fname)))
 
 
 func _load_tex(path: String) -> Texture2D:

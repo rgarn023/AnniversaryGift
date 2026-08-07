@@ -146,7 +146,7 @@ func _test_concurrent_refresh_contract() -> void:
 	var auth_src := FileAccess.get_file_as_string("res://scripts/network/auth_service.gd")
 	_assert(auth_src.contains("while _is_refreshing"), "Pending calls wait on single-flight refresh")
 	var main_src := FileAccess.get_file_as_string("res://scripts/main.gd")
-	_assert(main_src.contains("Opening your chest"), "Startup shows friendly opening copy while restoring")
+	_assert(main_src.contains("CharoiteBoot"), "Startup shows Charoite Games boot while restoring")
 	_assert(main_src.contains("Keep Me Signed In"), "Settings Keep Me Signed In present")
 
 

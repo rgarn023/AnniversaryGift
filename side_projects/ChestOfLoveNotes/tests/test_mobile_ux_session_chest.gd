@@ -96,18 +96,17 @@ func _test_logical_viewport() -> void:
 
 func _test_chest_frames() -> void:
 	for f in [
-		"opening_frames/frame_00_closed.png",
-		"opening_frames/frame_01_open10.png",
-		"opening_frames/frame_02_open25.png",
-		"opening_frames/frame_03_ajar.png",
-		"opening_frames/frame_04_half.png",
-		"opening_frames/frame_05_open.png",
+		"chest_closed.png",
+		"chest_open_10.png",
+		"chest_open_25.png",
+		"chest_ajar.png",
+		"chest_half.png",
+		"chest_open.png",
 	]:
 		_assert(FileAccess.file_exists("res://assets/art/chest/%s" % f), "frame exists: " + f)
 	var chest_src := FileAccess.get_file_as_string("res://scripts/chest/treasure_chest.gd")
 	_assert(chest_src.contains("FRAME_KEYS"), "multi-frame keys present")
-	_assert(chest_src.contains("opening_frames"), "uses curated opening_frames path")
-	_assert(chest_src.contains("frame_00_closed.png"), "closed frame wired")
+	_assert(chest_src.contains("chest_closed.png"), "closed frame wired")
 	_assert(chest_src.contains("play_close_animation"), "close animation present")
 	_assert(chest_src.contains("TRANS_CUBIC"), "non-linear timing")
 	_assert(not chest_src.contains("chest_open_90.png"), "black-bg 90% frame removed from playback")
