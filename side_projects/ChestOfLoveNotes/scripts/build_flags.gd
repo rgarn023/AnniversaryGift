@@ -17,5 +17,5 @@ const PRIVATE_ONBOARDING_BUILD := true
 const SHOW_ONBOARDING_BANNER := false
 ## Debug-only chest preview path (never enable in production content path).
 const DEV_CHEST_SCROLL_PREVIEW := false
-const APP_VERSION_NAME := "0.1.12-profile-compose-sent-chest"
-const APP_VERSION_CODE := 13
+const APP_VERSION_NAME := "0.1.13-location-performance"
+const APP_VERSION_CODE := 14

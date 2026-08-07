@@ -22,6 +22,9 @@ var cached_chest: Dictionary = {}
 var cached_saved: Dictionary = {}
 var cached_sent: Dictionary = {}
 var cached_friends: Dictionary = {}
+## Soft-refresh timestamps (unix) — avoid refetching on every tab tap.
+var cache_fetched_at: Dictionary = {"chest": 0, "friends": 0, "sent": 0, "profile": 0}
+const CACHE_SOFT_TTL_SEC := 45
 
 ## Local hide list for Sent history (recoverable; not permanent deletion).
 const SENT_HIDDEN_PATH := "user://coln_sent_hidden.json"
@@ -94,6 +97,25 @@ func clear_private_caches() -> void:
 	cached_sent.clear()
 	cached_friends.clear()
 	hidden_sent_ids.clear()
+	cache_fetched_at = {"chest": 0, "friends": 0, "sent": 0, "profile": 0}
+
+
+func cache_is_fresh(key: String) -> bool:
+	var at := int(cache_fetched_at.get(key, 0))
+	if at <= 0:
+		return false
+	return int(Time.get_unix_time_from_system()) - at < CACHE_SOFT_TTL_SEC
+
+
+func mark_cache_fresh(key: String) -> void:
+	cache_fetched_at[key] = int(Time.get_unix_time_from_system())
+
+
+func invalidate_cache(key: String = "") -> void:
+	if key.is_empty():
+		cache_fetched_at = {"chest": 0, "friends": 0, "sent": 0, "profile": 0}
+	else:
+		cache_fetched_at[key] = 0
 
 
 func load_hidden_sent() -> void:

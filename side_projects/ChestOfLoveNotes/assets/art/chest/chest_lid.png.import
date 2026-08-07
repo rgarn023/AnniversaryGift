@@ -2,9 +2,9 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://8024or5aiq13"
-path.s3tc="res://.godot/imported/chest_ajar.png-ab58e9b034d15d86210df5178758d127.s3tc.ctex"
-path.etc2="res://.godot/imported/chest_ajar.png-ab58e9b034d15d86210df5178758d127.etc2.ctex"
+uid=""uid://dgiyet06k2400""
+path.s3tc="res://.godot/imported/chest_lid.png-b0745751433a4fda0578cdf1f1daa5c8.s3tc.ctex"
+path.etc2="res://.godot/imported/chest_lid.png-b0745751433a4fda0578cdf1f1daa5c8.etc2.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
@@ -12,8 +12,8 @@ metadata={
 
 [deps]
 
-source_file="res://assets/art/chest/chest_ajar.png"
-dest_files=["res://.godot/imported/chest_ajar.png-ab58e9b034d15d86210df5178758d127.s3tc.ctex", "res://.godot/imported/chest_ajar.png-ab58e9b034d15d86210df5178758d127.etc2.ctex"]
+source_file="res://assets/art/chest/chest_lid.png"
+dest_files=["res://.godot/imported/chest_lid.png-b0745751433a4fda0578cdf1f1daa5c8.s3tc.ctex", "res://.godot/imported/chest_lid.png-b0745751433a4fda0578cdf1f1daa5c8.etc2.ctex"]
 
 [params]
 

@@ -29,10 +29,18 @@ func send_scroll(payload: Dictionary) -> Dictionary:
 	return await api.call_edge_function("send-scroll", body, "POST")
 
 
-func open_scroll(scroll_id: String, password: String = "") -> Dictionary:
+func open_scroll(
+	scroll_id: String,
+	password: String = "",
+	location_lat: float = NAN,
+	location_lng: float = NAN
+) -> Dictionary:
 	var body := {"scroll_id": scroll_id}
 	if not password.is_empty():
 		body["password"] = password
+	if not is_nan(location_lat) and not is_nan(location_lng):
+		body["location_lat"] = location_lat
+		body["location_lng"] = location_lng
 	return await api.call_edge_function("open-scroll", body, "POST")
 
 

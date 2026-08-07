@@ -17,6 +17,7 @@ fi
 
 mkdir -p "$JAVA_DST" "$RES_XML"
 cp -f "$PLUGIN_DIR/ChestSecureStoragePlugin.kt" "$JAVA_DST/ChestSecureStoragePlugin.kt"
+cp -f "$PLUGIN_DIR/ChestLocationPlugin.kt" "$JAVA_DST/ChestLocationPlugin.kt"
 cp -f "$PLUGIN_DIR/backup_rules.xml" "$RES_XML/coln_backup_rules.xml"
 cp -f "$PLUGIN_DIR/data_extraction_rules.xml" "$RES_XML/coln_data_extraction_rules.xml"
 
@@ -79,6 +80,10 @@ meta = '''
         <meta-data
             android:name="org.godotengine.plugin.v2.ChestSecureStorage"
             android:value="com.charoitegames.chestoflovenotes.securestorage.ChestSecureStoragePlugin" />
+        <!-- Chest of Love Notes: one-shot Location Lock helper -->
+        <meta-data
+            android:name="org.godotengine.plugin.v2.ChestLocation"
+            android:value="com.charoitegames.chestoflovenotes.securestorage.ChestLocationPlugin" />
 '''
 
 if 'org.godotengine.plugin.v2.ChestSecureStorage' not in text:
@@ -91,13 +96,37 @@ else:
         'android:name="org.godotengine.plugin.v2.ChestSecureStorage"\n            android:value="com.charoitegames.chestoflovenotes.securestorage.ChestSecureStoragePlugin"',
         text,
     )
+    if 'org.godotengine.plugin.v2.ChestLocation' not in text:
+        text = re.sub(
+            r'(android:name="org\.godotengine\.plugin\.v2\.ChestSecureStorage"[^/]*/>)',
+            r'''\1
+        <meta-data
+            android:name="org.godotengine.plugin.v2.ChestLocation"
+            android:value="com.charoitegames.chestoflovenotes.securestorage.ChestLocationPlugin" />''',
+            text,
+            count=1,
+            flags=re.S,
+        )
+
+# Location permissions for Location Lock (requested at use-time by the OS dialog).
+for perm in (
+    'android.permission.ACCESS_COARSE_LOCATION',
+    'android.permission.ACCESS_FINE_LOCATION',
+):
+    if perm not in text:
+        text = text.replace(
+            '</manifest>',
+            f'    <uses-permission android:name="{perm}" />\n</manifest>',
+            1,
+        )
 
 path.write_text(text)
 print('Updated', path)
 PY
 
-echo "Installed ChestSecureStorage into android/build"
+echo "Installed ChestSecureStorage + ChestLocation into android/build"
 echo "  kotlin: $JAVA_DST/ChestSecureStoragePlugin.kt"
+echo "  location: $JAVA_DST/ChestLocationPlugin.kt"
 echo "  backup rules: $RES_XML/coln_backup_rules.xml"
 echo "  data extraction: $RES_XML/coln_data_extraction_rules.xml"
 

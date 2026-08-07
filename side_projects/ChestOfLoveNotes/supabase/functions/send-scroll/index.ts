@@ -14,6 +14,12 @@ interface Body {
   title?: string;
   unlock_at?: string;
   password?: string;
+  /** Optional Location Lock — recipient must be near lat/lng to open. */
+  has_location_lock?: boolean;
+  location_name?: string;
+  location_lat?: number;
+  location_lng?: number;
+  location_radius_m?: number;
 }
 
 const MIN_PASSWORD = 4;
@@ -80,6 +86,38 @@ Deno.serve(async (req) => {
     const title = (body.title?.trim() || "A Love Note").slice(0, 120);
     const service = createServiceClient();
 
+    let hasLocationLock = Boolean(body.has_location_lock);
+    let locationName = (body.location_name ?? "").trim().slice(0, 120);
+    let locationLat: number | null = null;
+    let locationLng: number | null = null;
+    let locationRadiusM = 500;
+    if (hasLocationLock) {
+      const lat = Number(body.location_lat);
+      const lng = Number(body.location_lng);
+      const radius = Number(body.location_radius_m ?? 500);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        throw new AppError(
+          "invalid_location",
+          "Location Lock needs a valid place coordinate",
+          400,
+        );
+      }
+      if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+        throw new AppError("invalid_location", "Location coordinates out of range", 400);
+      }
+      if (!Number.isFinite(radius) || radius < 50 || radius > 50000) {
+        throw new AppError("invalid_location", "Location radius must be 50–50000 meters", 400);
+      }
+      if (!locationName) {
+        locationName = "a set place";
+      }
+      locationLat = lat;
+      locationLng = lng;
+      locationRadiusM = Math.round(radius);
+    } else {
+      locationName = "";
+    }
+
     const { data: friends } = await service.rpc("are_friends", {
       a: me,
       b: body.recipient_id,
@@ -106,9 +144,14 @@ Deno.serve(async (req) => {
         title,
         unlock_at: unlockAt.toISOString(),
         has_password: hasPassword,
+        has_location_lock: hasLocationLock,
+        location_name: locationName,
+        location_lat: locationLat,
+        location_lng: locationLng,
+        location_radius_m: locationRadiusM,
       })
       .select(
-        "id, sender_id, recipient_id, title, unlock_at, has_password, created_at",
+        "id, sender_id, recipient_id, title, unlock_at, has_password, has_location_lock, location_name, created_at",
       )
       .single();
 
@@ -215,6 +258,8 @@ Deno.serve(async (req) => {
         title: scroll.title,
         unlock_at: scroll.unlock_at,
         has_password: scroll.has_password,
+        has_location_lock: Boolean(scroll.has_location_lock),
+        location_name: scroll.location_name ?? "",
         created_at: scroll.created_at,
         is_opened: false,
       },

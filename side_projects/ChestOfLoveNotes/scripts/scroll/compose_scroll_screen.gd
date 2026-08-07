@@ -58,6 +58,18 @@ var _unlock_date: Dictionary = {}
 var _unlock_hour: int = 20
 var _unlock_minute: int = 0
 
+var _location_toggle: CheckButton
+var _location_fields: VBoxContainer
+var _location_name_edit: LineEdit
+var _location_status: Label
+var _location_use_btn: Button
+var _has_location_lock: bool = false
+var _location_name: String = ""
+var _location_lat: float = 0.0
+var _location_lng: float = 0.0
+var _location_radius_m: int = LocationHelper.DEFAULT_RADIUS_M
+var _location_fix_ok: bool = false
+
 var _pw_toggle: CheckButton
 var _pw_fields: VBoxContainer
 var _pw_edit: LineEdit
@@ -95,6 +107,7 @@ func _notification(what: int) -> void:
 
 
 func get_draft() -> Dictionary:
+	var loc_name := _location_name_edit.text.strip_edges() if _location_name_edit else _location_name
 	return {
 		"recipient_id": str(_selected_friend.get("id", "")),
 		"recipient_display_name": str(_selected_friend.get("display_name", "")),
@@ -105,6 +118,12 @@ func get_draft() -> Dictionary:
 		"unlock_unix": _compute_unlock_unix(),
 		"password": _password_value(),
 		"has_password": _pw_toggle.button_pressed if _pw_toggle else false,
+		"has_location_lock": _location_toggle.button_pressed if _location_toggle else _has_location_lock,
+		"location_name": loc_name,
+		"location_lat": _location_lat,
+		"location_lng": _location_lng,
+		"location_radius_m": _location_radius_m,
+		"location_fix_ok": _location_fix_ok,
 	}
 
 
@@ -157,6 +176,17 @@ func apply_draft(draft: Dictionary) -> void:
 			_pw_edit.text = pw
 		if _pw2_edit:
 			_pw2_edit.text = pw
+	_has_location_lock = bool(draft.get("has_location_lock", false))
+	_location_name = str(draft.get("location_name", ""))
+	_location_lat = float(draft.get("location_lat", 0.0))
+	_location_lng = float(draft.get("location_lng", 0.0))
+	_location_radius_m = int(draft.get("location_radius_m", LocationHelper.DEFAULT_RADIUS_M))
+	_location_fix_ok = bool(draft.get("location_fix_ok", false))
+	if _location_toggle:
+		_location_toggle.set_pressed_no_signal(_has_location_lock)
+	if _location_name_edit:
+		_location_name_edit.text = _location_name
+	_sync_location_visibility()
 	_refresh_recipient_row()
 	_refresh_schedule_labels()
 	_sync_delivery_visibility()
@@ -214,20 +244,12 @@ func _build_ui() -> void:
 	_title_font = _load_font("res://assets/fonts/Cinzel-Bold.ttf")
 	_body_font = _load_font("res://assets/fonts/CormorantGaramond-Regular.ttf")
 
+	## Transparent form over the shared chrome starfield — avoid a second full-screen blit.
 	var bg := ColorRect.new()
-	bg.color = COL_BG
+	bg.color = Color(COL_BG.r, COL_BG.g, COL_BG.b, 0.72)
 	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(bg)
-	if ResourceLoader.exists("res://assets/art/background/starfield.png"):
-		var stars := TextureRect.new()
-		stars.texture = load("res://assets/art/background/starfield.png")
-		stars.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-		stars.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		stars.stretch_mode = TextureRect.STRETCH_SCALE
-		stars.modulate = Color(1, 1, 1, 0.55)
-		stars.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		add_child(stars)
 
 	_safe_margin = MarginContainer.new()
 	_safe_margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -269,6 +291,7 @@ func _build_ui() -> void:
 	_form.add_child(_build_title_card())
 	_form.add_child(_build_message_card())
 	_form.add_child(_build_delivery_card())
+	_form.add_child(_build_location_card())
 	_form.add_child(_build_password_card())
 	_form.add_child(_build_summary_card())
 
@@ -297,6 +320,7 @@ func _build_ui() -> void:
 
 
 func _build_header() -> VBoxContainer:
+	## Primary bottom-nav destination — no redundant top Back control.
 	var wrap := VBoxContainer.new()
 	wrap.add_theme_constant_override("separation", 6)
 	if private_onboarding_label:
@@ -306,30 +330,8 @@ func _build_header() -> VBoxContainer:
 		chip.add_theme_font_size_override("font_size", 16)
 		chip.add_theme_color_override("font_color", Color(1.0, 0.78, 0.45, 0.85))
 		wrap.add_child(chip)
-
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 12)
-	row.custom_minimum_size = Vector2(0, MobileUi.font_touch(48))
-	wrap.add_child(row)
-
-	var back := Button.new()
-	back.text = "←"
-	back.custom_minimum_size = Vector2(MobileUi.font_touch(48), MobileUi.font_touch(48))
-	back.focus_mode = Control.FOCUS_NONE
-	back.add_theme_font_size_override("font_size", MobileUi.font(MobileUi.SIZE_SCREEN_TITLE))
-	_style_icon_button(back)
-	back.pressed.connect(func() -> void: back_pressed.emit())
-	row.add_child(back)
-
-	var heading := Label.new()
-	heading.text = "Compose Scroll"
-	heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	heading.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	heading.add_theme_font_size_override("font_size", MobileUi.font(MobileUi.SIZE_SCREEN_TITLE))
-	heading.add_theme_color_override("font_color", COL_GOLD)
-	if _title_font:
-		heading.add_theme_font_override("font", _title_font)
-	row.add_child(heading)
+	var heading := MobileUi.make_page_title("Compose", _title_font)
+	wrap.add_child(heading)
 	return wrap
 
 
@@ -502,6 +504,123 @@ func _build_delivery_card() -> PanelContainer:
 	_tz_label.add_theme_color_override("font_color", COL_SUPPORT)
 	col.add_child(_tz_label)
 	return card
+
+
+func _build_location_card() -> PanelContainer:
+	var card := _make_card()
+	var col := _card_body(card)
+	col.add_child(_section_heading("Location Lock"))
+	var toggle_row := HBoxContainer.new()
+	toggle_row.custom_minimum_size = Vector2(0, 56)
+	col.add_child(toggle_row)
+	var toggle_label := Label.new()
+	toggle_label.text = "Lock to a place"
+	toggle_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	toggle_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	toggle_label.add_theme_font_size_override("font_size", 19)
+	toggle_label.add_theme_color_override("font_color", COL_TEXT)
+	toggle_row.add_child(toggle_label)
+	_location_toggle = CheckButton.new()
+	_location_toggle.custom_minimum_size = Vector2(72, 48)
+	_location_toggle.focus_mode = Control.FOCUS_NONE
+	_location_toggle.toggled.connect(func(on: bool) -> void:
+		_has_location_lock = on
+		_sync_location_visibility()
+		_refresh_summary()
+		_update_validation()
+	)
+	toggle_row.add_child(_location_toggle)
+
+	_location_fields = VBoxContainer.new()
+	_location_fields.visible = false
+	_location_fields.add_theme_constant_override("separation", 10)
+	col.add_child(_location_fields)
+
+	var help := Label.new()
+	help.text = "Your friend must be near this place to open the scroll. You can combine this with a scheduled unlock time."
+	help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	help.add_theme_font_size_override("font_size", 16)
+	help.add_theme_color_override("font_color", COL_SUPPORT)
+	_location_fields.add_child(help)
+
+	_location_fields.add_child(_field_caption("Place name"))
+	_location_name_edit = LineEdit.new()
+	_location_name_edit.placeholder_text = "e.g. Our favorite park"
+	_location_name_edit.custom_minimum_size = Vector2(0, MobileUi.font_touch(MobileUi.INPUT_H))
+	_location_name_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_location_name_edit.add_theme_font_size_override("font_size", 19)
+	_style_line_edit(_location_name_edit)
+	_location_name_edit.text_changed.connect(func(t: String) -> void:
+		_location_name = t.strip_edges()
+		_refresh_summary()
+		_update_validation()
+	)
+	_location_fields.add_child(_location_name_edit)
+
+	_location_use_btn = Button.new()
+	_location_use_btn.text = "Use Current Location"
+	_location_use_btn.custom_minimum_size = Vector2(0, MobileUi.font_touch(48))
+	_location_use_btn.focus_mode = Control.FOCUS_NONE
+	_style_secondary_button(_location_use_btn)
+	_location_use_btn.pressed.connect(_on_use_current_location)
+	_location_fields.add_child(_location_use_btn)
+
+	_location_status = Label.new()
+	_location_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_location_status.add_theme_font_size_override("font_size", 15)
+	_location_status.add_theme_color_override("font_color", COL_SUPPORT)
+	_location_status.text = "Location not set yet."
+	_location_fields.add_child(_location_status)
+	return card
+
+
+func _sync_location_visibility() -> void:
+	var on := _location_toggle != null and _location_toggle.button_pressed
+	_has_location_lock = on
+	if _location_fields:
+		_location_fields.visible = on
+	if _location_status:
+		if not on:
+			_location_status.text = ""
+		elif _location_fix_ok:
+			_location_status.text = "Place locked · opens nearby (~%dm)" % _location_radius_m
+		else:
+			_location_status.text = "Tap Use Current Location to set the lock place."
+
+
+func _on_use_current_location() -> void:
+	## Permission only when the user opts into Location Lock configuration.
+	_location_status.text = "Getting location…"
+	_location_use_btn.disabled = true
+	if OS.get_name() == "Android":
+		var status := LocationHelper.request_permission_if_needed()
+		if status != "granted":
+			## Give the OS dialog a moment, then re-check.
+			await get_tree().create_timer(0.35).timeout
+			status = LocationHelper.permission_status()
+		if status != "granted":
+			_location_fix_ok = false
+			_location_status.text = "Location permission is needed to set a Location Lock. You can still send without it."
+			_location_use_btn.disabled = false
+			_update_validation()
+			return
+	var fix: Dictionary = LocationHelper.get_current_fix()
+	_location_use_btn.disabled = false
+	if not bool(fix.get("ok", false)):
+		_location_fix_ok = false
+		_location_status.text = str(fix.get("error", "Could not read your location."))
+		_update_validation()
+		return
+	_location_lat = float(fix.get("lat", 0.0))
+	_location_lng = float(fix.get("lng", 0.0))
+	_location_radius_m = LocationHelper.DEFAULT_RADIUS_M
+	_location_fix_ok = true
+	if _location_name_edit and _location_name_edit.text.strip_edges().is_empty():
+		_location_name_edit.text = "Current place"
+		_location_name = "Current place"
+	_location_status.text = "Place locked · opens nearby (~%dm)" % _location_radius_m
+	_refresh_summary()
+	_update_validation()
 
 
 func _build_password_card() -> PanelContainer:
@@ -853,9 +972,15 @@ func _refresh_summary() -> void:
 	if _summary_label == null:
 		return
 	var to_name := str(_selected_friend.get("display_name", "Not chosen"))
-	var when := "Immediately" if (_open_immediately and _open_immediately.button_pressed) else (
+	var immediate := _open_immediately != null and _open_immediately.button_pressed
+	var schedule_label := "Immediately" if immediate else (
 		"%s at %s" % [_format_date(_unlock_date), _format_time(_unlock_hour, _unlock_minute)]
 	)
+	var loc_on := _location_toggle != null and _location_toggle.button_pressed
+	var when := schedule_label
+	if loc_on:
+		var place := _location_name_edit.text.strip_edges() if _location_name_edit else _location_name
+		when = LocationHelper.format_lock_summary(place, not immediate, schedule_label)
 	var pw := "Required" if (_pw_toggle and _pw_toggle.button_pressed) else "Not required"
 	_summary_label.text = "To: %s\nOpens: %s\nMagic Password: %s" % [to_name, when, pw]
 
@@ -929,6 +1054,12 @@ func _validation_error() -> String:
 			return "Magic password must be 4–64 characters."
 		if p1 != p2:
 			return "Passwords do not match."
+	if _location_toggle and _location_toggle.button_pressed:
+		var place := _location_name_edit.text.strip_edges() if _location_name_edit else ""
+		if place.is_empty():
+			return "Give your Location Lock a place name."
+		if not _location_fix_ok:
+			return "Set the Location Lock place with Use Current Location."
 	return ""
 
 

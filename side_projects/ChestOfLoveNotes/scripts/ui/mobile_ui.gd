@@ -23,8 +23,8 @@ const SIZE_HELPER := 14
 const SIZE_BUTTON := 17
 const SIZE_STAT_NUMBER := 22
 const SIZE_STAT_LABEL := 14
-const SIZE_NAV_LABEL := 15
-const SIZE_NAV_ICON := 16
+const SIZE_NAV_LABEL := 16
+const SIZE_NAV_ICON := 18
 const SIZE_BADGE := 14
 const SIZE_WELCOME := 17
 const SIZE_INPUT := 17
@@ -33,7 +33,7 @@ const TOUCH_MIN := 48
 const TOUCH_PRIMARY_H := 54
 const TOUCH_CTA_H := 56
 const TOUCH_SECONDARY_H := 50
-const TOUCH_NAV_H := 74
+const TOUCH_NAV_H := 80
 const INPUT_H := 50
 const ROW_H := 56
 const FILTER_CHIP_H := 48
@@ -159,6 +159,20 @@ static func _save() -> void:
 	cfg.set_value("accessibility", PREF_TEXT_SIZE, label)
 	cfg.set_value("accessibility", PREF_REDUCED_MOTION, _reduced_motion)
 	cfg.save(SETTINGS_PATH)
+
+
+static func make_page_title(text: String, title_font: Font = null) -> Label:
+	## Shared gold decorative title for primary bottom-nav destinations.
+	var lab := Label.new()
+	lab.text = text
+	lab.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	lab.custom_minimum_size = Vector2(0, font_touch(48))
+	lab.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	apply_label(lab, SIZE_SCREEN_TITLE, COLOR_TITLE, false)
+	if title_font != null:
+		lab.add_theme_font_override("font", title_font)
+	return lab
 
 
 static func apply_label(lab: Label, base_size: int, color: Color = COLOR_BODY, allow_wrap: bool = true) -> void:

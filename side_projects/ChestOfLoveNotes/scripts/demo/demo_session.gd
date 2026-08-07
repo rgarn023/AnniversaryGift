@@ -300,6 +300,8 @@ func _public_recipient_item(s: Dictionary, st: Dictionary) -> Dictionary:
 		"unlock_at_unix": s.unlock_at_unix,
 		"has_magic_password": bool(s.get("has_magic_password", false)),
 		"has_password": bool(s.get("has_magic_password", false)),
+		"has_location_lock": bool(s.get("has_location_lock", false)),
+		"location_name": str(s.get("location_name", "")),
 		"created_at": s.created_at,
 		"kind": "love_note",
 		"is_read": bool(st.get("is_read", false)),
@@ -318,6 +320,8 @@ func _derive_state(s: Dictionary, st: Dictionary) -> String:
 	if bool(st.get("is_saved", false)) or bool(st.get("is_read", false)):
 		return "opened"
 	if int(s.get("unlock_at_unix", 0)) > now_unix():
+		return "locked"
+	if bool(s.get("has_location_lock", false)):
 		return "locked"
 	if bool(s.get("has_magic_password", false)):
 		return "password_unlocked_unread"
@@ -373,11 +377,27 @@ func send_friend_request(query: String) -> Dictionary:
 	return {"ok": true, "recipient": target}
 
 
-func send_scroll(recipient_id: String, title: String, body: String, unlock_unix: int, magic_password: String = "") -> Dictionary:
+func send_scroll(
+	recipient_id: String,
+	title: String,
+	body: String,
+	unlock_unix: int,
+	magic_password: String = "",
+	has_location_lock: bool = false,
+	location_name: String = "",
+	location_lat: float = 0.0,
+	location_lng: float = 0.0,
+	location_radius_m: int = 500
+) -> Dictionary:
 	if body.strip_edges().is_empty() or body.length() > 5000:
 		return {"ok": false, "error": "Invalid message length."}
 	if unlock_unix < now_unix() - 5 or unlock_unix > now_unix() + 86400 * 365 * 5:
 		return {"ok": false, "error": "Invalid unlock time."}
+	if has_location_lock:
+		if location_name.strip_edges().is_empty():
+			return {"ok": false, "error": "Location Lock needs a place name."}
+		if absf(location_lat) > 90.0 or absf(location_lng) > 180.0:
+			return {"ok": false, "error": "Invalid Location Lock coordinates."}
 	var friends := get_friends()
 	var ok_friend := false
 	for f in friends:
@@ -390,6 +410,11 @@ func send_scroll(recipient_id: String, title: String, body: String, unlock_unix:
 	var meta := _meta(id, current_user_id, recipient_id, title.substr(0, 80), unlock_unix, not magic_password.is_empty(), 0)
 	if not magic_password.is_empty():
 		meta["_demo_password"] = magic_password
+	meta["has_location_lock"] = has_location_lock
+	meta["location_name"] = location_name.strip_edges()
+	meta["location_lat"] = location_lat
+	meta["location_lng"] = location_lng
+	meta["location_radius_m"] = location_radius_m
 	scrolls.append(meta)
 	scroll_bodies[id] = body
 	_ensure_party_states(id, current_user_id, recipient_id)
@@ -400,7 +425,12 @@ func send_scroll(recipient_id: String, title: String, body: String, unlock_unix:
 	return {"ok": true, "scroll": safe}
 
 
-func open_scroll(scroll_id: String, magic_password: String = "") -> Dictionary:
+func open_scroll(
+	scroll_id: String,
+	magic_password: String = "",
+	location_lat: float = NAN,
+	location_lng: float = NAN
+) -> Dictionary:
 	for s in scrolls:
 		if str(s.id) != scroll_id:
 			continue
@@ -420,6 +450,24 @@ func open_scroll(scroll_id: String, magic_password: String = "") -> Dictionary:
 				"unlock_at_unix": int(s.unlock_at_unix),
 				"server_now_unix": now_unix(),
 			}
+		if bool(s.get("has_location_lock", false)):
+			if is_nan(location_lat) or is_nan(location_lng):
+				return {
+					"ok": false,
+					"locked": true,
+					"location_required": true,
+					"error": "Move near the locked place and allow location access to open this scroll.",
+				}
+			var tlat := float(s.get("location_lat", 0.0))
+			var tlng := float(s.get("location_lng", 0.0))
+			var radius := int(s.get("location_radius_m", 500))
+			if not LocationHelper.within_radius(location_lat, location_lng, tlat, tlng, radius):
+				return {
+					"ok": false,
+					"locked": true,
+					"location_locked": true,
+					"error": "You need to be near %s to open this scroll." % str(s.get("location_name", "the locked place")),
+				}
 		if bool(s.has_magic_password):
 			if not _password_allowed(scroll_id):
 				return {"ok": false, "locked": false, "error": "Too many attempts. Try again later."}

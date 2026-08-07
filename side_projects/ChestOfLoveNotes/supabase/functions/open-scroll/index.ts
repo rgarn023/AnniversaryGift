@@ -10,6 +10,27 @@ interface Body {
   password?: string;
   /** Godot client compatibility alias */
   magic_password?: string;
+  /** Recipient current fix when Location Lock is enabled */
+  location_lat?: number;
+  location_lng?: number;
+}
+
+function haversineMeters(
+  lat1: number,
+  lng1: number,
+  lat2: number,
+  lng2: number,
+): number {
+  const r = 6371000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const p1 = toRad(lat1);
+  const p2 = toRad(lat2);
+  const dp = toRad(lat2 - lat1);
+  const dl = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dp / 2) * Math.sin(dp / 2) +
+    Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) * Math.sin(dl / 2);
+  return r * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(Math.max(0, 1 - a)));
 }
 
 /**
@@ -50,7 +71,7 @@ Deno.serve(async (req) => {
     const { data: scroll, error: scrollErr } = await service
       .from("scrolls")
       .select(
-        "id, sender_id, recipient_id, title, unlock_at, has_password, created_at",
+        "id, sender_id, recipient_id, title, unlock_at, has_password, has_location_lock, location_name, location_lat, location_lng, location_radius_m, created_at",
       )
       .eq("id", body.scroll_id)
       .maybeSingle();
@@ -99,6 +120,34 @@ Deno.serve(async (req) => {
     const now = new Date();
     if (unlockAt.getTime() > now.getTime()) {
       throw new AppError("locked", "This scroll is not unlocked yet", 403);
+    }
+
+    // 6b. Location Lock — missing/unavailable location must NEVER unlock.
+    if (Boolean(scroll.has_location_lock)) {
+      const targetLat = Number(scroll.location_lat);
+      const targetLng = Number(scroll.location_lng);
+      const radius = Number(scroll.location_radius_m ?? 500);
+      const lat = Number(body.location_lat);
+      const lng = Number(body.location_lng);
+      if (!Number.isFinite(targetLat) || !Number.isFinite(targetLng)) {
+        throw new AppError("locked", "This scroll requires a place that is not configured", 403);
+      }
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        throw new AppError(
+          "location_required",
+          "Move near the locked place and allow location access to open this scroll",
+          403,
+        );
+      }
+      const distance = haversineMeters(lat, lng, targetLat, targetLng);
+      if (!Number.isFinite(radius) || distance > radius) {
+        const place = String(scroll.location_name || "the locked place");
+        throw new AppError(
+          "location_locked",
+          `You need to be near ${place} to open this scroll`,
+          403,
+        );
+      }
     }
 
     // Load encrypted contents (service role only — never returned)
