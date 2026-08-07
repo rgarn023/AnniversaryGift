@@ -498,14 +498,21 @@ func _show_main_chest() -> void:
 	root.add_theme_constant_override("separation", 12)
 	margin.add_child(root)
 
-	# Header
+	# Header: brand title centered, refresh as trailing icon.
 	var header := HBoxContainer.new()
-	header.custom_minimum_size.y = MobileUi.font_touch(52)
+	header.custom_minimum_size.y = MobileUi.font_touch(56)
+	header.add_theme_constant_override("separation", 8)
 	root.add_child(header)
+	var header_spacer := Control.new()
+	header_spacer.custom_minimum_size = Vector2(MobileUi.font_touch(48), MobileUi.font_touch(48))
+	header.add_child(header_spacer)
 	var title := Label.new()
 	title.text = "Chest of Love Notes"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title.clip_text = true
+	title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	MobileUi.apply_label(title, MobileUi.SIZE_SCREEN_TITLE, MobileUi.COLOR_TITLE)
 	if _title_font():
 		title.add_theme_font_override("font", _title_font())
@@ -533,13 +540,15 @@ func _show_main_chest() -> void:
 		else:
 			_show_toast(str(chest_result.get("error", "Could not refresh chest.")))
 
-	# Summary card
+	# Summary card — three equal columns, never wrap labels.
 	var summary := PanelContainer.new()
+	summary.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	summary.add_theme_stylebox_override("panel", MobileUi.card_style())
 	root.add_child(summary)
 	var sum_row := HBoxContainer.new()
 	sum_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	sum_row.add_theme_constant_override("separation", 8)
+	sum_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sum_row.add_theme_constant_override("separation", 12)
 	summary.add_child(sum_row)
 	for item in [
 		["Unread", counts.unread],
@@ -548,44 +557,55 @@ func _show_main_chest() -> void:
 	]:
 		var cell := VBoxContainer.new()
 		cell.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		cell.add_theme_constant_override("separation", 2)
+		cell.custom_minimum_size = Vector2(96, 0)
+		cell.add_theme_constant_override("separation", 4)
 		var num := Label.new()
 		num.text = str(item[1])
 		num.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		num.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		MobileUi.apply_label(num, MobileUi.SIZE_STAT_NUMBER, MobileUi.COLOR_TITLE)
 		cell.add_child(num)
 		var lab := Label.new()
 		lab.text = str(item[0])
 		lab.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		lab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		MobileUi.apply_label(lab, MobileUi.SIZE_STAT_LABEL, MobileUi.COLOR_SECONDARY)
 		cell.add_child(lab)
 		sum_row.add_child(cell)
 
-	# Chest area (expands)
+	# Chest area (expands) — chest sized to ~50% of usable width and centered.
 	var chest_area := Control.new()
 	chest_area.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	chest_area.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	chest_area.clip_contents = false
 	root.add_child(chest_area)
 	var your := Label.new()
 	your.text = "Your Chest"
 	your.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	your.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	your.position = Vector2(-200, 8)
-	your.size = Vector2(400, 36)
+	your.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
+	your.offset_top = 4
+	your.offset_bottom = 40
 	MobileUi.apply_label(your, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY)
 	chest_area.add_child(your)
 
 	_chest = LoveNotesChest.new()
 	_chest.reduced_motion = state.reduced_motion
-	_chest.set_anchors_preset(Control.PRESET_CENTER)
-	# ~52% of typical phone width in logical space; grows with area.
-	var chest_side := 560
-	_chest.custom_minimum_size = Vector2(chest_side, chest_side)
-	_chest.size = Vector2(chest_side, chest_side)
-	_chest.position = Vector2(-chest_side * 0.5, -chest_side * 0.42)
 	_chest.z_index = 5
 	_chest.tapped.connect(_on_chest_tapped)
 	chest_area.add_child(_chest)
+	var layout_chest := func() -> void:
+		if _chest == null or not is_instance_valid(_chest) or not is_instance_valid(chest_area):
+			return
+		var area := chest_area.size
+		if area.x < 8.0 or area.y < 8.0:
+			return
+		var side := clampf(area.x * 0.52, 280.0, minf(area.x * 0.72, area.y * 0.78))
+		_chest.custom_minimum_size = Vector2(side, side)
+		_chest.size = Vector2(side, side)
+		_chest.position = Vector2((area.x - side) * 0.5, (area.y - side) * 0.52)
+	chest_area.resized.connect(layout_chest)
+	await get_tree().process_frame
+	layout_chest.call()
 	_chest.configure(LoveNotesChest.ChestState.READY, false)
 	_chest.set_unread_badge(int(counts.unread))
 
@@ -620,6 +640,7 @@ func _add_bottom_nav(selected: String) -> void:
 	nav.offset_top = -MobileUi.font_touch(MobileUi.TOUCH_NAV_H) - int(safe.w)
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_theme_constant_override("separation", 4)
 	nav.add_child(row)
 	var tabs := [
@@ -633,7 +654,7 @@ func _add_bottom_nav(selected: String) -> void:
 		var b := Button.new()
 		b.text = str(t[1])
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		b.custom_minimum_size = Vector2(0, MobileUi.font_touch(MobileUi.TOUCH_NAV_H) - 8)
+		b.custom_minimum_size = Vector2(64, MobileUi.font_touch(MobileUi.TOUCH_NAV_H) - 8)
 		b.focus_mode = Control.FOCUS_NONE
 		b.add_theme_font_size_override("font_size", MobileUi.font(MobileUi.SIZE_NAV_LABEL))
 		var sel := str(t[0]) == selected
@@ -641,6 +662,8 @@ func _add_bottom_nav(selected: String) -> void:
 		var flat := StyleBoxFlat.new()
 		flat.bg_color = Color(0.18, 0.12, 0.28, 0.95) if sel else Color(0, 0, 0, 0)
 		flat.set_corner_radius_all(12)
+		flat.content_margin_left = 4
+		flat.content_margin_right = 4
 		b.add_theme_stylebox_override("normal", flat)
 		b.add_theme_stylebox_override("hover", flat)
 		b.add_theme_stylebox_override("pressed", flat)

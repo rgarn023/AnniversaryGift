@@ -37,3 +37,6 @@ android/build/.cxx/
 *~
 .idea/
 .vscode/
+
+# Local emulator-only APKs (not for GitHub)
+build/*emulator*.apk

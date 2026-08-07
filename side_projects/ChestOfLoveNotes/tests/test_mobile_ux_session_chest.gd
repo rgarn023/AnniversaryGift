@@ -82,8 +82,12 @@ func _test_mobile_ui_scale() -> void:
 	MobileUi.set_reduced_motion(false)
 	MobileUi.set_text_size(MobileUi.TextSize.STANDARD)
 	var ui_src := FileAccess.get_file_as_string("res://scripts/ui/mobile_ui.gd")
+	var main_src := FileAccess.get_file_as_string("res://scripts/main.gd")
 	_assert(ui_src.contains("Android system font-scale"), "documents Android font-scale limitation")
 	_assert(not ui_src.contains(".scale ="), "does not apply node scale transforms for text")
+	_assert(ui_src.contains("autowrap: bool = false"), "labels default to no autowrap")
+	_assert(main_src.contains("OVERRUN_TRIM_ELLIPSIS"), "title uses ellipsis not vertical wrap")
+	_assert(main_src.contains("area.x * 0.52"), "chest sized to usable width")
 
 
 func _test_chest_frames() -> void:

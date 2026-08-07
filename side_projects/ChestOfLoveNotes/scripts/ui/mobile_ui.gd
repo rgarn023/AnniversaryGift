@@ -22,7 +22,7 @@ const SIZE_HELPER := 16
 const SIZE_BUTTON := 19
 const SIZE_STAT_NUMBER := 26
 const SIZE_STAT_LABEL := 16
-const SIZE_NAV_LABEL := 14
+const SIZE_NAV_LABEL := 15
 const SIZE_BADGE := 16
 
 const TOUCH_MIN := 48
@@ -142,10 +142,15 @@ static func _save() -> void:
 	cfg.save(SETTINGS_PATH)
 
 
-static func apply_label(lab: Label, base_size: int, color: Color = COLOR_BODY) -> void:
+static func apply_label(lab: Label, base_size: int, color: Color = COLOR_BODY, autowrap: bool = false) -> void:
+	## Default: no autowrap. Autowrap on short labels inside HBoxes collapses
+	## width and stacks letters vertically on tall phones.
 	lab.add_theme_font_size_override("font_size", font(base_size))
 	lab.add_theme_color_override("font_color", color)
-	lab.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	if autowrap:
+		lab.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	else:
+		lab.autowrap_mode = TextServer.AUTOWRAP_OFF
 
 
 static func card_style() -> StyleBoxFlat:
