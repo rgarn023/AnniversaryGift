@@ -35,7 +35,7 @@ const TOUCH_SECONDARY_H := 50
 const TOUCH_NAV_H := 68
 const INPUT_H := 50
 const ROW_H := 56
-const FILTER_CHIP_H := 42
+const FILTER_CHIP_H := 48
 const CARD_PAD := 14
 const SCREEN_GUTTER := 18
 const GAP_RELATED := 9
@@ -165,6 +165,8 @@ static func apply_label(lab: Label, base_size: int, color: Color = COLOR_BODY, a
 	lab.add_theme_color_override("font_color", color)
 	if allow_wrap:
 		lab.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		lab.clip_text = false
+		lab.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
 	else:
 		lab.autowrap_mode = TextServer.AUTOWRAP_OFF
 		lab.clip_text = true
@@ -231,52 +233,53 @@ static func apply_safe_margins(margin: MarginContainer, extra_bottom: int = 0) -
 
 
 static func configure_scroll(scroll: ScrollContainer, horizontal: bool = false) -> void:
-	## Native finger-drag scrolling: content follows touch; scrollbar is a thin indicator.
+	## Native finger-drag scrolling; hide persistent desktop-style scrollbars.
 	if horizontal:
-		scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+		scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
 		scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	else:
 		scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-		scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+		scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
 	## Small deadzone so intentional swipes start quickly without eating taps.
 	scroll.scroll_deadzone = 12
-	scroll.follow_focus = true
-	_style_scrollbars(scroll)
+	## follow_focus jumps the page while typing on mobile — keep OFF globally.
+	scroll.follow_focus = false
+	_hide_scrollbars(scroll)
 	## After children exist, make non-interactive surfaces pass drag to ScrollContainer.
-	scroll.child_entered_tree.connect(func(node: Node) -> void:
-		if node is Control:
-			_pass_drag_through(node as Control)
-	)
+	if not scroll.has_meta("_coln_scroll_wired"):
+		scroll.set_meta("_coln_scroll_wired", true)
+		scroll.child_entered_tree.connect(func(node: Node) -> void:
+			if node is Control:
+				_pass_drag_through(node as Control)
+		)
 	for child in scroll.get_children():
 		if child is Control:
 			_pass_drag_through(child as Control)
 
 
-static func _style_scrollbars(scroll: ScrollContainer) -> void:
+static func _hide_scrollbars(scroll: ScrollContainer) -> void:
 	var vbar := scroll.get_v_scroll_bar()
 	if vbar:
-		vbar.custom_minimum_size.x = 5
-		var grabber := StyleBoxFlat.new()
-		grabber.bg_color = Color(0.92, 0.86, 0.98, 0.42)
-		grabber.set_corner_radius_all(3)
-		grabber.content_margin_left = 1
-		grabber.content_margin_right = 1
-		vbar.add_theme_stylebox_override("grabber", grabber)
-		vbar.add_theme_stylebox_override("grabber_highlight", grabber)
-		vbar.add_theme_stylebox_override("grabber_pressed", grabber)
-		var track := StyleBoxFlat.new()
-		track.bg_color = Color(1, 1, 1, 0.06)
-		track.set_corner_radius_all(3)
-		vbar.add_theme_stylebox_override("scroll", track)
-		## Wider invisible hit area so the thin bar remains usable if dragged.
-		vbar.mouse_filter = Control.MOUSE_FILTER_STOP
-		vbar.custom_minimum_size.x = 18
-		## Visual width stays thin via stylebox; expand hit with empty margins.
-		grabber.content_margin_left = 6
-		grabber.content_margin_right = 6
+		vbar.visible = false
+		vbar.modulate.a = 0.0
+		vbar.custom_minimum_size.x = 0
+		vbar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var empty := StyleBoxEmpty.new()
+		vbar.add_theme_stylebox_override("scroll", empty)
+		vbar.add_theme_stylebox_override("grabber", empty)
+		vbar.add_theme_stylebox_override("grabber_highlight", empty)
+		vbar.add_theme_stylebox_override("grabber_pressed", empty)
 	var hbar := scroll.get_h_scroll_bar()
 	if hbar:
-		hbar.custom_minimum_size.y = 5
+		hbar.visible = false
+		hbar.modulate.a = 0.0
+		hbar.custom_minimum_size.y = 0
+		hbar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var empty_h := StyleBoxEmpty.new()
+		hbar.add_theme_stylebox_override("scroll", empty_h)
+		hbar.add_theme_stylebox_override("grabber", empty_h)
+		hbar.add_theme_stylebox_override("grabber_highlight", empty_h)
+		hbar.add_theme_stylebox_override("grabber_pressed", empty_h)
 
 
 static func _pass_drag_through(node: Control) -> void:
@@ -303,3 +306,31 @@ static func _should_keep_stop(node: Control) -> bool:
 
 static func enable_touch_scroll_on_tree(root: Control) -> void:
 	_pass_drag_through(root)
+
+
+static func release_text_focus(from: Node = null) -> void:
+	var vp: Viewport = null
+	if from != null and is_instance_valid(from):
+		vp = from.get_viewport()
+	else:
+		var tree := Engine.get_main_loop() as SceneTree
+		if tree:
+			vp = tree.root
+	if vp == null:
+		return
+	var focus := vp.gui_get_focus_owner()
+	if focus != null and focus is Control:
+		(focus as Control).release_focus()
+	if DisplayServer.has_feature(DisplayServer.FEATURE_VIRTUAL_KEYBOARD):
+		DisplayServer.virtual_keyboard_hide()
+
+
+static func wire_keyboard_avoidance(host: Node, scroll: ScrollContainer, pad: Control) -> Node:
+	## Avoid typed KeyboardAvoidance return to keep MobileUi load-order independent.
+	var avoid_script := load("res://scripts/ui/keyboard_avoidance.gd") as Script
+	var avoid: Node = avoid_script.new() if avoid_script != null else Node.new()
+	avoid.name = "KeyboardAvoidance"
+	host.add_child(avoid)
+	if avoid.has_method("setup"):
+		avoid.call("setup", scroll, pad)
+	return avoid

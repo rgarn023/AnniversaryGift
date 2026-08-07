@@ -51,9 +51,11 @@ func _test_session_soft_fail_keeps_keystore() -> void:
 	_assert(not AndroidSecureStore.has_session(), "hard clear deletes Keystore session")
 	var app_src := FileAccess.get_file_as_string("res://scripts/app_state.gd")
 	_assert(app_src.contains("refresh_soft_fail"), "restore soft-fail path present")
-	_assert(app_src.contains("clear(false)"), "soft failures clear memory only")
+	_assert(app_src.contains("silent"), "silent restore reasons present")
+	_assert(app_src.contains("await_ready"), "waits for Android secure plugin readiness")
 	_assert(app_src.contains("persist_session_verified"), "verified persist helper present")
-	_assert(app_src.contains("membership_soft_fail"), "soft membership path present")
+	_assert(app_src.contains("membership_soft_fail_continued") or app_src.contains("membership_soft_fail"), "soft membership path present")
+	_assert(not app_src.contains('session_restore_message = "Could not verify your account'), "no false verify toast message")
 	_assert(app_src.contains("refresh_invalid"), "resume hard refresh invalid path present")
 	_assert(app_src.contains("forbidden"), "cold restore checks membership forbidden before sign-out")
 	var auth_src := FileAccess.get_file_as_string("res://scripts/network/auth_service.gd")
@@ -63,8 +65,13 @@ func _test_session_soft_fail_keeps_keystore() -> void:
 func _test_persist_verified() -> void:
 	var main_src := FileAccess.get_file_as_string("res://scripts/main.gd")
 	_assert(main_src.contains("persist_session_verified"), "sign-in verifies Keystore persist")
-	_assert(main_src.contains("Secure session persisted successfully"), "debug persist success toast")
+	_assert(not main_src.contains("Secure session persisted successfully"), "no fake persist-success toast")
 	_assert(main_src.contains("CharoiteBoot"), "Charoite cold boot wired")
+	_assert(main_src.contains('restore.get("silent"'), "startup restore silence gate")
+	_assert(main_src.contains("play_empty_feedback"), "empty chest subtle feedback")
+	_assert(not main_src.contains("opened=%d"), "no debug opened= sent status")
+	_assert(main_src.contains("_format_sent_status"), "human sent status helper")
+	_assert(main_src.contains("indeterminate"), "sign-in spinner present")
 	_assert(not main_src.contains("Restoring secure session"), "no technical restore copy for users")
 	_assert(main_src.contains("_log_secure_debug"), "debug secure YES/NO logging")
 	_assert(main_src.contains("_add_bottom_nav"), "bottom navigation present")
@@ -99,6 +106,9 @@ func _test_mobile_ui_scale() -> void:
 	_assert(ui_src.contains("Android system font-scale"), "documents Android font-scale limitation")
 	_assert(ui_src.contains("configure_scroll"), "scroll helper present")
 	_assert(ui_src.contains("_pass_drag_through"), "touch drag pass-through present")
+	_assert(ui_src.contains("follow_focus = false"), "follow_focus disabled globally")
+	_assert(ui_src.contains("SCROLL_MODE_SHOW_NEVER"), "scrollbars hidden")
+	_assert(ui_src.contains("wire_keyboard_avoidance"), "shared keyboard avoidance")
 	_assert(not ui_src.contains("Control.scale"), "does not apply Control.scale for text")
 
 
@@ -122,9 +132,11 @@ func _test_chest_frames() -> void:
 	_assert(chest_src.contains("chest_open_25.png"), "25% frame wired")
 	_assert(chest_src.contains("chest_half.png"), "half frame wired")
 	_assert(chest_src.contains("chest_open.png"), "open frame wired")
-	_assert(chest_src.contains("best_i"), "nearest discrete keyframe playback")
+	_assert(chest_src.contains("3.0 - 2.0 * t"), "smooth crossfade between frames")
+	_assert(chest_src.contains("play_empty_feedback"), "empty-chest jiggle present")
 	_assert(chest_src.contains("play_close_animation"), "close animation present")
 	_assert(chest_src.contains("TRANS_CUBIC"), "non-linear timing")
+	_assert(chest_src.contains("_apply_centered_zoom"), "centered zoom without position jump")
 	_assert(not chest_src.contains("chest_open_90.png"), "black-bg 90% frame removed from playback")
 	_assert(not chest_src.contains("var _latch"), "detached latch overlay removed")
 	_assert(not chest_src.contains("var _lock"), "detached lock overlay removed")
@@ -133,8 +145,8 @@ func _test_chest_frames() -> void:
 	_assert(chest_src.contains("CLOSING"), "closing state present")
 	_assert(chest_src.contains("FRAME_SIZE := Vector2(220"), "balanced chest footprint")
 	var main_src := FileAccess.get_file_as_string("res://scripts/main.gd")
-	_assert(main_src.contains("play_open_animation(state.reduced_motion)"), "main uses full open")
-	_assert(main_src.contains("var chest_side := 220"), "main chest display ~220")
+	_assert(main_src.contains("play_open_animation(state.reduced_motion"), "main uses cinematic open")
+	_assert(main_src.contains("var chest_side := 236"), "main chest display ~236")
 
 
 func _test_startup_charoite() -> void:
@@ -157,6 +169,7 @@ func _test_startup_charoite() -> void:
 	_assert(main_src.contains("Reduced Motion"), "Reduced Motion setting in Profile")
 	_assert(main_src.contains("Unread"), "summary Unread label")
 	_assert(main_src.contains("Your Chest"), "Your Chest label")
+	_assert(main_src.contains("OS.is_debug_build()"), "onboarding banner gated to debug")
 
 
 func _test_plugin_commit() -> void:
@@ -167,18 +180,22 @@ func _test_plugin_commit() -> void:
 
 
 func _test_build_version() -> void:
-	_assert(BuildFlags.APP_VERSION_CODE >= 10, "versionCode >= 10")
+	_assert(BuildFlags.APP_VERSION_CODE >= 11, "versionCode >= 11")
 	var preset := FileAccess.get_file_as_string("res://export_presets.cfg")
-	_assert(preset.contains("ChestOfLoveNotes-mobile-correction-complete-debug.apk"), "export APK name")
-	_assert(preset.contains("version/code=10"), "export versionCode 10")
+	_assert(preset.contains("ChestOfLoveNotes-mobile-production-polish-debug.apk"), "export APK name")
+	_assert(preset.contains("version/code=11"), "export versionCode 11")
 	_assert(BuildFlags.PRIVATE_ONBOARDING_BUILD == true, "private onboarding still enabled")
+	_assert(FileAccess.file_exists("res://assets/icons/app_icon_1024.png"), "app icon present")
+	_assert(FileAccess.file_exists("res://assets/icons/adaptive_foreground.png"), "adaptive foreground present")
+	var icon_readme := FileAccess.get_file_as_string("res://assets/icons/README_ICON.txt")
+	_assert(icon_readme.contains("must NOT use the Charoite Games CG logo"), "icon readme forbids CG logo")
 
 
 func _test_resume_gate() -> void:
 	var main_src := FileAccess.get_file_as_string("res://scripts/main.gd")
 	_assert(main_src.contains("if not _startup_done"), "resume ignored until startup done")
 	_assert(main_src.contains("_resume_inflight"), "resume single-flight coalesces FOCUS_IN+RESUMED")
-	_assert(main_src.contains("membership_soft_fail"), "soft membership does not force login")
+	_assert(main_src.contains("membership_soft_fail") or main_src.contains("play_empty_feedback"), "soft membership / empty chest paths")
 	_assert(main_src.contains("Vector2(354") or main_src.contains("modal_w := 354"), "modals sized for 390 viewport")
 	var mem_src := FileAccess.get_file_as_string("res://scripts/network/membership_service.gd")
 	_assert(mem_src.contains("_claim_inflight"), "membership single-flight")

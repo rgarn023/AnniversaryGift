@@ -79,15 +79,6 @@ func setup(p_friends: Array, show_onboarding_chip: bool = false) -> void:
 	_refresh_schedule_labels()
 	_refresh_summary()
 	_update_validation()
-	set_process(true)
-
-
-func _process(_delta: float) -> void:
-	var kb := SafeAreaHelper.keyboard_height_viewport()
-	if _keyboard_pad != null:
-		_keyboard_pad.custom_minimum_size.y = kb
-	if kb > 0.0:
-		_ensure_focused_visible()
 
 
 func _notification(what: int) -> void:
@@ -212,10 +203,12 @@ func _build_ui() -> void:
 	_validation_label.visible = false
 	_form.add_child(_validation_label)
 
-	_main_vbox.add_child(_build_bottom_actions())
+	## Document-flow actions so the keyboard never traps a nested fixed footer.
+	_form.add_child(_build_bottom_actions())
 	_keyboard_pad = Control.new()
 	_keyboard_pad.custom_minimum_size = Vector2(0, 0)
-	_main_vbox.add_child(_keyboard_pad)
+	_form.add_child(_keyboard_pad)
+	MobileUi.wire_keyboard_avoidance(self, _scroll, _keyboard_pad)
 
 	_overlay = Control.new()
 	_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -353,7 +346,8 @@ func _build_delivery_card() -> PanelContainer:
 	_open_immediately = CheckBox.new()
 	_open_immediately.text = "Open Immediately"
 	_open_immediately.button_pressed = true
-	_open_immediately.custom_minimum_size = Vector2(0, 52)
+	_open_immediately.custom_minimum_size = Vector2(0, MobileUi.font_touch(48))
+	_open_immediately.focus_mode = Control.FOCUS_NONE
 	_open_immediately.add_theme_font_size_override("font_size", 19)
 	_open_immediately.add_theme_color_override("font_color", COL_TEXT)
 	_open_immediately.toggled.connect(func(on: bool) -> void:

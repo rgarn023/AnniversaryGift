@@ -54,6 +54,22 @@ static func is_available() -> bool:
 	return true
 
 
+static func await_ready(tree: SceneTree, timeout_sec: float = 2.5) -> bool:
+	## Cold-start Android plugins can lag singleton registration by a few frames.
+	if _test_backend_enabled:
+		return not _test_force_unavailable
+	if OS.get_name() != "Android":
+		return is_available()
+	if tree == null:
+		return is_available()
+	var deadline := Time.get_ticks_msec() + int(timeout_sec * 1000.0)
+	while Time.get_ticks_msec() < deadline:
+		if is_available():
+			return true
+		await tree.process_frame
+	return is_available()
+
+
 static func storage_version() -> int:
 	if _test_backend_enabled:
 		return STORAGE_VERSION

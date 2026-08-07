@@ -9,5 +9,5 @@ class_name BuildFlags
 ## Never put real emails, passwords, or server secrets in this file.
 
 const PRIVATE_ONBOARDING_BUILD := true
-const APP_VERSION_NAME := "0.1.9-mobile-correction-complete"
-const APP_VERSION_CODE := 10
+const APP_VERSION_NAME := "0.1.10-mobile-production-polish"
+const APP_VERSION_CODE := 11

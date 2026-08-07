@@ -122,18 +122,28 @@ func maybe_warn_persist_failure() -> String:
 
 func persist_session_verified() -> Dictionary:
 	## Call after successful sign-in + membership. Hard-checks Keystore write.
+	var tree := Engine.get_main_loop() as SceneTree
+	if tree != null and OS.get_name() == "Android" and tokens.keep_me_signed_in:
+		await AndroidSecureStore.await_ready(tree, 2.5)
 	var ok := tokens.persist_if_needed()
+	## Round-trip verify: reload ciphertext markers, not just has_session().
 	var has := AndroidSecureStore.has_session()
+	var reload_ok := false
+	if ok and has and tokens.keep_me_signed_in:
+		var probe := AndroidSecureStore.load_session_json()
+		reload_ok = not probe.is_empty() and probe.contains("refresh_token")
 	debug_session_trace = _plugin_trace()
 	debug_session_trace["persist_ok"] = ok
 	debug_session_trace["has_session_after_persist"] = has
-	if tokens.keep_me_signed_in and (not ok or not has):
+	debug_session_trace["persist_roundtrip_ok"] = reload_ok
+	if tokens.keep_me_signed_in and (not ok or not has or not reload_ok):
 		return {
 			"ok": false,
 			"error": tokens.last_persist_error if tokens.last_persist_error != "" else "persist_failed",
 			"warning": maybe_warn_persist_failure(),
+			"persisted": false,
 		}
-	return {"ok": true, "persisted": ok and has}
+	return {"ok": true, "persisted": ok and has and (reload_ok or not tokens.keep_me_signed_in)}
 
 
 func _plugin_trace() -> Dictionary:
@@ -149,15 +159,22 @@ func _plugin_trace() -> Dictionary:
 
 func restore_session_if_possible() -> Dictionary:
 	## Startup restore. Soft network failures do NOT delete Keystore ciphertext.
+	## Missing/expired sessions are silent — never toast as a login error.
 	session_restore_message = ""
 	tokens.session_refresh_performed = false
+	var tree := Engine.get_main_loop() as SceneTree
+	if tree != null and OS.get_name() == "Android":
+		await AndroidSecureStore.await_ready(tree, 2.5)
 	debug_session_trace = _plugin_trace()
 	if not is_online():
-		return {"ok": false, "reason": "not_online"}
+		return {"ok": false, "reason": "not_online", "silent": true}
+	if not tokens.keep_me_signed_in:
+		return {"ok": false, "reason": "keep_me_off", "silent": true}
 	if not tokens.restore_from_secure_storage():
 		for k in tokens.debug_restore_trace.keys():
 			debug_session_trace[k] = tokens.debug_restore_trace[k]
-		return {"ok": false, "reason": "no_session"}
+		## No ciphertext / plugin not ready / decrypt empty → silent login.
+		return {"ok": false, "reason": "no_session", "silent": true}
 	debug_session_trace["decrypt_ok"] = tokens.last_decrypt_ok
 	debug_session_trace["session_restored"] = true
 
@@ -169,12 +186,17 @@ func restore_session_if_possible() -> Dictionary:
 		var invalid := bool(fresh.get("invalid_session", false))
 		if invalid:
 			tokens.clear(true) # definitive auth failure
-			session_restore_message = "Your session has expired. Please sign in again."
-			return {"ok": false, "reason": "refresh_invalid", "message": session_restore_message}
-		# Soft/network failure — keep Keystore for next launch.
-		tokens.clear(false)
-		session_restore_message = "Could not reach the server. Please try again."
-		return {"ok": false, "reason": "refresh_soft_fail", "message": session_restore_message}
+			## Expired sessions clear quietly and show login — not a scary startup error.
+			session_restore_message = ""
+			return {"ok": false, "reason": "refresh_invalid", "silent": true}
+		## Soft/network failure: keep Keystore. If access token still usable, continue;
+		## otherwise clear memory only and silently show login (no false verify toast).
+		if tokens.has_session() and not tokens.is_expired():
+			debug_session_trace["refresh_soft_fail_continued"] = true
+		else:
+			tokens.clear(false)
+			session_restore_message = ""
+			return {"ok": false, "reason": "refresh_soft_fail", "silent": true}
 
 	var user_result: Dictionary = await auth.refresh_user()
 	debug_session_trace["user_ok"] = bool(user_result.get("ok", false))
@@ -182,15 +204,14 @@ func restore_session_if_possible() -> Dictionary:
 		var status := int(api.last_http_status)
 		if status == 401 or status == 403:
 			tokens.clear(true)
-			session_restore_message = "Your session has expired. Please sign in again."
-			return {"ok": false, "reason": "user_invalid", "message": session_restore_message}
-		tokens.clear(false)
-		session_restore_message = "Could not verify your account. Please try again."
-		return {"ok": false, "reason": "user_soft_fail", "message": session_restore_message}
+			session_restore_message = ""
+			return {"ok": false, "reason": "user_invalid", "silent": true}
+		## Soft/network: tokens already refreshed — continue into the app.
+		debug_session_trace["user_soft_fail_continued"] = true
 	if not tokens.email_confirmed:
 		tokens.clear(true)
 		session_restore_message = "Please confirm your email, then sign in."
-		return {"ok": false, "reason": "email_unconfirmed", "message": session_restore_message}
+		return {"ok": false, "reason": "email_unconfirmed", "message": session_restore_message, "silent": false}
 
 	var claim: Dictionary = await membership.claim_membership()
 	debug_session_trace["membership_revalidated"] = bool(claim.get("ok", false)) and membership.is_member
@@ -199,28 +220,30 @@ func restore_session_if_possible() -> Dictionary:
 		if bool(claim.get("forbidden", false)):
 			sign_out()
 			session_restore_message = "This is a private app, and this account is not approved."
-			return {"ok": false, "reason": "membership_denied", "message": session_restore_message}
-		tokens.clear(false)
-		session_restore_message = "Could not verify membership. Please try again."
-		return {"ok": false, "reason": "membership_soft_fail", "message": session_restore_message}
+			return {"ok": false, "reason": "membership_denied", "message": session_restore_message, "silent": false}
+		## Soft membership hiccup after a valid refresh — enter app; resume will retry.
+		debug_session_trace["membership_soft_fail_continued"] = true
+		membership.is_member = true
 
 	var profile_result: Dictionary = await profiles.fetch_own_profile()
 	debug_session_trace["profile_loaded"] = bool(profile_result.get("ok", false))
+	var profile_exists := bool(profile_result.get("exists", false))
 	if not bool(profile_result.get("ok", false)):
 		var status2 := int(api.last_http_status)
 		if status2 == 401 or status2 == 403:
 			sign_out()
-			session_restore_message = "Your session has expired. Please sign in again."
-			return {"ok": false, "reason": "profile_invalid", "message": session_restore_message}
-		tokens.clear(false)
-		session_restore_message = "Could not load your profile. Please try again."
-		return {"ok": false, "reason": "profile_soft_fail", "message": session_restore_message}
+			session_restore_message = ""
+			return {"ok": false, "reason": "profile_invalid", "silent": true}
+		## Soft profile load failure: still enter if we have a restored session.
+		debug_session_trace["profile_soft_fail_continued"] = true
+		profile_exists = not profiles.profile.is_empty()
 
-	# Persist rotated tokens after successful restore.
-	tokens.persist_if_needed()
+	# Persist rotated tokens after successful restore (verified write when possible).
+	var persisted := tokens.persist_if_needed()
+	debug_session_trace["repersist_ok"] = persisted
 	return {
 		"ok": true,
-		"profile_exists": bool(profile_result.get("exists", false)),
+		"profile_exists": profile_exists,
 		"session_restored": tokens.session_restored,
 		"session_refresh_performed": tokens.session_refresh_performed,
 	}

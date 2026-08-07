@@ -23,6 +23,10 @@ var _pending_restore: Dictionary = {}
 var _startup_done: bool = false
 ## FOCUS_IN + RESUMED can both fire; coalesce into one resume pass.
 var _resume_inflight: bool = false
+var _last_chest_counts: Dictionary = {"unread": 0, "locked": 0, "requests": 0}
+var _auth_busy: bool = false
+var _chest_action_busy: bool = false
+var _friend_action_busy: bool = false
 
 
 func _ready() -> void:
@@ -68,8 +72,11 @@ func _startup_navigate() -> void:
 		_startup_done = true
 		_log_secure_debug("startup_destination_chest")
 		return
-	if not str(restore.get("message", "")).is_empty():
-		_show_toast(str(restore.message))
+	## Missing/expired/soft-fail sessions are silent. Only definitive denials toast.
+	if not bool(restore.get("silent", true)):
+		var msg := str(restore.get("message", ""))
+		if not msg.is_empty():
+			_show_toast(msg)
 	_show_welcome()
 	_startup_done = true
 	_log_secure_debug("startup_destination_login")
@@ -121,10 +128,11 @@ func _build_chrome() -> void:
 		add_child(stars)
 
 	_banner = Label.new()
-	if state.is_demo():
+	## Production builds never show onboarding/dev watermarks.
+	if state.is_demo() and OS.is_debug_build():
 		_banner.text = "LOCAL DEMO MODE"
 		_banner.visible = true
-	elif state.is_private_onboarding_build():
+	elif state.is_private_onboarding_build() and OS.is_debug_build():
 		_banner.text = "Private Onboarding Build"
 		_banner.visible = true
 	else:
@@ -162,7 +170,11 @@ func _build_chrome() -> void:
 
 
 func _clear_screen() -> void:
+	MobileUi.release_text_focus(self)
 	_compose_screen = null
+	_auth_busy = false
+	_chest_action_busy = false
+	_friend_action_busy = false
 	for c in _screen_host.get_children():
 		c.queue_free()
 
@@ -301,7 +313,6 @@ func _show_auth(sign_up: bool) -> void:
 	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(card)
 	var box := VBoxContainer.new()
-	box.custom_minimum_size.x = 320
 	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	box.add_theme_constant_override("separation", 14)
 	card.add_child(box)
@@ -336,11 +347,12 @@ func _show_auth(sign_up: bool) -> void:
 	MobileUi.style_line_edit(password)
 	pw_row.add_child(password)
 	var eye := Button.new()
-	eye.text = "👁"
-	eye.custom_minimum_size = Vector2(MobileUi.font_touch(48), MobileUi.font_touch(48))
+	eye.text = "Show"
+	eye.custom_minimum_size = Vector2(MobileUi.font_touch(72), MobileUi.font_touch(48))
 	MobileUi.style_button(eye, 48)
 	eye.pressed.connect(func() -> void:
 		password.secret = not password.secret
+		eye.text = "Hide" if not password.secret else "Show"
 	)
 	pw_row.add_child(eye)
 
@@ -358,9 +370,36 @@ func _show_auth(sign_up: bool) -> void:
 	MobileUi.apply_label(status, MobileUi.SIZE_HELPER, MobileUi.COLOR_HELPER)
 	box.add_child(status)
 
-	var submit_label := "Create Account" if sign_up else "Sign In"
-	box.add_child(_make_button(submit_label, func() -> void:
-		status.text = "Working…"
+	var submit_row := HBoxContainer.new()
+	submit_row.add_theme_constant_override("separation", 10)
+	box.add_child(submit_row)
+	var submit := Button.new()
+	submit.text = "Create Account" if sign_up else "Sign In"
+	submit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	MobileUi.style_button(submit, MobileUi.TOUCH_CTA_H)
+	submit_row.add_child(submit)
+	var spinner := ProgressBar.new()
+	spinner.custom_minimum_size = Vector2(MobileUi.font_touch(48), MobileUi.font_touch(48))
+	spinner.show_percentage = false
+	spinner.min_value = 0
+	spinner.max_value = 1
+	spinner.value = 0.35
+	spinner.visible = false
+	spinner.indeterminate = true
+	submit_row.add_child(spinner)
+
+	var kb_pad := Control.new()
+	kb_pad.custom_minimum_size = Vector2(0, 0)
+	box.add_child(kb_pad)
+	MobileUi.wire_keyboard_avoidance(root, scroll, kb_pad)
+
+	submit.pressed.connect(func() -> void:
+		if _auth_busy:
+			return
+		_auth_busy = true
+		submit.disabled = true
+		spinner.visible = true
+		status.text = ""
 		status.add_theme_color_override("font_color", MobileUi.COLOR_HELPER)
 		# Never log password values.
 		if sign_up:
@@ -371,6 +410,9 @@ func _show_auth(sign_up: bool) -> void:
 			if confirm:
 				confirm.text = ""
 			if not bool(result.get("ok", false)):
+				_auth_busy = false
+				submit.disabled = false
+				spinner.visible = false
 				status.add_theme_color_override("font_color", MobileUi.COLOR_DANGER)
 				status.text = str(result.get("error", "Sign up failed."))
 				return
@@ -383,6 +425,9 @@ func _show_auth(sign_up: bool) -> void:
 			var result: Dictionary = await state.auth.sign_in(email.text, password.text)
 			password.text = ""
 			if not bool(result.get("ok", false)):
+				_auth_busy = false
+				submit.disabled = false
+				spinner.visible = false
 				status.add_theme_color_override("font_color", MobileUi.COLOR_DANGER)
 				status.text = str(result.get("error", "Sign in failed."))
 				if bool(result.get("needs_confirmation", false)):
@@ -390,7 +435,7 @@ func _show_auth(sign_up: bool) -> void:
 					box.add_child(_make_button("Go to Check Your Email", _show_check_email))
 				return
 			await _after_verified_sign_in()
-	, Vector2(0, MobileUi.TOUCH_CTA_H)))
+	)
 	if sign_up:
 		box.add_child(_make_button("Already have an account? Sign In", func() -> void: _show_auth(false)))
 	elif state.show_sign_up():
@@ -461,15 +506,14 @@ func _after_verified_sign_in() -> void:
 		_show_welcome()
 		return
 	# Hard-require Keystore persistence when Keep Me Signed In is ON.
-	var persist: Dictionary = state.persist_session_verified()
+	var persist: Dictionary = await state.persist_session_verified()
 	_log_secure_debug("after_signin_persist")
 	if not bool(persist.get("ok", false)):
 		var warn := str(persist.get("warning", state.maybe_warn_persist_failure()))
 		if warn.is_empty():
 			warn = "Secure sign-in storage failed. You’ll need to sign in again after closing the app."
 		_show_toast(warn)
-	elif OS.is_debug_build() and bool(persist.get("persisted", false)):
-		_show_toast("Secure session persisted successfully.")
+	## Never toast "persisted successfully" — only warn on genuine failure.
 	if not bool(profile_result.get("exists", false)):
 		_show_profile_setup()
 		return
@@ -588,6 +632,7 @@ func _show_main_chest() -> void:
 			counts.requests = fr.size()
 		else:
 			_show_toast(str(chest_result.get("error", "Could not refresh chest.")))
+	_last_chest_counts = counts.duplicate()
 
 	# Summary card
 	var summary := PanelContainer.new()
@@ -617,7 +662,7 @@ func _show_main_chest() -> void:
 		cell.add_child(lab)
 		sum_row.add_child(cell)
 
-	# Chest area (expands)
+	# Chest area — balanced vertical composition (chest is the focus).
 	var chest_area := Control.new()
 	chest_area.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	chest_area.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -626,19 +671,23 @@ func _show_main_chest() -> void:
 	your.text = "Your Chest"
 	your.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	your.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	your.position = Vector2(-200, 8)
-	your.size = Vector2(400, 36)
+	your.anchor_left = 0.0
+	your.anchor_right = 1.0
+	your.offset_left = 0
+	your.offset_right = 0
+	your.offset_top = 4
+	your.offset_bottom = 36
 	MobileUi.apply_label(your, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY)
 	chest_area.add_child(your)
 
 	_chest = LoveNotesChest.new()
 	_chest.reduced_motion = state.reduced_motion
 	_chest.set_anchors_preset(Control.PRESET_CENTER)
-	# ~220 logical px on ~390 width — balanced Standard density (not oversized).
-	var chest_side := 220
+	# ~236 logical px — fills empty vertical space without crowding nav.
+	var chest_side := 236
 	_chest.custom_minimum_size = Vector2(chest_side, chest_side)
 	_chest.size = Vector2(chest_side, chest_side)
-	_chest.position = Vector2(-chest_side * 0.5, -chest_side * 0.38)
+	_chest.position = Vector2(-chest_side * 0.5, -chest_side * 0.46)
 	_chest.z_index = 5
 	_chest.tapped.connect(_on_chest_tapped)
 	chest_area.add_child(_chest)
@@ -689,29 +738,61 @@ func _add_bottom_nav(selected: String) -> void:
 		var b := Button.new()
 		b.text = str(t[1])
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		b.custom_minimum_size = Vector2(0, MobileUi.font_touch(MobileUi.TOUCH_NAV_H) - 8)
+		b.custom_minimum_size = Vector2(0, MobileUi.font_touch(MobileUi.TOUCH_NAV_H) - 4)
 		b.focus_mode = Control.FOCUS_NONE
 		b.add_theme_font_size_override("font_size", MobileUi.font(MobileUi.SIZE_NAV_LABEL))
 		var sel := str(t[0]) == selected
 		b.add_theme_color_override("font_color", MobileUi.COLOR_NAV_SELECTED if sel else MobileUi.COLOR_NAV_IDLE)
 		var flat := StyleBoxFlat.new()
-		flat.bg_color = Color(0.18, 0.12, 0.28, 0.95) if sel else Color(0, 0, 0, 0)
-		flat.set_corner_radius_all(12)
+		flat.bg_color = Color(0.22, 0.14, 0.32, 0.98) if sel else Color(0, 0, 0, 0)
+		flat.set_corner_radius_all(14)
+		flat.content_margin_top = 6
+		flat.content_margin_bottom = 6
+		if sel:
+			flat.border_width_top = 3
+			flat.border_color = MobileUi.COLOR_NAV_SELECTED
 		b.add_theme_stylebox_override("normal", flat)
 		b.add_theme_stylebox_override("hover", flat)
 		b.add_theme_stylebox_override("pressed", flat)
 		var cb: Callable = t[2]
-		b.pressed.connect(cb)
+		b.pressed.connect(func() -> void:
+			MobileUi.release_text_focus(self)
+			cb.call()
+		)
 		row.add_child(b)
 
 
 func _on_chest_tapped() -> void:
 	if not _guard_private_chest():
 		return
-	if _chest == null or _chest.animating:
+	if _chest == null or _chest.animating or _chest_action_busy:
 		return
-	# Full physical opening unless reduced motion.
-	await _chest.play_open_animation(state.reduced_motion)
+	_chest_action_busy = true
+	_chest.set_interaction_enabled(false)
+	var revealable := int(_last_chest_counts.get("unread", 0)) > 0 or int(_last_chest_counts.get("requests", 0)) > 0
+	if not revealable:
+		## Empty chest: subtle feedback only — never the full cinematic.
+		await _chest.play_empty_feedback()
+		_show_toast("Your chest is empty.")
+		_chest.set_interaction_enabled(true)
+		_chest_action_busy = false
+		return
+	## Dim surroundings for a short cinematic hold, then transition to notes.
+	var dim := ColorRect.new()
+	dim.color = Color(0.02, 0.01, 0.06, 0.0)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	dim.z_index = 4
+	_screen_host.add_child(dim)
+	var dim_tw := create_tween()
+	dim_tw.tween_property(dim, "color:a", 0.55 if not state.reduced_motion else 0.35, 0.28)
+	await _chest.play_open_animation(state.reduced_motion, false)
+	var fade := create_tween()
+	fade.tween_property(dim, "color:a", 0.85, 0.18)
+	await fade.finished
+	if is_instance_valid(dim):
+		dim.queue_free()
+	_chest_action_busy = false
 	_show_inventory()
 
 
@@ -830,13 +911,17 @@ func _show_inventory() -> void:
 	header.add_child(title)
 	header.add_child(_make_button("Back", _show_main_chest, Vector2(160, MobileUi.TOUCH_PRIMARY_H)))
 
-	# Large filter chips (horizontally scrollable)
+	# Horizontally swipeable filter chips — tall enough not to clip, no scrollbar.
 	var chip_scroll := _wire_scroll(ScrollContainer.new(), true)
-	chip_scroll.custom_minimum_size.y = MobileUi.font_touch(MobileUi.FILTER_CHIP_H + 8)
+	chip_scroll.custom_minimum_size.y = MobileUi.font_touch(MobileUi.FILTER_CHIP_H + 14)
+	chip_scroll.clip_contents = true
 	root.add_child(chip_scroll)
 	var filters := HBoxContainer.new()
-	filters.add_theme_constant_override("separation", 10)
+	filters.add_theme_constant_override("separation", 8)
 	chip_scroll.add_child(filters)
+	var chip_pad := Control.new()
+	chip_pad.custom_minimum_size = Vector2(4, 0)
+	filters.add_child(chip_pad)
 	for f in [
 		["all", "Current"],
 		["unread", "Unread"],
@@ -847,11 +932,17 @@ func _show_inventory() -> void:
 		var chip := _make_button(str(f[1]), func() -> void:
 			_inventory_filter = fname
 			_show_inventory()
-		, Vector2(150, 52))
+		, Vector2(118, MobileUi.FILTER_CHIP_H))
+		chip.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 		if _inventory_filter == fname:
 			chip.add_theme_color_override("font_color", MobileUi.COLOR_TITLE)
 		filters.add_child(chip)
-	filters.add_child(_make_button("Saved", _show_saved, Vector2(140, 52)))
+	var saved_chip := _make_button("Saved", _show_saved, Vector2(110, MobileUi.FILTER_CHIP_H))
+	saved_chip.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	filters.add_child(saved_chip)
+	var chip_pad2 := Control.new()
+	chip_pad2.custom_minimum_size = Vector2(12, 0)
+	filters.add_child(chip_pad2)
 
 	var scroll := _wire_scroll(ScrollContainer.new())
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -1282,7 +1373,7 @@ func _show_compose() -> void:
 	compose.back_pressed.connect(_show_main_chest)
 	compose.preview_requested.connect(_on_compose_preview)
 	compose.send_requested.connect(_on_compose_send_requested)
-	compose.setup(friends, state.is_private_onboarding_build())
+	compose.setup(friends, state.is_private_onboarding_build() and OS.is_debug_build())
 
 
 func _on_compose_preview(draft: Dictionary) -> void:
@@ -1367,14 +1458,46 @@ func _show_friends() -> void:
 	search.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	MobileUi.style_line_edit(search)
 	root.add_child(search)
-	root.add_child(_make_button("Add Friend", func() -> void:
+	var add_btn := Button.new()
+	add_btn.text = "Add Friend"
+	add_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	MobileUi.style_button(add_btn, MobileUi.TOUCH_PRIMARY_H)
+	add_btn.disabled = true
+	root.add_child(add_btn)
+	var friend_status := Label.new()
+	friend_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	MobileUi.apply_label(friend_status, MobileUi.SIZE_HELPER, MobileUi.COLOR_HELPER)
+	root.add_child(friend_status)
+	var refresh_add := func(_t: String = "") -> void:
+		var q := search.text.strip_edges()
+		add_btn.disabled = q.is_empty() or _friend_action_busy
+	search.text_changed.connect(refresh_add)
+	add_btn.pressed.connect(func() -> void:
+		var q := search.text.strip_edges()
+		if q.is_empty() or _friend_action_busy:
+			return
+		_friend_action_busy = true
+		add_btn.disabled = true
+		friend_status.text = ""
 		var result: Dictionary = {}
 		if state.is_demo():
-			result = state.demo.send_friend_request(search.text)
+			result = state.demo.send_friend_request(q)
 		elif state.is_online():
-			result = await state.friends.send_friend_request_query(search.text)
-		_show_toast("Friend request sent." if bool(result.get("ok", false)) else str(result.get("error", "Failed")))
-	, Vector2(0, MobileUi.TOUCH_PRIMARY_H)))
+			result = await state.friends.send_friend_request_query(q)
+		_friend_action_busy = false
+		refresh_add.call()
+		if bool(result.get("ok", false)):
+			search.text = ""
+			refresh_add.call()
+			_show_toast("Friend request sent.")
+			_show_friends()
+		else:
+			friend_status.add_theme_color_override("font_color", MobileUi.COLOR_DANGER)
+			friend_status.text = str(result.get("error", "Could not send friend request."))
+	)
+	var kb_pad_f := Control.new()
+	kb_pad_f.custom_minimum_size = Vector2(0, 0)
+	# keyboard pad applied after scroll exists below
 
 	var scroll := _wire_scroll(ScrollContainer.new())
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -1384,6 +1507,8 @@ func _show_friends() -> void:
 	list.add_theme_constant_override("separation", MobileUi.GAP_CARDS)
 	scroll.add_child(list)
 	MobileUi.enable_touch_scroll_on_tree(list)
+	root.add_child(kb_pad_f)
+	MobileUi.wire_keyboard_avoidance(root, scroll, kb_pad_f)
 
 	var section := Label.new()
 	section.text = "Accepted friends"
@@ -1482,16 +1607,19 @@ func _show_sent() -> void:
 			var unlock_unix := int(s.get("unlock_at_unix", 0))
 			if unlock_unix == 0 and not unlock_at.is_empty():
 				unlock_unix = int(Time.get_unix_time_from_datetime_string(unlock_at))
-			var row := Label.new()
-			row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			row.text = "%s → %s · opens %s · opened=%d" % [
-				str(s.get("title", "")),
-				str(s.get("recipient_display_name", recipient.get("display_name", ""))),
-				Time.get_datetime_string_from_unix_time(unlock_unix, false) if unlock_unix > 0 else unlock_at,
-				int(s.get("opened_count", 0)),
+			var title_lab := Label.new()
+			title_lab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			title_lab.text = "%s → %s" % [
+				str(s.get("title", "Love Note")),
+				str(s.get("recipient_display_name", recipient.get("display_name", "Friend"))),
 			]
-			MobileUi.apply_label(row, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY, true)
-			col.add_child(row)
+			MobileUi.apply_label(title_lab, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY, true)
+			col.add_child(title_lab)
+			var status_lab := Label.new()
+			status_lab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			status_lab.text = _format_sent_status(s, unlock_unix, unlock_at)
+			MobileUi.apply_label(status_lab, MobileUi.SIZE_SECONDARY, MobileUi.COLOR_SECONDARY, true)
+			col.add_child(status_lab)
 			var sid := str(s.get("id", ""))
 			var has_pw := bool(s.get("has_password", false))
 			if has_pw:
@@ -1642,22 +1770,64 @@ func _clear_reveal_timers() -> void:
 
 
 func _settings_row(label_text: String, value_control: Control) -> PanelContainer:
-	## Label stays compact; value expands so long email/codes never wrap one-char-wide.
+	## Label wraps naturally; value keeps a usable touch target on the right.
 	var card := _make_card()
 	var row := HBoxContainer.new()
 	row.custom_minimum_size.y = MobileUi.font_touch(MobileUi.ROW_H)
-	row.add_theme_constant_override("separation", 10)
+	row.add_theme_constant_override("separation", 12)
 	card.add_child(row)
 	var lab := Label.new()
 	lab.text = label_text
-	lab.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	lab.custom_minimum_size.x = 108
-	MobileUi.apply_label(lab, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY, false)
+	lab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	lab.size_flags_stretch_ratio = 1.4
+	lab.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	MobileUi.apply_label(lab, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY, true)
 	row.add_child(lab)
-	value_control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	value_control.size_flags_stretch_ratio = 1.6
+	value_control.size_flags_horizontal = Control.SIZE_SHRINK_END
+	value_control.size_flags_stretch_ratio = 1.0
+	if value_control.custom_minimum_size.x < 72:
+		value_control.custom_minimum_size.x = 72
+	if value_control.custom_minimum_size.y < MobileUi.TOUCH_MIN:
+		value_control.custom_minimum_size.y = MobileUi.font_touch(MobileUi.TOUCH_MIN)
 	row.add_child(value_control)
 	return card
+
+
+func _format_friendly_datetime(unix_ts: int) -> String:
+	if unix_ts <= 0:
+		return ""
+	var dt := Time.get_datetime_dict_from_unix_time(unix_ts)
+	var months := ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+	var month := months[clampi(int(dt.month) - 1, 0, 11)]
+	var hour := int(dt.hour)
+	var minute := int(dt.minute)
+	var ampm := "AM" if hour < 12 else "PM"
+	var hour12 := hour % 12
+	if hour12 == 0:
+		hour12 = 12
+	return "%s %d, %d at %d:%02d %s" % [month, int(dt.day), int(dt.year), hour12, minute, ampm]
+
+
+func _format_sent_status(item: Dictionary, unlock_unix: int, unlock_at: String) -> String:
+	var opened_count := int(item.get("opened_count", 0))
+	var opened_at := str(item.get("opened_at", item.get("first_opened_at", "")))
+	var opened_unix := int(item.get("opened_at_unix", 0))
+	if opened_unix <= 0 and not opened_at.is_empty():
+		opened_unix = int(Time.get_unix_time_from_datetime_string(opened_at))
+	if opened_count > 0 or opened_unix > 0:
+		var when := _format_friendly_datetime(opened_unix)
+		if when.is_empty():
+			return "Opened"
+		return "Opened\n%s" % when
+	var now_u := _now_unix()
+	if unlock_unix > now_u:
+		var until := _format_friendly_datetime(unlock_unix)
+		if until.is_empty() and not unlock_at.is_empty():
+			return "Locked until %s" % unlock_at
+		return "Locked until %s" % until
+	if bool(item.get("delivered", true)):
+		return "Delivered"
+	return "Sent"
 
 
 func _settings_value_label(text: String) -> Label:
@@ -1721,6 +1891,10 @@ func _show_profile() -> void:
 	col.add_theme_constant_override("separation", MobileUi.GAP_CARDS)
 	scroll.add_child(col)
 	MobileUi.enable_touch_scroll_on_tree(col)
+	var kb_pad_p := Control.new()
+	kb_pad_p.custom_minimum_size = Vector2(0, 0)
+	root.add_child(kb_pad_p)
+	MobileUi.wire_keyboard_avoidance(root, scroll, kb_pad_p)
 
 	var me: Dictionary = {}
 	if state.is_demo():
