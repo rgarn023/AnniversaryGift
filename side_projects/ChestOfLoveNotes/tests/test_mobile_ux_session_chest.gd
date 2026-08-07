@@ -53,8 +53,11 @@ func _test_session_soft_fail_keeps_keystore() -> void:
 	_assert(app_src.contains("refresh_soft_fail"), "restore soft-fail path present")
 	_assert(app_src.contains("clear(false)"), "soft failures clear memory only")
 	_assert(app_src.contains("persist_session_verified"), "verified persist helper present")
-	_assert(app_src.contains("membership_soft_fail"), "resume soft membership path present")
+	_assert(app_src.contains("membership_soft_fail"), "soft membership path present")
 	_assert(app_src.contains("refresh_invalid"), "resume hard refresh invalid path present")
+	_assert(app_src.contains("forbidden"), "cold restore checks membership forbidden before sign-out")
+	var auth_src := FileAccess.get_file_as_string("res://scripts/network/auth_service.gd")
+	_assert(auth_src.contains("_last_refresh_result"), "refresh waiters keep leader soft/hard result")
 
 
 func _test_persist_verified() -> void:
@@ -110,12 +113,16 @@ func _test_logical_viewport() -> void:
 
 
 func _test_chest_frames() -> void:
-	for f in ["chest_closed.png", "chest_open.png"]:
+	for f in ["chest_closed.png", "chest_open_10.png", "chest_open_25.png", "chest_half.png", "chest_open.png"]:
 		_assert(FileAccess.file_exists("res://assets/art/chest/%s" % f), "frame exists: " + f)
 	var chest_src := FileAccess.get_file_as_string("res://scripts/chest/treasure_chest.gd")
 	_assert(chest_src.contains("FRAME_KEYS"), "multi-frame keys present")
 	_assert(chest_src.contains("chest_closed.png"), "closed frame wired")
+	_assert(chest_src.contains("chest_open_10.png"), "10% frame wired")
+	_assert(chest_src.contains("chest_open_25.png"), "25% frame wired")
+	_assert(chest_src.contains("chest_half.png"), "half frame wired")
 	_assert(chest_src.contains("chest_open.png"), "open frame wired")
+	_assert(chest_src.contains("best_i"), "nearest discrete keyframe playback")
 	_assert(chest_src.contains("play_close_animation"), "close animation present")
 	_assert(chest_src.contains("TRANS_CUBIC"), "non-linear timing")
 	_assert(not chest_src.contains("chest_open_90.png"), "black-bg 90% frame removed from playback")
@@ -155,17 +162,19 @@ func _test_plugin_commit() -> void:
 
 
 func _test_build_version() -> void:
-	_assert(BuildFlags.APP_VERSION_CODE >= 8, "versionCode >= 8")
+	_assert(BuildFlags.APP_VERSION_CODE >= 9, "versionCode >= 9")
 	var preset := FileAccess.get_file_as_string("res://export_presets.cfg")
 	_assert(preset.contains("ChestOfLoveNotes-mobile-correction-complete-debug.apk"), "export APK name")
-	_assert(preset.contains("version/code=8"), "export versionCode 8")
+	_assert(preset.contains("version/code=9"), "export versionCode 9")
 	_assert(BuildFlags.PRIVATE_ONBOARDING_BUILD == true, "private onboarding still enabled")
 
 
 func _test_resume_gate() -> void:
 	var main_src := FileAccess.get_file_as_string("res://scripts/main.gd")
 	_assert(main_src.contains("if not _startup_done"), "resume ignored until startup done")
+	_assert(main_src.contains("_resume_inflight"), "resume single-flight coalesces FOCUS_IN+RESUMED")
 	_assert(main_src.contains("membership_soft_fail"), "soft membership does not force login")
+	_assert(main_src.contains("Vector2(354") or main_src.contains("modal_w := 354"), "modals sized for 390 viewport")
 	var mem_src := FileAccess.get_file_as_string("res://scripts/network/membership_service.gd")
 	_assert(mem_src.contains("_claim_inflight"), "membership single-flight")
 	_assert(mem_src.contains("_claim_membership_inner"), "membership claim does not clear at start")

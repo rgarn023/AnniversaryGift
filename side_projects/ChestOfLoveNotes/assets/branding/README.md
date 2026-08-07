@@ -6,6 +6,8 @@
 - `charoite_system_splash_dark.png` — dark cosmic background for Godot/Android system splash
   (no text, no chest, not a full studio presentation).
 - `charoite_dark_square.png` — solid dark square helper.
+- `android_splash_mark_interim.png` — temporary non-chest launcher/splash mark used only until
+  the official CG logo binary is packaged. Do not treat as the studio logo.
 
 Until the official CG logo file is packaged, CharoiteBoot falls back to the existing
 wordmark only (single presentation; no "Presents" label and no duplicate text Label).

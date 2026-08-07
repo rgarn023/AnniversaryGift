@@ -1,8 +1,8 @@
 extends Control
 class_name LoveNotesChest
-## Physical chest open/close with ONE consistent source pair (closed ↔ open).
-## Intermediate AI frames and detached latch/lock overlays removed — they caused
-## geometry morph and giant/detached hardware on the logical mobile viewport.
+## Physical chest open/close using one consistent canvas family (1200×820).
+## Discrete nearest-keyframe playback (no alpha morph). Detached latch/lock
+## overlays stay removed — hardware is baked into each frame.
 
 signal tapped
 signal open_finished
@@ -16,10 +16,13 @@ const SCROLL_ART := "res://assets/art/scroll/"
 ## ~210–220 logical px wide on ~390 viewport (balanced, not oversized).
 const FRAME_SIZE := Vector2(220, 150)
 
-## Only closed + open from the same canvas family — no mid-sequence morph frames.
-const FRAME_KEYS: Array = [0.0, 1.0]
+## Discrete open amounts → matching frames. Same canvas size/placement.
+const FRAME_KEYS: Array = [0.0, 0.12, 0.28, 0.55, 1.0]
 const FRAME_FILES: Array = [
 	"chest_closed.png",
+	"chest_open_10.png",
+	"chest_open_25.png",
+	"chest_half.png",
 	"chest_open.png",
 ]
 
@@ -283,13 +286,16 @@ func _show_frame_state(open_amount: float) -> void:
 	_open_amount = clampf(open_amount, 0.0, 1.0)
 	if _frame_nodes.is_empty():
 		return
-	for n in _frame_nodes:
-		(n as TextureRect).modulate.a = 0.0
-	## Two-frame blend: closed (0) ↔ open (1). Same canvas size/placement.
-	var t := _open_amount
-	(_frame_nodes[0] as TextureRect).modulate.a = 1.0 - t
-	if _frame_nodes.size() > 1:
-		(_frame_nodes[1] as TextureRect).modulate.a = t
+	## Nearest discrete keyframe only — no crossfade morph between renders.
+	var best_i := 0
+	var best_d := 999.0
+	for i in FRAME_KEYS.size():
+		var d: float = absf(_open_amount - float(FRAME_KEYS[i]))
+		if d < best_d:
+			best_d = d
+			best_i = i
+	for i in _frame_nodes.size():
+		(_frame_nodes[i] as TextureRect).modulate.a = 1.0 if i == best_i else 0.0
 	## Warm amber glow tied to openness.
 	var glow_a := 0.0
 	if _open_amount < 0.15:

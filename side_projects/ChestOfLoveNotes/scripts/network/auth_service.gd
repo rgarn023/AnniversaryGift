@@ -8,6 +8,7 @@ var config: BackendConfig
 var tokens: SecureTokenService
 var _resend_cooldown_until: int = 0
 var _is_refreshing: bool = false
+var _last_refresh_result: Dictionary = {"ok": false, "error": "Session refresh failed.", "invalid_session": false}
 
 
 func _init(p_api: ApiClient, p_config: BackendConfig, p_tokens: SecureTokenService) -> void:
@@ -100,9 +101,10 @@ func refresh_session() -> Dictionary:
 	if _is_refreshing:
 		while _is_refreshing:
 			await Engine.get_main_loop().process_frame
+		## Return the leader's actual outcome — do not mark soft failures as invalid.
 		if tokens.has_session() and not tokens.is_expired():
-			return {"ok": true}
-		return {"ok": false, "error": "Session refresh failed.", "invalid_session": true}
+			return {"ok": true, "invalid_session": false}
+		return _last_refresh_result.duplicate(true)
 
 	_is_refreshing = true
 	var url := "%s/auth/v1/token?grant_type=refresh_token" % config.supabase_url.rstrip("/")
@@ -133,7 +135,7 @@ func refresh_session() -> Dictionary:
 			)
 			await refresh_user()
 			tokens.persist_if_needed()
-			out = {"ok": true}
+			out = {"ok": true, "invalid_session": false}
 	else:
 		var status := int(result.get("status", 0))
 		var invalid := status == 400 or status == 401 or status == 403
@@ -145,6 +147,7 @@ func refresh_session() -> Dictionary:
 		if invalid:
 			tokens.clear(true)
 
+	_last_refresh_result = out.duplicate(true)
 	_is_refreshing = false
 	return out
 

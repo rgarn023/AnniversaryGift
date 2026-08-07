@@ -21,6 +21,8 @@ var _pending_restore: Dictionary = {}
 ## Ignore APPLICATION_RESUMED / FOCUS_IN until cold-start navigation completes.
 ## Resume revalidation previously raced restore and wiped a valid session.
 var _startup_done: bool = false
+## FOCUS_IN + RESUMED can both fire; coalesce into one resume pass.
+var _resume_inflight: bool = false
 
 
 func _ready() -> void:
@@ -904,7 +906,7 @@ func _make_chest_item_row(item: Dictionary) -> PanelContainer:
 	panel.add_child(row)
 	var title := Label.new()
 	title.text = str(item.get("title", "Scroll"))
-	title.add_theme_font_size_override("font_size", 30)
+	title.add_theme_font_size_override("font_size", MobileUi.font(MobileUi.SIZE_SECTION))
 	title.add_theme_color_override("font_color", Color(0.98, 0.9, 0.75))
 	row.add_child(title)
 	var meta := Label.new()
@@ -916,21 +918,22 @@ func _make_chest_item_row(item: Dictionary) -> PanelContainer:
 		var remain := int(item.get("unlock_at_unix", 0)) - _now_unix()
 		meta.text += "  ·  unlocks in %dm" % maxi(int(ceil(remain / 60.0)), 0)
 	meta.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	meta.add_theme_font_size_override("font_size", 22)
+	meta.add_theme_font_size_override("font_size", MobileUi.font(MobileUi.SIZE_SECONDARY))
 	meta.add_theme_color_override("font_color", Color(0.82, 0.76, 0.88))
 	row.add_child(meta)
 	var actions := HBoxContainer.new()
 	actions.add_theme_constant_override("separation", 8)
 	row.add_child(actions)
-	actions.add_child(_make_button("Open", func() -> void: _open_chest_item(item), Vector2(160, 56)))
+	var btn_h := MobileUi.font_touch(MobileUi.TOUCH_SECONDARY_H)
+	actions.add_child(_make_button("Open", func() -> void: _open_chest_item(item), Vector2(120, btn_h)))
 	if str(item.get("kind", "love_note")) != "friend_request":
 		var fav := bool(item.get("is_favorite", false))
 		actions.add_child(_make_button("★" if fav else "☆", func() -> void:
 			_toggle_favorite(str(item.id), not fav)
-		, Vector2(80, 56)))
+		, Vector2(64, btn_h)))
 		actions.add_child(_make_button("Delete", func() -> void:
 			_confirm_delete_received(str(item.id))
-		, Vector2(140, 56)))
+		, Vector2(110, btn_h)))
 	return panel
 
 
@@ -1006,29 +1009,31 @@ func _confirm_delete_received(scroll_id: String) -> void:
 	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_overlay.add_child(dim)
 	var box := VBoxContainer.new()
+	var modal_w := 354.0
+	var modal_h := 280.0
 	box.set_anchors_preset(Control.PRESET_CENTER)
-	box.position = Vector2(-340, -220)
-	box.size = Vector2(680, 420)
-	box.add_theme_constant_override("separation", 14)
+	box.position = Vector2(-modal_w * 0.5, -modal_h * 0.5)
+	box.size = Vector2(modal_w, modal_h)
+	box.add_theme_constant_override("separation", MobileUi.GAP_RELATED)
 	_overlay.add_child(box)
 	var title := Label.new()
 	title.text = "Hide this scroll?"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 36)
+	title.add_theme_font_size_override("font_size", MobileUi.font(MobileUi.SIZE_SCREEN_TITLE))
 	title.add_theme_color_override("font_color", Color(0.98, 0.86, 0.45))
 	box.add_child(title)
 	var body := Label.new()
 	body.text = "This hides the note from your Current and Saved views only. It does not erase the sender's history or permanently destroy the message."
 	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	body.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	body.add_theme_font_size_override("font_size", 24)
+	body.add_theme_font_size_override("font_size", MobileUi.font(MobileUi.SIZE_BODY))
 	body.add_theme_color_override("font_color", Color(0.9, 0.85, 0.95))
 	box.add_child(body)
 	box.add_child(_make_button("Hide from my chest", func() -> void:
 		_hide_overlay()
 		_delete_received(scroll_id)
 	))
-	box.add_child(_make_button("Cancel", _hide_overlay, Vector2(220, 64)))
+	box.add_child(_make_button("Cancel", _hide_overlay, Vector2(180, MobileUi.font_touch(MobileUi.TOUCH_SECONDARY_H))))
 
 
 func _delete_received(scroll_id: String) -> void:
@@ -1096,22 +1101,24 @@ func _show_friend_request(item: Dictionary) -> void:
 	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_overlay.add_child(dim)
 	var box := VBoxContainer.new()
+	var modal_w := 354.0
+	var modal_h := 320.0
 	box.set_anchors_preset(Control.PRESET_CENTER)
-	box.position = Vector2(-360, -280)
-	box.size = Vector2(720, 560)
-	box.add_theme_constant_override("separation", 16)
+	box.position = Vector2(-modal_w * 0.5, -modal_h * 0.5)
+	box.size = Vector2(modal_w, modal_h)
+	box.add_theme_constant_override("separation", MobileUi.GAP_RELATED)
 	_overlay.add_child(box)
 	var title := Label.new()
 	title.text = "Friend Request"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 40)
+	title.add_theme_font_size_override("font_size", MobileUi.font(MobileUi.SIZE_SCREEN_TITLE))
 	title.add_theme_color_override("font_color", Color(0.85, 0.9, 1.0))
 	box.add_child(title)
 	var body := Label.new()
 	body.text = "%s would like to become your friend." % str(item.get("sender_display_name", "Someone"))
 	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	body.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	body.add_theme_font_size_override("font_size", 28)
+	body.add_theme_font_size_override("font_size", MobileUi.font(MobileUi.SIZE_BODY))
 	body.add_theme_color_override("font_color", Color(0.95, 0.9, 0.98))
 	box.add_child(body)
 	box.add_child(_make_button("Accept", func() -> void:
@@ -1155,28 +1162,30 @@ func _show_password_dialog(item: Dictionary) -> void:
 	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_overlay.add_child(dim)
 	var box := VBoxContainer.new()
+	var modal_w := 354.0
+	var modal_h := 320.0
 	box.set_anchors_preset(Control.PRESET_CENTER)
-	box.position = Vector2(-340, -260)
-	box.size = Vector2(680, 520)
-	box.add_theme_constant_override("separation", 14)
+	box.position = Vector2(-modal_w * 0.5, -modal_h * 0.5)
+	box.size = Vector2(modal_w, modal_h)
+	box.add_theme_constant_override("separation", MobileUi.GAP_RELATED)
 	_overlay.add_child(box)
 	var title := Label.new()
 	title.text = "Magic Password"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 38)
+	title.add_theme_font_size_override("font_size", MobileUi.font(MobileUi.SIZE_SCREEN_TITLE))
 	title.add_theme_color_override("font_color", Color(0.95, 0.78, 1.0))
 	box.add_child(title)
 	var hint := Label.new()
 	hint.text = "Demo password for the sealed note: starlight"
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	hint.add_theme_font_size_override("font_size", 22)
+	hint.add_theme_font_size_override("font_size", MobileUi.font(MobileUi.SIZE_SECONDARY))
 	hint.add_theme_color_override("font_color", Color(0.85, 0.8, 0.9))
 	box.add_child(hint)
 	var field := LineEdit.new()
 	field.placeholder_text = "Enter magic password"
 	field.secret = true
-	field.custom_minimum_size = Vector2(0, 64)
+	field.custom_minimum_size = Vector2(0, MobileUi.font_touch(MobileUi.INPUT_H))
 	box.add_child(field)
 	var show_toggle := CheckBox.new()
 	show_toggle.text = "Show password"
@@ -1901,15 +1910,17 @@ func _show_modal_panel(title_text: String, lines: Array, button_text: String, cb
 	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_overlay.add_child(dim)
 	var box := VBoxContainer.new()
+	var modal_w := 354.0
+	var modal_h := 360.0
 	box.set_anchors_preset(Control.PRESET_CENTER)
-	box.position = Vector2(-360, -300)
-	box.size = Vector2(720, 600)
-	box.add_theme_constant_override("separation", 12)
+	box.position = Vector2(-modal_w * 0.5, -modal_h * 0.5)
+	box.size = Vector2(modal_w, modal_h)
+	box.add_theme_constant_override("separation", MobileUi.GAP_RELATED)
 	_overlay.add_child(box)
 	var title := Label.new()
 	title.text = title_text
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 38)
+	title.add_theme_font_size_override("font_size", MobileUi.font(MobileUi.SIZE_SCREEN_TITLE))
 	title.add_theme_color_override("font_color", Color(0.98, 0.86, 0.45))
 	box.add_child(title)
 	for line in lines:
@@ -1917,7 +1928,7 @@ func _show_modal_panel(title_text: String, lines: Array, button_text: String, cb
 		lab.text = str(line)
 		lab.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		lab.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		lab.add_theme_font_size_override("font_size", 24)
+		lab.add_theme_font_size_override("font_size", MobileUi.font(MobileUi.SIZE_BODY))
 		lab.add_theme_color_override("font_color", Color(0.92, 0.88, 0.95))
 		box.add_child(lab)
 	box.add_child(_make_button(button_text, cb))
@@ -1969,6 +1980,9 @@ func _on_app_resumed() -> void:
 	## Cold-start window: do not race secure session restore with resume revalidation.
 	if not _startup_done:
 		return
+	if _resume_inflight:
+		return
+	_resume_inflight = true
 	if state.is_online() and state.tokens.has_session():
 		var resumed: Dictionary = await state.revalidate_on_resume()
 		if not bool(resumed.get("ok", false)):
@@ -1977,9 +1991,11 @@ func _on_app_resumed() -> void:
 			if reason in ["refresh_soft_fail", "membership_soft_fail", "not_signed_in"]:
 				if reason != "not_signed_in":
 					_show_toast(str(resumed.get("message", "Could not refresh session.")))
+				_resume_inflight = false
 				return
 			_show_toast(str(resumed.get("message", "Your session has expired. Please sign in again.")))
 			_show_welcome()
+			_resume_inflight = false
 			return
 		# Refresh chest / friends / saved metadata when returning to Main Chest.
 		if _current_screen == "main_chest":
@@ -1993,3 +2009,4 @@ func _on_app_resumed() -> void:
 			if bool(saved.get("ok", false)) and typeof(saved.get("data")) == TYPE_DICTIONARY:
 				state.cached_saved = saved.data
 			_show_main_chest()
+	_resume_inflight = false

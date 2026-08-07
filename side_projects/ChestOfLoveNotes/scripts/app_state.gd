@@ -195,10 +195,14 @@ func restore_session_if_possible() -> Dictionary:
 	var claim: Dictionary = await membership.claim_membership()
 	debug_session_trace["membership_revalidated"] = bool(claim.get("ok", false)) and membership.is_member
 	if not bool(claim.get("ok", false)) or not membership.is_member:
-		# Membership denial is definitive for this account.
-		sign_out()
-		session_restore_message = "This is a private app, and this account is not approved."
-		return {"ok": false, "reason": "membership_denied", "message": session_restore_message}
+		## Only definitive allowlist denial wipes Keystore; soft/network keeps session.
+		if bool(claim.get("forbidden", false)):
+			sign_out()
+			session_restore_message = "This is a private app, and this account is not approved."
+			return {"ok": false, "reason": "membership_denied", "message": session_restore_message}
+		tokens.clear(false)
+		session_restore_message = "Could not verify membership. Please try again."
+		return {"ok": false, "reason": "membership_soft_fail", "message": session_restore_message}
 
 	var profile_result: Dictionary = await profiles.fetch_own_profile()
 	debug_session_trace["profile_loaded"] = bool(profile_result.get("ok", false))
