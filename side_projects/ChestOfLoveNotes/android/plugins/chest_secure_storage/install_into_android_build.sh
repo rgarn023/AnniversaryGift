@@ -100,3 +100,30 @@ echo "Installed ChestSecureStorage into android/build"
 echo "  kotlin: $JAVA_DST/ChestSecureStoragePlugin.kt"
 echo "  backup rules: $RES_XML/coln_backup_rules.xml"
 echo "  data extraction: $RES_XML/coln_data_extraction_rules.xml"
+
+# Ensure Godot-copied *.import sidecars under res/ cannot break Android resource merge.
+BUILD_GRADLE="$BUILD_DIR/build.gradle"
+if [[ -f "$BUILD_GRADLE" ]] && ! grep -q 'colnStripImportSidecars' "$BUILD_GRADLE"; then
+  cat >> "$BUILD_GRADLE" <<'GRADLE'
+
+// Chest of Love Notes: Godot may copy *.webp.import sidecars into res/ during export.
+tasks.register("colnStripImportSidecars") {
+    doLast {
+        def resDir = file("res")
+        if (!resDir.exists()) {
+            return
+        }
+        resDir.eachFileRecurse { f ->
+            if (f.isFile() && f.name.endsWith(".import")) {
+                f.delete()
+            }
+        }
+    }
+}
+tasks.matching { it.name.startsWith("merge") && it.name.contains("Resources") }.configureEach {
+    dependsOn("colnStripImportSidecars")
+}
+preBuild.dependsOn("colnStripImportSidecars")
+GRADLE
+  echo "Patched android/build/build.gradle to strip *.import sidecars"
+fi
