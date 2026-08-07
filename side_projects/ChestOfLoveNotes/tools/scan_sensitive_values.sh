@@ -56,16 +56,22 @@ else
   echo "FAIL: PRIVATE_ONBOARDING_BUILD not true"
   FAIL=1
 fi
-if rg -q 'version/code=6' export_presets.cfg && rg -q '0.1.5-backend-config-fixed' export_presets.cfg; then
-  echo "PASS: export version code/name bumped for backend-config-fixed"
+if rg -q 'version/code=7' export_presets.cfg && rg -q '0.1.6-mobile-native-complete-fix' export_presets.cfg; then
+  echo "PASS: export version code/name bumped for mobile-native-complete-fix"
 else
   echo "FAIL: export version not bumped"
   FAIL=1
 fi
-if rg -q 'ChestOfLoveNotes-backend-config-fixed-debug.apk' export_presets.cfg; then
-  echo "PASS: export path targets backend-config-fixed APK"
+if rg -q 'ChestOfLoveNotes-mobile-native-complete-fix-debug.apk' export_presets.cfg; then
+  echo "PASS: export path targets mobile-native-complete-fix APK"
 else
   echo "FAIL: export path incorrect"
+  FAIL=1
+fi
+if rg -q 'viewport_width=390' project.godot && rg -q 'charoite_boot_splash.png' project.godot; then
+  echo "PASS: logical mobile viewport + Charoite splash"
+else
+  echo "FAIL: viewport/splash not updated"
   FAIL=1
 fi
 if [[ -f config/backend_config.json ]]; then

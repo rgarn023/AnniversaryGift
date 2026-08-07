@@ -16,6 +16,10 @@ var _overlay: Control
 var _reveal_timers: Dictionary = {}
 
 
+var _boot_duration_sec: float = 0.0
+var _pending_restore: Dictionary = {}
+
+
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	MobileUi.ensure_loaded()
@@ -29,25 +33,35 @@ func _ready() -> void:
 	add_child(_scroll_viewer)
 	if state.api:
 		state.api.session_invalidated.connect(_on_session_invalidated)
-	# Never show Sign In while restore is pending.
+	# Cold start: Charoite Games ≥5s while session/backend init runs in parallel.
 	await _startup_navigate()
 
 
 func _startup_navigate() -> void:
+	## Charoite Games cold boot (≥5s). Session restore runs during the hold.
+	var boot := CharoiteBoot.new()
+	boot.z_index = 80
+	add_child(boot)
+	_log_secure_debug("startup_begin")
+	_pending_restore = {"ok": false}
 	if state.is_online():
-		_show_session_loading()
-		await get_tree().process_frame
-		_log_secure_debug("startup_begin")
-		var restore: Dictionary = await state.restore_session_if_possible()
+		_pending_restore = await state.restore_session_if_possible()
 		_log_secure_debug("startup_after_restore")
-		if bool(restore.get("ok", false)):
-			if bool(restore.get("profile_exists", false)):
-				_show_main_chest()
-			else:
-				_show_profile_setup()
-			return
-		if not str(restore.get("message", "")).is_empty():
-			_show_toast(str(restore.message))
+	# Keep brand on screen for the remaining time of the 5s presentation.
+	if not boot.is_finished():
+		await boot.finished
+	_boot_duration_sec = boot.measured_duration_sec()
+	boot.queue_free()
+	_log_secure_debug("startup_after_boot")
+	var restore := _pending_restore
+	if bool(restore.get("ok", false)):
+		if bool(restore.get("profile_exists", false)):
+			_show_main_chest()
+		else:
+			_show_profile_setup()
+		return
+	if not str(restore.get("message", "")).is_empty():
+		_show_toast(str(restore.message))
 	_show_welcome()
 
 
@@ -70,21 +84,6 @@ func _log_secure_debug(tag: String) -> void:
 			"YES" if bool(snap.get("profile_loaded", false)) else "NO",
 		]
 	)
-
-
-func _show_session_loading() -> void:
-	_current_screen = "loading"
-	_clear_screen()
-	var box := VBoxContainer.new()
-	box.set_anchors_preset(Control.PRESET_CENTER)
-	box.position = Vector2(-360, -140)
-	box.size = Vector2(720, 280)
-	_screen_host.add_child(box)
-	var lab := Label.new()
-	lab.text = "Opening your chest…"
-	lab.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	MobileUi.apply_label(lab, MobileUi.SIZE_MAJOR_HEADING, MobileUi.COLOR_TITLE)
-	box.add_child(lab)
 
 
 func _on_session_invalidated() -> void:
@@ -119,10 +118,9 @@ func _build_chrome() -> void:
 		_banner.visible = false
 	_banner.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_banner.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	_banner.offset_top = 8
-	_banner.offset_bottom = 44
-	_banner.add_theme_color_override("font_color", Color(1.0, 0.75, 0.35))
-	_banner.add_theme_font_size_override("font_size", 22)
+	_banner.offset_top = 4
+	_banner.offset_bottom = 28
+	MobileUi.apply_label(_banner, MobileUi.SIZE_HELPER, MobileUi.COLOR_TITLE)
 	_banner.z_index = 50
 	add_child(_banner)
 
@@ -135,10 +133,9 @@ func _build_chrome() -> void:
 	_toast.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_toast.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_toast.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	_toast.position = Vector2(-420, -180)
-	_toast.size = Vector2(840, 80)
-	_toast.add_theme_color_override("font_color", Color(0.95, 0.88, 0.7))
-	_toast.add_theme_font_size_override("font_size", 24)
+	_toast.position = Vector2(-160, -120)
+	_toast.size = Vector2(320, 64)
+	MobileUi.apply_label(_toast, MobileUi.SIZE_BODY, MobileUi.COLOR_TITLE)
 	_toast.modulate.a = 0.0
 	_toast.z_index = 60
 	add_child(_toast)
@@ -169,14 +166,35 @@ func _body_font() -> Font:
 	return null
 
 
-func _make_button(text: String, cb: Callable, min_size: Vector2 = Vector2(320, 60)) -> Button:
+func _make_button(text: String, cb: Callable, min_size: Vector2 = Vector2(0, 60)) -> Button:
 	var b := Button.new()
 	b.text = text
 	var h := maxi(MobileUi.TOUCH_MIN, int(min_size.y))
-	b.custom_minimum_size = Vector2(maxi(MobileUi.TOUCH_MIN, int(min_size.x)), MobileUi.font_touch(h))
+	var w := int(min_size.x)
+	b.custom_minimum_size = Vector2(maxi(0, w), MobileUi.font_touch(h))
+	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL if w <= 0 else Control.SIZE_FILL
 	MobileUi.style_button(b, h)
 	b.pressed.connect(cb)
 	return b
+
+
+func _make_screen_root(extra_bottom: int = 0) -> VBoxContainer:
+	var margin := MarginContainer.new()
+	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	MobileUi.apply_safe_margins(margin, extra_bottom)
+	_screen_host.add_child(margin)
+	var root := VBoxContainer.new()
+	root.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	root.add_theme_constant_override("separation", 14)
+	margin.add_child(root)
+	return root
+
+
+func _make_card() -> PanelContainer:
+	var card := PanelContainer.new()
+	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	card.add_theme_stylebox_override("panel", MobileUi.card_style())
+	return card
 
 
 func _show_toast(text: String) -> void:
@@ -190,18 +208,22 @@ func _show_toast(text: String) -> void:
 func _show_welcome() -> void:
 	_current_screen = "welcome"
 	_clear_screen()
+	var root := _make_screen_root()
+	root.add_theme_constant_override("separation", 18)
+	var spacer_top := Control.new()
+	spacer_top.custom_minimum_size.y = 24
+	root.add_child(spacer_top)
+
+	var card := _make_card()
+	root.add_child(card)
 	var box := VBoxContainer.new()
-	box.set_anchors_preset(Control.PRESET_CENTER)
-	box.position = Vector2(-420, -520)
-	box.size = Vector2(840, 1100)
-	box.add_theme_constant_override("separation", 22)
-	_screen_host.add_child(box)
+	box.add_theme_constant_override("separation", 16)
+	card.add_child(box)
 
 	var title := Label.new()
 	title.text = "Chest of Love Notes"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 54)
-	title.add_theme_color_override("font_color", Color(0.98, 0.86, 0.45))
+	MobileUi.apply_label(title, MobileUi.SIZE_APP_TITLE, MobileUi.COLOR_TITLE)
 	if _title_font():
 		title.add_theme_font_override("font", _title_font())
 	box.add_child(title)
@@ -209,40 +231,32 @@ func _show_welcome() -> void:
 	var sub := Label.new()
 	sub.text = "Send sealed scrolls to friends.\nThey wait in the chest until their unlock time."
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	sub.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	sub.add_theme_font_size_override("font_size", 30)
-	sub.add_theme_color_override("font_color", Color(0.92, 0.86, 0.95))
+	MobileUi.apply_label(sub, MobileUi.SIZE_WELCOME, MobileUi.COLOR_BODY)
 	if _body_font():
 		sub.add_theme_font_override("font", _body_font())
 	box.add_child(sub)
 
 	if state.is_demo():
-		box.add_child(_make_button("Enter Local Demo", _enter_demo))
+		box.add_child(_make_button("Enter Local Demo", _enter_demo, Vector2(0, MobileUi.TOUCH_CTA_H)))
 		var note := Label.new()
 		note.text = "No Supabase credentials found. Demo uses fictional accounts only."
-		note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		note.add_theme_font_size_override("font_size", 22)
-		note.add_theme_color_override("font_color", Color(1.0, 0.8, 0.55, 0.95))
+		MobileUi.apply_label(note, MobileUi.SIZE_HELPER, MobileUi.COLOR_HELPER)
 		box.add_child(note)
 	elif state.is_online():
-		box.add_child(_make_button("Sign In", func() -> void: _show_auth(false)))
+		box.add_child(_make_button("Sign In", func() -> void: _show_auth(false), Vector2(0, MobileUi.TOUCH_CTA_H)))
 		if state.show_sign_up():
-			box.add_child(_make_button("Sign Up", func() -> void: _show_auth(true)))
+			box.add_child(_make_button("Sign Up", func() -> void: _show_auth(true), Vector2(0, MobileUi.TOUCH_PRIMARY_H)))
 		var private_note := Label.new()
 		private_note.text = "This is a private app. Only approved accounts can enter the chest."
-		private_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		private_note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		private_note.add_theme_font_size_override("font_size", 22)
-		private_note.add_theme_color_override("font_color", Color(0.9, 0.82, 0.7))
+		MobileUi.apply_label(private_note, MobileUi.SIZE_SECONDARY, MobileUi.COLOR_SECONDARY)
 		box.add_child(private_note)
 	else:
 		var err := Label.new()
 		err.text = "Backend is not configured.\nAdd config/backend_config.json (see example)."
-		err.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		err.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		err.add_theme_font_size_override("font_size", 26)
-		err.add_theme_color_override("font_color", Color(1.0, 0.55, 0.45))
+		MobileUi.apply_label(err, MobileUi.SIZE_BODY, MobileUi.COLOR_DANGER)
 		box.add_child(err)
 
 
@@ -260,44 +274,76 @@ func _show_auth(sign_up: bool) -> void:
 		return
 	_current_screen = "auth_signup" if sign_up else "auth_signin"
 	_clear_screen()
+	var root := _make_screen_root()
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	root.add_child(scroll)
+	var card := _make_card()
+	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(card)
 	var box := VBoxContainer.new()
-	box.set_anchors_preset(Control.PRESET_CENTER)
-	box.position = Vector2(-400, -520)
-	box.size = Vector2(800, 1040)
-	box.add_theme_constant_override("separation", 16)
-	_screen_host.add_child(box)
-	var title := Label.new()
-	title.text = "Sign Up" if sign_up else "Sign In"
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 44)
-	title.add_theme_color_override("font_color", Color(0.98, 0.86, 0.45))
-	box.add_child(title)
+	box.custom_minimum_size.x = 320
+	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	box.add_theme_constant_override("separation", 14)
+	card.add_child(box)
+
+	var brand := Label.new()
+	brand.text = "Chest of Love Notes"
+	brand.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	MobileUi.apply_label(brand, MobileUi.SIZE_APP_TITLE, MobileUi.COLOR_TITLE)
+	if _title_font():
+		brand.add_theme_font_override("font", _title_font())
+	box.add_child(brand)
+
+	var welcome := Label.new()
+	welcome.text = "Create your account" if sign_up else "Welcome back"
+	welcome.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	MobileUi.apply_label(welcome, MobileUi.SIZE_WELCOME, MobileUi.COLOR_BODY)
+	box.add_child(welcome)
+
 	var email := LineEdit.new()
 	email.placeholder_text = "Email"
-	email.custom_minimum_size = Vector2(0, 64)
+	email.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	MobileUi.style_line_edit(email)
 	box.add_child(email)
+
+	var pw_row := HBoxContainer.new()
+	pw_row.add_theme_constant_override("separation", 8)
+	box.add_child(pw_row)
 	var password := LineEdit.new()
 	password.placeholder_text = "Password"
 	password.secret = true
-	password.custom_minimum_size = Vector2(0, 64)
-	box.add_child(password)
+	password.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	MobileUi.style_line_edit(password)
+	pw_row.add_child(password)
+	var eye := Button.new()
+	eye.text = "👁"
+	eye.custom_minimum_size = Vector2(MobileUi.font_touch(48), MobileUi.font_touch(48))
+	MobileUi.style_button(eye, 48)
+	eye.pressed.connect(func() -> void:
+		password.secret = not password.secret
+	)
+	pw_row.add_child(eye)
+
 	var confirm: LineEdit = null
 	if sign_up:
 		confirm = LineEdit.new()
 		confirm.placeholder_text = "Confirm password"
 		confirm.secret = true
-		confirm.custom_minimum_size = Vector2(0, 64)
+		confirm.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		MobileUi.style_line_edit(confirm)
 		box.add_child(confirm)
+
 	var status := Label.new()
-	status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	status.add_theme_font_size_override("font_size", 22)
-	status.add_theme_color_override("font_color", Color(1.0, 0.7, 0.55))
+	MobileUi.apply_label(status, MobileUi.SIZE_HELPER, MobileUi.COLOR_HELPER)
 	box.add_child(status)
+
 	var submit_label := "Create Account" if sign_up else "Sign In"
 	box.add_child(_make_button(submit_label, func() -> void:
 		status.text = "Working…"
-		status.add_theme_color_override("font_color", Color(0.9, 0.85, 0.7))
+		status.add_theme_color_override("font_color", MobileUi.COLOR_HELPER)
 		# Never log password values.
 		if sign_up:
 			var result: Dictionary = await state.auth.sign_up(
@@ -307,7 +353,7 @@ func _show_auth(sign_up: bool) -> void:
 			if confirm:
 				confirm.text = ""
 			if not bool(result.get("ok", false)):
-				status.add_theme_color_override("font_color", Color(1.0, 0.55, 0.45))
+				status.add_theme_color_override("font_color", MobileUi.COLOR_DANGER)
 				status.text = str(result.get("error", "Sign up failed."))
 				return
 			if bool(result.get("needs_confirmation", true)):
@@ -319,14 +365,14 @@ func _show_auth(sign_up: bool) -> void:
 			var result: Dictionary = await state.auth.sign_in(email.text, password.text)
 			password.text = ""
 			if not bool(result.get("ok", false)):
-				status.add_theme_color_override("font_color", Color(1.0, 0.55, 0.45))
+				status.add_theme_color_override("font_color", MobileUi.COLOR_DANGER)
 				status.text = str(result.get("error", "Sign in failed."))
 				if bool(result.get("needs_confirmation", false)):
 					state.pending_confirm_email = email.text.strip_edges().to_lower()
-					box.add_child(_make_button("Go to Check Your Email", _show_check_email, Vector2(360, 64)))
+					box.add_child(_make_button("Go to Check Your Email", _show_check_email))
 				return
 			await _after_verified_sign_in()
-	))
+	, Vector2(0, MobileUi.TOUCH_CTA_H)))
 	if sign_up:
 		box.add_child(_make_button("Already have an account? Sign In", func() -> void: _show_auth(false)))
 	elif state.show_sign_up():
@@ -337,20 +383,18 @@ func _show_auth(sign_up: bool) -> void:
 func _show_check_email() -> void:
 	_current_screen = "check_email"
 	_clear_screen()
+	var root := _make_screen_root()
+	var card := _make_card()
+	root.add_child(card)
 	var box := VBoxContainer.new()
-	box.set_anchors_preset(Control.PRESET_CENTER)
-	box.position = Vector2(-420, -480)
-	box.size = Vector2(840, 960)
-	box.add_theme_constant_override("separation", 18)
-	_screen_host.add_child(box)
+	box.add_theme_constant_override("separation", 14)
+	card.add_child(box)
 	var title := Label.new()
 	title.text = "Check Your Email"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 44)
-	title.add_theme_color_override("font_color", Color(0.98, 0.86, 0.45))
+	MobileUi.apply_label(title, MobileUi.SIZE_SCREEN_TITLE, MobileUi.COLOR_TITLE)
 	box.add_child(title)
 	var body := Label.new()
-	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	body.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	body.text = (
 		"We sent a confirmation link to your email.\n\n"
@@ -359,16 +403,13 @@ func _show_check_email() -> void:
 		+ "3. Return here and continue to Sign In.\n\n"
 		+ "Membership is checked only after a verified sign-in."
 	)
-	body.add_theme_font_size_override("font_size", 26)
-	body.add_theme_color_override("font_color", Color(0.92, 0.88, 0.96))
+	MobileUi.apply_label(body, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY)
 	box.add_child(body)
 	var status := Label.new()
-	status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	status.add_theme_font_size_override("font_size", 22)
-	status.add_theme_color_override("font_color", Color(0.9, 0.82, 0.7))
+	MobileUi.apply_label(status, MobileUi.SIZE_HELPER, MobileUi.COLOR_HELPER)
 	box.add_child(status)
-	box.add_child(_make_button("I’ve Confirmed My Email", func() -> void: _show_auth(false)))
+	box.add_child(_make_button("I’ve Confirmed My Email", func() -> void: _show_auth(false), Vector2(0, MobileUi.TOUCH_CTA_H)))
 	box.add_child(_make_button("Return to Sign In", func() -> void: _show_auth(false)))
 	box.add_child(_make_button("Resend Confirmation", func() -> void:
 		var result: Dictionary = await state.auth.resend_confirmation(state.pending_confirm_email)
@@ -420,38 +461,35 @@ func _after_verified_sign_in() -> void:
 func _show_profile_setup() -> void:
 	_current_screen = "profile_setup"
 	_clear_screen()
+	var root := _make_screen_root()
+	var card := _make_card()
+	root.add_child(card)
 	var box := VBoxContainer.new()
-	box.set_anchors_preset(Control.PRESET_CENTER)
-	box.position = Vector2(-400, -420)
-	box.size = Vector2(800, 840)
-	box.add_theme_constant_override("separation", 16)
-	_screen_host.add_child(box)
+	box.add_theme_constant_override("separation", 14)
+	card.add_child(box)
 	var title := Label.new()
 	title.text = "Create Your Profile"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 42)
-	title.add_theme_color_override("font_color", Color(0.98, 0.86, 0.45))
+	MobileUi.apply_label(title, MobileUi.SIZE_SCREEN_TITLE, MobileUi.COLOR_TITLE)
 	box.add_child(title)
 	var info := Label.new()
 	info.text = "Choose a username and display name. Your friend code is generated securely."
-	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	info.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	info.add_theme_font_size_override("font_size", 24)
-	info.add_theme_color_override("font_color", Color(0.9, 0.85, 0.95))
+	MobileUi.apply_label(info, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY)
 	box.add_child(info)
 	var username := LineEdit.new()
 	username.placeholder_text = "Username (3–32 characters)"
-	username.custom_minimum_size = Vector2(0, 64)
+	username.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	MobileUi.style_line_edit(username)
 	box.add_child(username)
 	var display_name := LineEdit.new()
 	display_name.placeholder_text = "Display name"
-	display_name.custom_minimum_size = Vector2(0, 64)
+	display_name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	MobileUi.style_line_edit(display_name)
 	box.add_child(display_name)
 	var status := Label.new()
-	status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	status.add_theme_font_size_override("font_size", 22)
-	status.add_theme_color_override("font_color", Color(1.0, 0.7, 0.55))
+	MobileUi.apply_label(status, MobileUi.SIZE_HELPER, MobileUi.COLOR_HELPER)
 	box.add_child(status)
 	box.add_child(_make_button("Save Profile", func() -> void:
 		status.text = "Saving…"
@@ -461,7 +499,7 @@ func _show_profile_setup() -> void:
 			return
 		_show_toast("Profile ready.")
 		_show_main_chest()
-	))
+	, Vector2(0, MobileUi.TOUCH_CTA_H)))
 	box.add_child(_make_button("Sign Out", func() -> void:
 		await state.sign_out_full()
 		_show_welcome()
@@ -578,11 +616,11 @@ func _show_main_chest() -> void:
 	_chest = LoveNotesChest.new()
 	_chest.reduced_motion = state.reduced_motion
 	_chest.set_anchors_preset(Control.PRESET_CENTER)
-	# ~52% of typical phone width in logical space; grows with area.
-	var chest_side := 560
+	# ~65% of ~390 logical width — dominant home focal point.
+	var chest_side := 260
 	_chest.custom_minimum_size = Vector2(chest_side, chest_side)
 	_chest.size = Vector2(chest_side, chest_side)
-	_chest.position = Vector2(-chest_side * 0.5, -chest_side * 0.42)
+	_chest.position = Vector2(-chest_side * 0.5, -chest_side * 0.38)
 	_chest.z_index = 5
 	_chest.tapped.connect(_on_chest_tapped)
 	chest_area.add_child(_chest)
@@ -814,9 +852,9 @@ func _show_inventory() -> void:
 		items = await _load_online_chest_items(_inventory_filter)
 	if items.is_empty():
 		var empty := Label.new()
-		empty.text = "No scrolls in this view."
-		empty.add_theme_font_size_override("font_size", 28)
-		empty.add_theme_color_override("font_color", Color(0.85, 0.8, 0.9))
+		empty.text = "Your chest is empty.\n\nNew love notes will appear here."
+		empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		MobileUi.apply_label(empty, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY)
 		list.add_child(empty)
 		return
 	for item in items:
@@ -1599,23 +1637,50 @@ func _clear_reveal_timers() -> void:
 	_reveal_timers.clear()
 
 
+func _settings_row(label_text: String, value_control: Control) -> PanelContainer:
+	var card := _make_card()
+	var row := HBoxContainer.new()
+	row.custom_minimum_size.y = MobileUi.font_touch(56)
+	row.add_theme_constant_override("separation", 10)
+	card.add_child(row)
+	var lab := Label.new()
+	lab.text = label_text
+	lab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	MobileUi.apply_label(lab, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY)
+	row.add_child(lab)
+	row.add_child(value_control)
+	return card
+
+
+func _settings_value_label(text: String) -> Label:
+	var v := Label.new()
+	v.text = text
+	v.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	MobileUi.apply_label(v, MobileUi.SIZE_SECONDARY, MobileUi.COLOR_SECONDARY)
+	return v
+
+
 func _show_profile() -> void:
 	_current_screen = "profile"
 	_clear_screen()
-	var root := VBoxContainer.new()
-	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	root.offset_left = 40
-	root.offset_right = -40
-	root.offset_top = 40
-	root.offset_bottom = -40
-	root.add_theme_constant_override("separation", 16)
-	_screen_host.add_child(root)
+	var root := _make_screen_root(MobileUi.font_touch(MobileUi.TOUCH_NAV_H) + 8)
 	var title := Label.new()
-	title.text = "Profile / Settings"
+	title.text = "Profile"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 42)
-	title.add_theme_color_override("font_color", Color(0.98, 0.86, 0.45))
+	MobileUi.apply_label(title, MobileUi.SIZE_SCREEN_TITLE, MobileUi.COLOR_TITLE)
+	if _title_font():
+		title.add_theme_font_override("font", _title_font())
 	root.add_child(title)
+
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	root.add_child(scroll)
+	var col := VBoxContainer.new()
+	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	col.add_theme_constant_override("separation", 10)
+	scroll.add_child(col)
+
 	var me: Dictionary = {}
 	if state.is_demo():
 		me = state.demo.get_profile()
@@ -1623,50 +1688,31 @@ func _show_profile() -> void:
 		var pref: Dictionary = await state.profiles.fetch_own_profile()
 		if bool(pref.get("ok", false)) and bool(pref.get("exists", false)):
 			me = state.profiles.profile
-	var build_label := ""
-	if state.is_private_onboarding_build():
-		build_label = "\n\nPrivate Onboarding Build"
-	var info := Label.new()
-	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	info.text = (
-		"Display name: %s\nUsername: @%s\nFriend code: %s\n\n%s\n\nMode: %s\nPrivate role: %s%s"
-		% [
-			str(me.get("display_name", "")),
-			str(me.get("username", "")),
-			str(me.get("friend_code", "")),
-			state.tokens.limitation_message,
-			"LOCAL DEMO" if state.is_demo() else ("ONLINE" if state.is_online() else "UNCONFIGURED"),
-			state.membership.role if state.membership.role != "" else "(none)",
-			build_label,
-		]
-	)
-	info.add_theme_font_size_override("font_size", 26)
-	info.add_theme_color_override("font_color", Color(0.92, 0.88, 0.96))
-	root.add_child(info)
-	# Accessibility settings
-	var text_row := HBoxContainer.new()
-	text_row.custom_minimum_size.y = MobileUi.font_touch(56)
-	root.add_child(text_row)
-	var text_lab := Label.new()
-	text_lab.text = "Text Size"
-	text_lab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	MobileUi.apply_label(text_lab, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY)
-	text_row.add_child(text_lab)
-	var text_btn := _make_button(MobileUi.text_size_label(), func() -> void:
+
+	var section := Label.new()
+	section.text = "ACCOUNT"
+	MobileUi.apply_label(section, MobileUi.SIZE_SECTION, MobileUi.COLOR_TITLE)
+	col.add_child(section)
+	col.add_child(_settings_row("Display Name", _settings_value_label(str(me.get("display_name", "—")))))
+	col.add_child(_settings_row("Username", _settings_value_label("@" + str(me.get("username", "—")))))
+	col.add_child(_settings_row("Email", _settings_value_label(str(state.tokens.user_email if state.tokens.user_email != "" else "—"))))
+	col.add_child(_settings_row("Friend Code", _settings_value_label(str(me.get("friend_code", "—")))))
+	var access := "Active" if state.membership.is_member or state.is_demo() else "—"
+	col.add_child(_settings_row("Private Access", _settings_value_label(access)))
+
+	var prefs := Label.new()
+	prefs.text = "PREFERENCES"
+	MobileUi.apply_label(prefs, MobileUi.SIZE_SECTION, MobileUi.COLOR_TITLE)
+	col.add_child(prefs)
+
+	var text_btn := _make_button(MobileUi.text_size_label() + "  >", func() -> void:
 		MobileUi.cycle_text_size()
 		_show_toast("Text Size: %s" % MobileUi.text_size_label())
 		_show_profile()
-	, Vector2(200, MobileUi.TOUCH_PRIMARY_H))
-	text_row.add_child(text_btn)
+	, Vector2(140, 48))
+	text_btn.size_flags_horizontal = Control.SIZE_SHRINK_END
+	col.add_child(_settings_row("Text Size", text_btn))
 
-	var motion_row := HBoxContainer.new()
-	motion_row.custom_minimum_size.y = MobileUi.font_touch(56)
-	root.add_child(motion_row)
-	var motion_lab := Label.new()
-	motion_lab.text = "Reduced Motion"
-	motion_lab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	MobileUi.apply_label(motion_lab, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY)
-	motion_row.add_child(motion_lab)
 	var motion_toggle := CheckButton.new()
 	motion_toggle.button_pressed = MobileUi.reduced_motion()
 	motion_toggle.custom_minimum_size = Vector2(72, 48)
@@ -1678,17 +1724,9 @@ func _show_profile() -> void:
 			_scroll_viewer.set_reduced_motion(on)
 		_show_toast("Reduced Motion is %s" % ("ON" if on else "OFF"))
 	)
-	motion_row.add_child(motion_toggle)
+	col.add_child(_settings_row("Reduced Motion", motion_toggle))
 
 	if state.is_online():
-		var keep_row := HBoxContainer.new()
-		keep_row.custom_minimum_size.y = MobileUi.font_touch(56)
-		root.add_child(keep_row)
-		var keep_lab := Label.new()
-		keep_lab.text = "Keep Me Signed In"
-		keep_lab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		MobileUi.apply_label(keep_lab, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY)
-		keep_row.add_child(keep_lab)
 		var keep_toggle := CheckButton.new()
 		keep_toggle.button_pressed = state.tokens.keep_me_signed_in
 		keep_toggle.custom_minimum_size = Vector2(72, 48)
@@ -1697,21 +1735,22 @@ func _show_profile() -> void:
 			state.tokens.set_keep_me_signed_in(on)
 			_show_toast("Keep Me Signed In is %s" % ("ON" if on else "OFF"))
 		)
-		keep_row.add_child(keep_toggle)
+		col.add_child(_settings_row("Keep Me Signed In", keep_toggle))
+
 	if OS.is_debug_build():
-		root.add_child(_make_button("Online Diagnostics", _show_diagnostics))
-	root.add_child(_make_button("Sign Out", func() -> void:
+		col.add_child(_make_button("Online Diagnostics", _show_diagnostics))
+	col.add_child(_make_button("Sign Out", func() -> void:
 		_clear_reveal_timers()
 		await state.sign_out_full()
 		if state.is_demo():
 			state.demo.enable()
 		_show_welcome()
-	))
+	, Vector2(0, MobileUi.TOUCH_CTA_H)))
+
 	if state.membership.is_member or state.is_demo():
-		root.add_child(_make_button("Back", _show_main_chest))
 		_add_bottom_nav("profile")
 	else:
-		root.add_child(_make_button("Back", _show_welcome))
+		col.add_child(_make_button("Back", _show_welcome))
 
 
 func _show_diagnostics() -> void:

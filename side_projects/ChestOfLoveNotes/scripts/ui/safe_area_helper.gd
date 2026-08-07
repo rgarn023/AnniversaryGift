@@ -21,7 +21,7 @@ static func display_insets_viewport() -> Vector4:
 	if tree is SceneTree:
 		vp = (tree as SceneTree).root.get_visible_rect().size
 	if vp.x <= 0.0 or vp.y <= 0.0:
-		vp = Vector2(1080, 2400)
+		vp = Vector2(390, 844)
 
 	var win_size := Vector2(DisplayServer.window_get_size())
 	if win_size.x <= 0.0 or win_size.y <= 0.0:

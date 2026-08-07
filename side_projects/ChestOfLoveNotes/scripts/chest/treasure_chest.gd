@@ -12,21 +12,21 @@ signal scroll_emerged(global_pos: Vector2)
 enum ChestState { LOCKED_SILHOUETTE, AVAILABLE, OPENING, OPENED, READY }
 
 const ART := "res://assets/art/chest/"
+const FRAME_ART := "res://assets/art/chest/opening_frames/"
 const SCROLL_ART := "res://assets/art/scroll/"
-const FRAME_SIZE := Vector2(560, 383)
+## Logical chest footprint in ~390-wide mobile space (~60% width).
+const FRAME_SIZE := Vector2(260, 178)
 
-## Ordered opening amounts and texture paths (progressive motion, no closed→open jump).
-const FRAME_KEYS: Array = [0.0, 0.10, 0.25, 0.33, 0.50, 0.66, 0.75, 0.90, 1.0]
+## Curated transparent frames only (black-bg intermediates removed from playback).
+## Same camera family: closed → early open → ajar → half → open.
+const FRAME_KEYS: Array = [0.0, 0.12, 0.28, 0.45, 0.70, 1.0]
 const FRAME_FILES: Array = [
-	"chest_closed.png",
-	"chest_open_10.png",
-	"chest_open_25.png",
-	"chest_ajar.png",
-	"chest_open_50.png",
-	"chest_half.png",
-	"chest_open_75.png",
-	"chest_open_90.png",
-	"chest_open.png",
+	"frame_00_closed.png",
+	"frame_01_open10.png",
+	"frame_02_open25.png",
+	"frame_03_ajar.png",
+	"frame_04_half.png",
+	"frame_05_open.png",
 ]
 
 @export var reduced_motion: bool = false
@@ -61,7 +61,7 @@ var _open_amount: float = 0.0
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	clip_contents = false
-	custom_minimum_size = Vector2(560, 560)
+	custom_minimum_size = Vector2(FRAME_SIZE.x, FRAME_SIZE.x)
 	modulate.a = 0.0
 	visible = false
 	_preload_textures()
@@ -87,7 +87,10 @@ func _ready() -> void:
 func _preload_textures() -> void:
 	_frame_textures.clear()
 	for fname in FRAME_FILES:
-		_frame_textures.append(_load_tex(ART + str(fname)))
+		var path := FRAME_ART + str(fname)
+		if not ResourceLoader.exists(path):
+			path = ART + str(fname)
+		_frame_textures.append(_load_tex(path))
 
 
 func _load_tex(path: String) -> Texture2D:
@@ -216,15 +219,15 @@ func _make_particles(color: Color, amount: int, dir: Vector2, speed: float) -> C
 	p.amount = amount
 	p.lifetime = 1.2
 	p.one_shot = true
-	p.explosiveness = 0.55
+	p.explosiveness = 0.15
 	p.local_coords = false
 	p.direction = dir
-	p.spread = 40.0
-	p.initial_velocity_min = speed * 0.35
-	p.initial_velocity_max = speed
-	p.gravity = Vector2(0, 26)
-	p.scale_amount_min = 1.0
-	p.scale_amount_max = 2.0
+	p.spread = 28.0
+	p.initial_velocity_min = speed * 0.2
+	p.initial_velocity_max = speed * 0.55
+	p.gravity = Vector2(0, 18)
+	p.scale_amount_min = 0.8
+	p.scale_amount_max = 1.4
 	p.color = color
 	return p
 
@@ -234,7 +237,7 @@ func _layout_frames() -> void:
 		return
 	var area := size
 	if area.x < 8.0 or area.y < 8.0:
-		area = Vector2(560, 560)
+		area = Vector2(FRAME_SIZE.x, FRAME_SIZE.x)
 	_root_visual.pivot_offset = area * 0.5
 	var frame_h: float = area.x * (FRAME_SIZE.y / FRAME_SIZE.x)
 	var top: float = (area.y - frame_h) * 0.38
@@ -476,61 +479,56 @@ func apply_ready_idle_state() -> void:
 
 
 func _open_short() -> void:
-	## Reduced-motion / fast path (~0.4s), still progressive frames.
-	if not reduced_motion:
-		_emit_burst()
+	## Reduced-motion path (~0.35–0.45s): closed → brief glow → open.
+	_show_frame_state(0.0)
 	var tw := create_tween()
-	tw.tween_method(_show_frame_state, 0.0, 1.0, 0.4).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	tw.tween_method(_show_frame_state, 0.0, 1.0, 0.38).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	await tw.finished
 
 
 func _open_full() -> void:
 	_layout_frames()
-	# 0.00–0.12 press
+	# 0.00–0.12 tactile press (base stays planted — scale only)
 	var press := create_tween()
-	press.tween_property(_root_visual, "scale", Vector2(1.0, 0.975), 0.12).set_trans(Tween.TRANS_SINE)
+	press.tween_property(_root_visual, "scale", Vector2(1.0, 0.978), 0.12).set_trans(Tween.TRANS_SINE)
 	await press.finished
 	if _skip:
 		_apply_finished_state()
 		return
 
-	# 0.12–0.48 latch/lock mechanical motion
+	# 0.12–0.45 latch/lock mechanical motion
 	_latch.modulate.a = 1.0
 	_lock.modulate.a = 0.95
 	HapticHelper.lock_release()
 	var latch_tw := create_tween()
 	latch_tw.tween_property(_root_visual, "scale", Vector2.ONE, 0.10)
-	latch_tw.parallel().tween_property(_latch, "position:y", _latch.position.y - 5.0, 0.16)
-	latch_tw.parallel().tween_property(_lock, "rotation", deg_to_rad(8.0), 0.18)
+	latch_tw.parallel().tween_property(_latch, "position:y", _latch.position.y - 4.0, 0.18)
+	latch_tw.parallel().tween_property(_lock, "rotation", deg_to_rad(6.0), 0.18)
 	await latch_tw.finished
 	if _skip:
 		_apply_finished_state()
 		return
 	var release := create_tween()
-	release.tween_property(_latch, "modulate:a", 0.0, 0.16)
-	release.parallel().tween_property(_lock, "rotation", deg_to_rad(-4.0), 0.14)
-	release.parallel().tween_property(_lock, "modulate:a", 0.0, 0.18)
+	release.tween_property(_latch, "modulate:a", 0.0, 0.14)
+	release.parallel().tween_property(_lock, "rotation", 0.0, 0.12)
+	release.parallel().tween_property(_lock, "modulate:a", 0.0, 0.14)
 	await release.finished
 	if _skip:
 		_apply_finished_state()
 		return
 
-	# 0.45–1.45 lid opens with weight (slow → fast → slow) + mild overshoot
-	_front_lip.modulate.a = 1.0
+	# 0.45–1.55 weighted lid (~1.1s): slow start, faster mid, soft settle. No bounce.
+	_front_lip.modulate.a = 0.85
 	var lid := create_tween()
-	lid.tween_method(_show_frame_state, 0.0, 1.04, 0.95).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
-	await get_tree().create_timer(0.35).timeout
+	lid.tween_method(_show_frame_state, 0.0, 1.0, 1.10).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
+	await get_tree().create_timer(0.40).timeout
 	if not _skip and not reduced_motion:
 		_emit_burst()
 	await lid.finished
 	if _skip:
 		_apply_finished_state()
 		return
-	# Settle overshoot 2–4%
-	var settle := create_tween()
-	settle.tween_method(_show_frame_state, 1.04, 0.97, 0.10)
-	settle.tween_method(_show_frame_state, 0.97, 1.0, 0.14)
-	await settle.finished
+	await get_tree().create_timer(0.18).timeout
 	await _emerge_scroll()
 	scroll_emerged.emit(get_scroll_global_center())
 
