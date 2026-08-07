@@ -115,6 +115,16 @@ Configure auth redirect URLs in Supabase for mobile email verification if using 
 
 ## 13. Connect the Godot app
 
+From env (preferred for APK exports — never prints secret values):
+
+```bash
+# Requires SUPABASE_URL and SUPABASE_ANON_KEY in the environment.
+python3 tools/prepare_backend_config.py
+python3 tools/verify_backend_config_for_export.py
+```
+
+Or manually:
+
 ```bash
 cp config/backend_config.example.json config/backend_config.json
 ```
@@ -129,7 +139,7 @@ Edit:
 }
 ```
 
-`config/backend_config.json` is gitignored.
+`config/backend_config.json` is gitignored. Private online APK exports must run the prepare/verify steps first; otherwise Android shows “Backend is not configured.”
 
 ## 14. Run backend tests
 

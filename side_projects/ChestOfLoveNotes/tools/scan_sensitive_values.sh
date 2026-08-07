@@ -56,16 +56,27 @@ else
   echo "FAIL: PRIVATE_ONBOARDING_BUILD not true"
   FAIL=1
 fi
-if rg -q 'version/code=5' export_presets.cfg && rg -q '0.1.4-mobile-accessibility-session-chest' export_presets.cfg; then
-  echo "PASS: export version code/name bumped for accessibility-session-chest"
+if rg -q 'version/code=6' export_presets.cfg && rg -q '0.1.5-backend-config-fixed' export_presets.cfg; then
+  echo "PASS: export version code/name bumped for backend-config-fixed"
 else
   echo "FAIL: export version not bumped"
   FAIL=1
 fi
-if rg -q 'ChestOfLoveNotes-mobile-accessibility-session-chest-debug.apk' export_presets.cfg; then
-  echo "PASS: export path targets accessibility-session-chest APK"
+if rg -q 'ChestOfLoveNotes-backend-config-fixed-debug.apk' export_presets.cfg; then
+  echo "PASS: export path targets backend-config-fixed APK"
 else
   echo "FAIL: export path incorrect"
+  FAIL=1
+fi
+if [[ -f config/backend_config.json ]]; then
+  if python3 tools/verify_backend_config_for_export.py; then
+    echo "PASS: backend_config.json present and non-placeholder for private export"
+  else
+    echo "FAIL: backend_config.json invalid for private export"
+    FAIL=1
+  fi
+else
+  echo "FAIL: config/backend_config.json missing (private APK would show Backend is not configured)"
   FAIL=1
 fi
 # Session persistence must not use plaintext user:// token files in client sources.

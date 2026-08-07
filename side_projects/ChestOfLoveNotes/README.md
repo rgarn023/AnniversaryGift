@@ -52,18 +52,23 @@ godot --headless --path side_projects/ChestOfLoveNotes -s res://tests/test_demo_
 
 ## Build Android APK
 
+Private online builds require the gitignored client config (URL + publishable key only):
+
 ```bash
-godot --headless --path side_projects/ChestOfLoveNotes --export-debug "Android" build/ChestOfLoveNotes-debug.apk
+cd side_projects/ChestOfLoveNotes
+python3 tools/prepare_backend_config.py   # uses SUPABASE_URL + SUPABASE_ANON_KEY
+python3 tools/verify_backend_config_for_export.py
+godot --headless --path . --export-debug "Android" build/ChestOfLoveNotes-backend-config-fixed-debug.apk
 ```
 
-Output: `side_projects/ChestOfLoveNotes/build/ChestOfLoveNotes-debug.apk`
+If `config/backend_config.json` is missing at export time, the APK packs no backend credentials and shows **Backend is not configured**.
 
 ## Supabase
 
 See [SETUP_SUPABASE.md](SETUP_SUPABASE.md).
 
 Client config example: `config/backend_config.example.json`  
-Copy to `config/backend_config.json` (gitignored) with your project URL + publishable key only.
+Copy to `config/backend_config.json` (gitignored) with your project URL + publishable key only, or run `python3 tools/prepare_backend_config.py`.
 
 **Never** put the service-role key or `MESSAGE_ENCRYPTION_KEY` in the Godot project.
 
