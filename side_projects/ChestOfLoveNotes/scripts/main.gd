@@ -939,23 +939,15 @@ func _show_saved() -> void:
 		return
 	_current_screen = "saved"
 	_clear_screen()
-	var root := VBoxContainer.new()
-	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	root.offset_left = 28
-	root.offset_right = -28
-	root.offset_top = 24
-	root.offset_bottom = -24
-	root.add_theme_constant_override("separation", 12)
-	_screen_host.add_child(root)
+	var root := _make_screen_root(MobileUi.font_touch(MobileUi.TOUCH_NAV_H) + 8)
 	var header := HBoxContainer.new()
 	root.add_child(header)
 	var title := Label.new()
 	title.text = "Saved Scrolls"
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	title.add_theme_font_size_override("font_size", 40)
-	title.add_theme_color_override("font_color", Color(0.98, 0.86, 0.45))
+	MobileUi.apply_label(title, MobileUi.SIZE_SCREEN_TITLE, MobileUi.COLOR_TITLE, false)
 	header.add_child(title)
-	header.add_child(_make_button("Back", _show_inventory, Vector2(160, 64)))
+	header.add_child(_make_button("Back", _show_inventory, Vector2(100, MobileUi.TOUCH_SECONDARY_H)))
 	var scroll := _wire_scroll(ScrollContainer.new())
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	root.add_child(scroll)
@@ -972,8 +964,7 @@ func _show_saved() -> void:
 	if items.is_empty():
 		var empty := Label.new()
 		empty.text = "No saved scrolls yet. Open a note to keep it here."
-		empty.add_theme_font_size_override("font_size", 28)
-		empty.add_theme_color_override("font_color", Color(0.85, 0.8, 0.9))
+		MobileUi.apply_label(empty, MobileUi.SIZE_BODY, MobileUi.COLOR_HELPER)
 		list.add_child(empty)
 		return
 	for item in items:
