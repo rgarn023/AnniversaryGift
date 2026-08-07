@@ -1513,12 +1513,12 @@ func _open_authorized_scroll(scroll_id: String, magic_password: String, needs_lo
 				await get_tree().create_timer(0.35).timeout
 				status = LocationHelper.permission_status()
 			if status != "granted":
-				_show_toast("Location permission is needed to open this place-locked scroll.")
+				_show_toast("Location access is needed only to verify whether you're near the unlock location.")
 				return
-		var fix: Dictionary = LocationHelper.get_current_fix()
+		var fix: Dictionary = LocationHelper.get_current_fix(true)
 		if not bool(fix.get("ok", false)):
 			## Never treat missing location as authorization to unlock.
-			_show_toast(str(fix.get("error", "Location is temporarily unavailable.")))
+			_show_toast(str(fix.get("error", "We couldn't verify your location. Try again.")))
 			return
 		lat = float(fix.get("lat", NAN))
 		lng = float(fix.get("lng", NAN))
@@ -1640,11 +1640,17 @@ func _on_compose_preview(draft: Dictionary) -> void:
 	if not immediate:
 		var unlock_unix := int(draft.get("unlock_unix", 0))
 		when = "Opens %s" % Time.get_datetime_string_from_unix_time(unlock_unix, false)
+	var meta_bits: PackedStringArray = PackedStringArray(["To %s" % recipient, when])
 	if bool(draft.get("has_location_lock", false)):
 		var place := str(draft.get("location_name", "")).strip_edges()
-		when = "Opens %s" % LocationHelper.format_lock_summary(place, not immediate, when.trim_prefix("Opens ").strip_edges() if when.begins_with("Opens ") else when)
+		var addr := str(draft.get("location_address", "")).strip_edges()
+		var radius := int(draft.get("location_radius_m", LocationHelper.DEFAULT_RADIUS_M))
+		var place_line := place if addr.is_empty() else "%s, %s" % [place, addr]
+		meta_bits.append("This scroll is location locked.")
+		meta_bits.append("Go within %s of %s to open it." % [LocationHelper.format_radius(radius), place_line])
 	var pw_note := "Magic password required" if bool(draft.get("has_password", false)) else "No magic password"
-	var meta := "To %s · %s · %s" % [recipient, when, pw_note]
+	meta_bits.append(pw_note)
+	var meta := " · ".join(meta_bits)
 	var body := str(draft.get("message", ""))
 	await _scroll_viewer.open_message(title, meta, body, false, false)
 
@@ -1665,14 +1671,19 @@ func _on_compose_send_requested(draft: Dictionary) -> void:
 		unlock_unix = int(draft.get("unlock_unix", unlock_unix))
 	var has_location_lock := bool(draft.get("has_location_lock", false))
 	var location_name := str(draft.get("location_name", "")).strip_edges()
+	var location_address := str(draft.get("location_address", "")).strip_edges()
 	var location_lat := float(draft.get("location_lat", 0.0))
 	var location_lng := float(draft.get("location_lng", 0.0))
 	var location_radius_m := int(draft.get("location_radius_m", LocationHelper.DEFAULT_RADIUS_M))
+	if has_location_lock and (not bool(draft.get("location_fix_ok", false)) or not is_finite(location_lat) or not is_finite(location_lng)):
+		_compose_screen.restore_after_failed_send()
+		_show_toast("Select a location from the search results or choose one on the map.")
+		return
 	var result: Dictionary = {}
 	if state.is_demo():
 		result = state.demo.send_scroll(
 			rid, title, body, unlock_unix, magic,
-			has_location_lock, location_name, location_lat, location_lng, location_radius_m
+			has_location_lock, location_name, location_lat, location_lng, location_radius_m, location_address
 		)
 	elif state.is_online():
 		# Existing send-scroll contract + optional Location Lock fields.
@@ -1688,6 +1699,7 @@ func _on_compose_send_requested(draft: Dictionary) -> void:
 			payload["password"] = magic
 		if has_location_lock:
 			payload["location_name"] = location_name
+			payload["location_address"] = location_address
 			payload["location_lat"] = location_lat
 			payload["location_lng"] = location_lng
 			payload["location_radius_m"] = location_radius_m

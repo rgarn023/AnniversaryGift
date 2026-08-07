@@ -60,15 +60,27 @@ var _unlock_minute: int = 0
 
 var _location_toggle: CheckButton
 var _location_fields: VBoxContainer
-var _location_name_edit: LineEdit
+var _location_search: LineEdit
 var _location_status: Label
 var _location_use_btn: Button
+var _location_map_btn: Button
+var _location_summary: PanelContainer
+var _location_summary_title: Label
+var _location_summary_addr: Label
+var _location_suggestions: VBoxContainer
+var _location_radius_row: HBoxContainer
+var _location_search_spinner: Label
 var _has_location_lock: bool = false
 var _location_name: String = ""
+var _location_address: String = ""
 var _location_lat: float = 0.0
 var _location_lng: float = 0.0
 var _location_radius_m: int = LocationHelper.DEFAULT_RADIUS_M
 var _location_fix_ok: bool = false
+var _location_search_service: LocationSearchService = LocationSearchService.new()
+var _location_search_token: int = 0
+var _location_debounce: Timer
+var _map_picker: MapLocationPicker
 
 var _pw_toggle: CheckButton
 var _pw_fields: VBoxContainer
@@ -107,7 +119,6 @@ func _notification(what: int) -> void:
 
 
 func get_draft() -> Dictionary:
-	var loc_name := _location_name_edit.text.strip_edges() if _location_name_edit else _location_name
 	return {
 		"recipient_id": str(_selected_friend.get("id", "")),
 		"recipient_display_name": str(_selected_friend.get("display_name", "")),
@@ -119,7 +130,8 @@ func get_draft() -> Dictionary:
 		"password": _password_value(),
 		"has_password": _pw_toggle.button_pressed if _pw_toggle else false,
 		"has_location_lock": _location_toggle.button_pressed if _location_toggle else _has_location_lock,
-		"location_name": loc_name,
+		"location_name": _location_name,
+		"location_address": _location_address,
 		"location_lat": _location_lat,
 		"location_lng": _location_lng,
 		"location_radius_m": _location_radius_m,
@@ -178,15 +190,17 @@ func apply_draft(draft: Dictionary) -> void:
 			_pw2_edit.text = pw
 	_has_location_lock = bool(draft.get("has_location_lock", false))
 	_location_name = str(draft.get("location_name", ""))
+	_location_address = str(draft.get("location_address", ""))
 	_location_lat = float(draft.get("location_lat", 0.0))
 	_location_lng = float(draft.get("location_lng", 0.0))
 	_location_radius_m = int(draft.get("location_radius_m", LocationHelper.DEFAULT_RADIUS_M))
 	_location_fix_ok = bool(draft.get("location_fix_ok", false))
 	if _location_toggle:
 		_location_toggle.set_pressed_no_signal(_has_location_lock)
-	if _location_name_edit:
-		_location_name_edit.text = _location_name
+	if _location_search and not _location_fix_ok:
+		_location_search.text = ""
 	_sync_location_visibility()
+	_refresh_location_summary()
 	_refresh_recipient_row()
 	_refresh_schedule_labels()
 	_sync_delivery_visibility()
@@ -210,6 +224,12 @@ func restore_after_failed_send() -> void:
 
 func handle_back() -> bool:
 	## Returns true when back was consumed by an open overlay.
+	if _map_picker != null and is_instance_valid(_map_picker):
+		_map_picker.cancelled.emit()
+		if is_instance_valid(_map_picker):
+			_map_picker.queue_free()
+		_map_picker = null
+		return true
 	if _overlay != null and _overlay.visible:
 		_hide_overlay()
 		return true
@@ -510,16 +530,32 @@ func _build_location_card() -> PanelContainer:
 	var card := _make_card()
 	var col := _card_body(card)
 	col.add_child(_section_heading("Location Lock"))
-	var toggle_row := HBoxContainer.new()
+	var blurb := Label.new()
+	blurb.text = "Require your friend to be near a specific place to open this scroll. Location is checked only when needed to create or open a location-locked scroll."
+	blurb.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	blurb.add_theme_font_size_override("font_size", 16)
+	blurb.add_theme_color_override("font_color", COL_SUPPORT)
+	col.add_child(blurb)
+
+	## Whole row is tappable — not only the tiny switch.
+	var toggle_row := Button.new()
+	toggle_row.flat = true
+	toggle_row.focus_mode = Control.FOCUS_NONE
 	toggle_row.custom_minimum_size = Vector2(0, 56)
+	toggle_row.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	col.add_child(toggle_row)
+	var toggle_inner := HBoxContainer.new()
+	toggle_inner.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	toggle_inner.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	toggle_row.add_child(toggle_inner)
 	var toggle_label := Label.new()
 	toggle_label.text = "Lock to a place"
 	toggle_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	toggle_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	toggle_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	toggle_label.add_theme_font_size_override("font_size", 19)
 	toggle_label.add_theme_color_override("font_color", COL_TEXT)
-	toggle_row.add_child(toggle_label)
+	toggle_inner.add_child(toggle_label)
 	_location_toggle = CheckButton.new()
 	_location_toggle.custom_minimum_size = Vector2(72, 48)
 	_location_toggle.focus_mode = Control.FOCUS_NONE
@@ -529,49 +565,133 @@ func _build_location_card() -> PanelContainer:
 		_refresh_summary()
 		_update_validation()
 	)
-	toggle_row.add_child(_location_toggle)
+	toggle_inner.add_child(_location_toggle)
+	toggle_row.pressed.connect(func() -> void:
+		_location_toggle.button_pressed = not _location_toggle.button_pressed
+	)
 
 	_location_fields = VBoxContainer.new()
 	_location_fields.visible = false
 	_location_fields.add_theme_constant_override("separation", 10)
 	col.add_child(_location_fields)
 
-	var help := Label.new()
-	help.text = "Your friend must be near this place to open the scroll. You can combine this with a scheduled unlock time."
-	help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	help.add_theme_font_size_override("font_size", 16)
-	help.add_theme_color_override("font_color", COL_SUPPORT)
-	_location_fields.add_child(help)
+	_location_fields.add_child(_field_caption("Search for a place or address"))
+	_location_search = LineEdit.new()
+	_location_search.placeholder_text = "City, address, landmark, venue…"
+	_location_search.custom_minimum_size = Vector2(0, MobileUi.font_touch(MobileUi.INPUT_H))
+	_location_search.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_location_search.add_theme_font_size_override("font_size", 19)
+	_style_line_edit(_location_search)
+	_location_search.text_changed.connect(_on_location_search_changed)
+	_location_fields.add_child(_location_search)
 
-	_location_fields.add_child(_field_caption("Place name"))
-	_location_name_edit = LineEdit.new()
-	_location_name_edit.placeholder_text = "e.g. Our favorite park"
-	_location_name_edit.custom_minimum_size = Vector2(0, MobileUi.font_touch(MobileUi.INPUT_H))
-	_location_name_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_location_name_edit.add_theme_font_size_override("font_size", 19)
-	_style_line_edit(_location_name_edit)
-	_location_name_edit.text_changed.connect(func(t: String) -> void:
-		_location_name = t.strip_edges()
-		_refresh_summary()
-		_update_validation()
-	)
-	_location_fields.add_child(_location_name_edit)
+	_location_search_spinner = Label.new()
+	_location_search_spinner.visible = false
+	_location_search_spinner.text = "Searching…"
+	_location_search_spinner.add_theme_font_size_override("font_size", 14)
+	_location_search_spinner.add_theme_color_override("font_color", COL_SUPPORT)
+	_location_fields.add_child(_location_search_spinner)
 
+	_location_suggestions = VBoxContainer.new()
+	_location_suggestions.visible = false
+	_location_suggestions.add_theme_constant_override("separation", 4)
+	_location_fields.add_child(_location_suggestions)
+
+	var action_row := HBoxContainer.new()
+	action_row.add_theme_constant_override("separation", 8)
+	_location_fields.add_child(action_row)
+	_location_map_btn = Button.new()
+	_location_map_btn.text = "Choose on Map"
+	_location_map_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_location_map_btn.custom_minimum_size = Vector2(0, MobileUi.font_touch(48))
+	_location_map_btn.focus_mode = Control.FOCUS_NONE
+	_style_secondary_button(_location_map_btn)
+	_location_map_btn.pressed.connect(_on_choose_on_map)
+	action_row.add_child(_location_map_btn)
 	_location_use_btn = Button.new()
 	_location_use_btn.text = "Use Current Location"
+	_location_use_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_location_use_btn.custom_minimum_size = Vector2(0, MobileUi.font_touch(48))
 	_location_use_btn.focus_mode = Control.FOCUS_NONE
 	_style_secondary_button(_location_use_btn)
 	_location_use_btn.pressed.connect(_on_use_current_location)
-	_location_fields.add_child(_location_use_btn)
+	action_row.add_child(_location_use_btn)
+
+	_location_summary = _make_card()
+	_location_summary.visible = false
+	var sum_col := _card_body(_location_summary)
+	var sel_cap := _field_caption("Selected Location")
+	sum_col.add_child(sel_cap)
+	_location_summary_title = Label.new()
+	_location_summary_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_location_summary_title.add_theme_font_size_override("font_size", 19)
+	_location_summary_title.add_theme_color_override("font_color", COL_GOLD)
+	sum_col.add_child(_location_summary_title)
+	_location_summary_addr = Label.new()
+	_location_summary_addr.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_location_summary_addr.add_theme_font_size_override("font_size", 15)
+	_location_summary_addr.add_theme_color_override("font_color", COL_SUPPORT)
+	sum_col.add_child(_location_summary_addr)
+	var change_btn := Button.new()
+	change_btn.text = "Change Location"
+	change_btn.custom_minimum_size = Vector2(0, 48)
+	change_btn.focus_mode = Control.FOCUS_NONE
+	_style_secondary_button(change_btn)
+	change_btn.pressed.connect(func() -> void:
+		_clear_resolved_location()
+		if _location_search:
+			_location_search.grab_focus()
+	)
+	sum_col.add_child(change_btn)
+	_location_fields.add_child(_location_summary)
+
+	_location_fields.add_child(_field_caption("Unlock radius"))
+	_location_radius_row = HBoxContainer.new()
+	_location_radius_row.add_theme_constant_override("separation", 6)
+	_location_fields.add_child(_location_radius_row)
+	for meters in LocationHelper.RADIUS_OPTIONS:
+		var rb := Button.new()
+		rb.text = LocationHelper.format_radius(meters)
+		rb.toggle_mode = true
+		rb.button_pressed = meters == _location_radius_m
+		rb.custom_minimum_size = Vector2(0, 48)
+		rb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		rb.focus_mode = Control.FOCUS_NONE
+		_style_secondary_button(rb)
+		var mcopy: int = meters
+		rb.pressed.connect(func() -> void:
+			_location_radius_m = mcopy
+			_sync_radius_buttons()
+			_refresh_location_summary()
+			_refresh_summary()
+			_update_validation()
+		)
+		_location_radius_row.add_child(rb)
 
 	_location_status = Label.new()
 	_location_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_location_status.add_theme_font_size_override("font_size", 15)
 	_location_status.add_theme_color_override("font_color", COL_SUPPORT)
-	_location_status.text = "Location not set yet."
+	_location_status.text = "Select a location from search results or the map."
 	_location_fields.add_child(_location_status)
+
+	if _location_debounce == null:
+		_location_debounce = Timer.new()
+		_location_debounce.one_shot = true
+		_location_debounce.wait_time = 0.35
+		_location_debounce.timeout.connect(_run_location_search)
+		add_child(_location_debounce)
 	return card
+
+
+func _sync_radius_buttons() -> void:
+	if _location_radius_row == null:
+		return
+	var i := 0
+	for child in _location_radius_row.get_children():
+		if child is Button and i < LocationHelper.RADIUS_OPTIONS.size():
+			(child as Button).set_pressed_no_signal(LocationHelper.RADIUS_OPTIONS[i] == _location_radius_m)
+		i += 1
 
 
 func _sync_location_visibility() -> void:
@@ -579,48 +699,190 @@ func _sync_location_visibility() -> void:
 	_has_location_lock = on
 	if _location_fields:
 		_location_fields.visible = on
+	if not on:
+		_hide_location_suggestions()
+	_refresh_location_summary()
+
+
+func _refresh_location_summary() -> void:
+	if _location_summary == null:
+		return
+	_location_summary.visible = _has_location_lock and _location_fix_ok
+	if _location_summary_title:
+		_location_summary_title.text = _location_name if not _location_name.is_empty() else "Selected place"
+	if _location_summary_addr:
+		var line := _location_address
+		if line.is_empty():
+			line = "Unlock within %s" % LocationHelper.format_radius(_location_radius_m)
+		else:
+			line = "%s\nUnlock within %s" % [line, LocationHelper.format_radius(_location_radius_m)]
+		_location_summary_addr.text = line
 	if _location_status:
-		if not on:
+		if not _has_location_lock:
 			_location_status.text = ""
 		elif _location_fix_ok:
-			_location_status.text = "Place locked · opens nearby (~%dm)" % _location_radius_m
+			_location_status.text = "Place locked · unlock within %s" % LocationHelper.format_radius(_location_radius_m)
 		else:
-			_location_status.text = "Tap Use Current Location to set the lock place."
+			_location_status.text = "Select a location from the search results or choose one on the map."
+
+
+func _clear_resolved_location() -> void:
+	_location_fix_ok = false
+	_location_name = ""
+	_location_address = ""
+	_location_lat = 0.0
+	_location_lng = 0.0
+	_refresh_location_summary()
+	_refresh_summary()
+	_update_validation()
+
+
+func _apply_resolved_place(place: Dictionary) -> void:
+	_location_lat = float(place.get("lat", 0.0))
+	_location_lng = float(place.get("lng", 0.0))
+	_location_name = str(place.get("name", "Selected place")).strip_edges()
+	_location_address = str(place.get("address", "")).strip_edges()
+	_location_fix_ok = is_finite(_location_lat) and is_finite(_location_lng)
+	_hide_location_suggestions()
+	if _location_search:
+		_location_search.text = ""
+		_location_search.release_focus()
+	_refresh_location_summary()
+	_refresh_summary()
+	_update_validation()
+
+
+func _on_location_search_changed(_t: String) -> void:
+	## Typing free text never counts as a resolved place.
+	if _location_fix_ok:
+		## Keep resolved place until user picks a new result; don't wipe on every keystroke.
+		pass
+	if _location_debounce:
+		_location_debounce.start()
+
+
+func _run_location_search() -> void:
+	if _location_search == null:
+		return
+	var q := _location_search.text.strip_edges()
+	if q.length() < LocationSearchService.MIN_QUERY_LEN:
+		_hide_location_suggestions()
+		return
+	_location_search_token = _location_search_service.next_token()
+	var token := _location_search_token
+	if _location_search_spinner:
+		_location_search_spinner.visible = true
+	var result: Dictionary = await _location_search_service.search_places(q, token)
+	if not is_inside_tree() or not _location_search_service.is_current(token):
+		return
+	if _location_search_spinner:
+		_location_search_spinner.visible = false
+	if not bool(result.get("ok", false)):
+		_location_status.text = "Couldn't search locations. Try again."
+		_hide_location_suggestions()
+		return
+	_show_location_suggestions(result.get("results", []) as Array)
+
+
+func _show_location_suggestions(results: Array) -> void:
+	_hide_location_suggestions()
+	if _location_suggestions == null:
+		return
+	if results.is_empty():
+		_location_status.text = "No places found. Try a different search."
+		return
+	for place in results:
+		if typeof(place) != TYPE_DICTIONARY:
+			continue
+		var btn := Button.new()
+		var name := str(place.get("name", ""))
+		var addr := str(place.get("address", ""))
+		btn.text = name if addr.is_empty() else "%s\n%s" % [name, addr]
+		btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		btn.custom_minimum_size = Vector2(0, 56)
+		btn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		btn.focus_mode = Control.FOCUS_NONE
+		_style_secondary_button(btn)
+		var captured: Dictionary = (place as Dictionary).duplicate(true)
+		btn.pressed.connect(func() -> void:
+			_apply_resolved_place(captured)
+		)
+		_location_suggestions.add_child(btn)
+	_location_suggestions.visible = true
+
+
+func _hide_location_suggestions() -> void:
+	if _location_suggestions == null:
+		return
+	for c in _location_suggestions.get_children():
+		c.queue_free()
+	_location_suggestions.visible = false
+
+
+func _on_choose_on_map() -> void:
+	## Create map only while open — release when closed.
+	if _map_picker != null and is_instance_valid(_map_picker):
+		return
+	MobileUi.release_text_focus(self)
+	var initial := {}
+	if _location_fix_ok:
+		initial = {
+			"lat": _location_lat,
+			"lng": _location_lng,
+			"name": _location_name,
+			"address": _location_address,
+			"ok": true,
+		}
+	_map_picker = MapLocationPicker.new()
+	get_tree().root.add_child(_map_picker)
+	_map_picker.confirmed.connect(func(place: Dictionary) -> void:
+		_apply_resolved_place(place)
+		_map_picker = null
+	)
+	_map_picker.cancelled.connect(func() -> void:
+		_map_picker = null
+	)
+	_map_picker.setup(initial, _location_radius_m, _location_search_service)
 
 
 func _on_use_current_location() -> void:
-	## Permission only when the user opts into Location Lock configuration.
-	_location_status.text = "Getting location…"
+	## GPS permission only for this sender action — never for typing search.
+	_location_status.text = "Allow location access to use your current position for this lock."
 	_location_use_btn.disabled = true
 	if OS.get_name() == "Android":
 		var status := LocationHelper.request_permission_if_needed()
 		if status != "granted":
-			## Give the OS dialog a moment, then re-check.
 			await get_tree().create_timer(0.35).timeout
 			status = LocationHelper.permission_status()
 		if status != "granted":
-			_location_fix_ok = false
-			_location_status.text = "Location permission is needed to set a Location Lock. You can still send without it."
+			_location_status.text = "Location access is needed only when using your current position."
 			_location_use_btn.disabled = false
 			_update_validation()
 			return
-	var fix: Dictionary = LocationHelper.get_current_fix()
-	_location_use_btn.disabled = false
+	var fix: Dictionary = LocationHelper.get_current_fix(true)
 	if not bool(fix.get("ok", false)):
-		_location_fix_ok = false
-		_location_status.text = str(fix.get("error", "Could not read your location."))
+		_location_status.text = str(fix.get("error", "We couldn't verify your location. Try again."))
+		_location_use_btn.disabled = false
 		_update_validation()
 		return
-	_location_lat = float(fix.get("lat", 0.0))
-	_location_lng = float(fix.get("lng", 0.0))
-	_location_radius_m = LocationHelper.DEFAULT_RADIUS_M
-	_location_fix_ok = true
-	if _location_name_edit and _location_name_edit.text.strip_edges().is_empty():
-		_location_name_edit.text = "Current place"
-		_location_name = "Current place"
-	_location_status.text = "Place locked · opens nearby (~%dm)" % _location_radius_m
-	_refresh_summary()
-	_update_validation()
+	var lat := float(fix.get("lat", 0.0))
+	var lng := float(fix.get("lng", 0.0))
+	_location_status.text = "Resolving place…"
+	var token := _location_search_service.next_token()
+	var rev: Dictionary = await _location_search_service.reverse_geocode(lat, lng, token)
+	_location_use_btn.disabled = false
+	if bool(rev.get("ok", false)) and typeof(rev.get("place")) == TYPE_DICTIONARY:
+		var place: Dictionary = (rev.get("place") as Dictionary).duplicate(true)
+		place["lat"] = lat
+		place["lng"] = lng
+		_apply_resolved_place(place)
+	else:
+		_apply_resolved_place({
+			"name": "Current place",
+			"address": "",
+			"lat": lat,
+			"lng": lng,
+		})
 
 
 func _build_password_card() -> PanelContainer:
@@ -977,12 +1239,23 @@ func _refresh_summary() -> void:
 		"%s at %s" % [_format_date(_unlock_date), _format_time(_unlock_hour, _unlock_minute)]
 	)
 	var loc_on := _location_toggle != null and _location_toggle.button_pressed
-	var when := schedule_label
+	var lines: PackedStringArray = PackedStringArray([
+		"Recipient: %s" % to_name,
+		"Opens: %s" % schedule_label,
+	])
 	if loc_on:
-		var place := _location_name_edit.text.strip_edges() if _location_name_edit else _location_name
-		when = LocationHelper.format_lock_summary(place, not immediate, schedule_label)
+		var place := _location_name if not _location_name.is_empty() else "Not selected"
+		if not _location_address.is_empty():
+			place = "%s, %s" % [_location_name, _location_address]
+		if immediate:
+			lines.append("Location: %s" % place)
+			lines.append("Unlock radius: %s" % LocationHelper.format_radius(_location_radius_m))
+		else:
+			lines.append("Available after: %s" % schedule_label)
+			lines.append("And only within %s of %s" % [LocationHelper.format_radius(_location_radius_m), _location_name if not _location_name.is_empty() else "selected place"])
 	var pw := "Required" if (_pw_toggle and _pw_toggle.button_pressed) else "Not required"
-	_summary_label.text = "To: %s\nOpens: %s\nMagic Password: %s" % [to_name, when, pw]
+	lines.append("Magic Password: %s" % pw)
+	_summary_label.text = "\n".join(lines)
 
 
 func _timezone_friendly_name() -> String:
@@ -1055,11 +1328,10 @@ func _validation_error() -> String:
 		if p1 != p2:
 			return "Passwords do not match."
 	if _location_toggle and _location_toggle.button_pressed:
-		var place := _location_name_edit.text.strip_edges() if _location_name_edit else ""
-		if place.is_empty():
-			return "Give your Location Lock a place name."
-		if not _location_fix_ok:
-			return "Set the Location Lock place with Use Current Location."
+		if not _location_fix_ok or not is_finite(_location_lat) or not is_finite(_location_lng):
+			return "Select a location from the search results or choose one on the map."
+		if _location_name.strip_edges().is_empty():
+			return "Select a location from the search results or choose one on the map."
 	return ""
 
 

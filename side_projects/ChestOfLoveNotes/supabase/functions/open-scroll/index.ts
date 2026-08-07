@@ -141,10 +141,15 @@ Deno.serve(async (req) => {
       }
       const distance = haversineMeters(lat, lng, targetLat, targetLng);
       if (!Number.isFinite(radius) || distance > radius) {
-        const place = String(scroll.location_name || "the locked place");
+        const place = String(scroll.location_name || "the unlock location");
+        const km = distance / 1000;
+        const away =
+          distance < 1000
+            ? `about ${Math.round(distance)} m away`
+            : `about ${km.toFixed(1)} km away`;
         throw new AppError(
           "location_locked",
-          `You need to be near ${place} to open this scroll`,
+          `You're ${away} from ${place}. Move closer (within ${radius} m) to open this scroll.`,
           403,
         );
       }

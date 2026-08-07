@@ -123,14 +123,14 @@ func _test_logical_viewport() -> void:
 
 
 func _test_chest_frames() -> void:
-	for f in ["chest_base.png", "chest_lid.png", "chest_interior.png", "chest_closed.png", "chest_open.png"]:
+	for f in ["chest_closed.png", "chest_open_10.png", "chest_ajar.png", "chest_half.png", "chest_open.png"]:
 		_assert(FileAccess.file_exists("res://assets/art/chest/%s" % f), "layer exists: " + f)
 	var chest_src := FileAccess.get_file_as_string("res://scripts/chest/treasure_chest.gd")
 	_assert(not chest_src.contains("FRAME_KEYS"), "static pose keyframe table removed")
-	_assert(chest_src.contains("chest_base.png"), "body layer wired")
-	_assert(chest_src.contains("chest_lid.png"), "lid layer wired")
-	_assert(chest_src.contains("_apply_open_amount"), "continuous open amount")
-	_assert(chest_src.contains("LID_OPEN_SCALE_Y"), "2.5D lid foreshortening")
+	_assert(chest_src.contains("chest_closed.png"), "closed plate wired")
+	_assert(chest_src.contains("FRAME_FILES"), "frame sequence wired")
+	_assert(chest_src.contains("_show_frame_progress"), "frame progress open")
+	_assert(chest_src.contains("FRAME_FILES"), "frame file list")
 	_assert(chest_src.contains("preload_assets"), "chest preload present")
 	_assert(chest_src.contains("play_empty_feedback"), "empty-chest helper present")
 	_assert(chest_src.contains("play_open_empty_pulse"), "empty open pulse present")
@@ -191,10 +191,10 @@ func _test_plugin_commit() -> void:
 
 
 func _test_build_version() -> void:
-	_assert(BuildFlags.APP_VERSION_CODE >= 14, "versionCode >= 14")
+	_assert(BuildFlags.APP_VERSION_CODE >= 15, "versionCode >= 14")
 	var preset := FileAccess.get_file_as_string("res://export_presets.cfg")
-	_assert(preset.contains("ChestOfLoveNotes-location-performance-fixes-debug.apk"), "export APK name")
-	_assert(preset.contains("version/code=14"), "export versionCode 14")
+	_assert(preset.contains("ChestOfLoveNotes-chest-location-lock-debug.apk"), "export APK name")
+	_assert(preset.contains("version/code=15"), "export versionCode 14")
 	_assert(BuildFlags.PRIVATE_ONBOARDING_BUILD == true, "private onboarding still enabled")
 	_assert(BuildFlags.SHOW_ONBOARDING_BANNER == false, "onboarding banner hidden in APKs")
 	_assert(FileAccess.file_exists("res://assets/icons/app_icon_1024.png"), "app icon present")

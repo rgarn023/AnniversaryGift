@@ -1,5 +1,5 @@
 extends SceneTree
-## Regression for Location Lock, lid chest animation, and UI/performance contracts.
+## Legacy + updated contracts for Location Lock / performance / UI polish.
 
 var _passed: int = 0
 var _failed: int = 0
@@ -36,8 +36,8 @@ func _test_location_lock_compose() -> void:
 	_assert(compose.contains("has_location_lock"), "draft includes has_location_lock")
 	_assert(compose.contains("location_lat"), "draft includes location_lat")
 	_assert(compose.contains("Use Current Location"), "current location control")
-	_assert(compose.contains("LocationHelper"), "uses LocationHelper")
-	_assert(compose.contains("format_lock_summary"), "Ready Check uses location summary")
+	_assert(compose.contains("LocationSearchService"), "uses LocationSearchService")
+	_assert(compose.contains("Unlock radius"), "Ready Check uses location summary")
 	var main := FileAccess.get_file_as_string("res://scripts/main.gd")
 	_assert(main.contains('"has_location_lock": has_location_lock'), "send payload includes location lock")
 	_assert(main.contains("location_radius_m"), "send payload includes radius")
@@ -67,17 +67,13 @@ func _test_location_draft_roundtrip() -> void:
 	compose._message_edit.text = "Meet me there"
 	compose._location_toggle.button_pressed = true
 	compose._sync_location_visibility()
-	compose._location_name_edit.text = "Favorite park"
-	compose._location_lat = 33.45
-	compose._location_lng = -112.07
-	compose._location_fix_ok = true
+	compose._apply_resolved_place({"name": "Favorite park", "address": "", "lat": 33.45, "lng": -112.07})
 	compose._location_radius_m = 500
 	compose._refresh_summary()
 	var draft := compose.get_draft()
 	_assert(bool(draft.has_location_lock), "draft location lock on")
 	_assert(str(draft.location_name) == "Favorite park", "draft place name")
-	_assert(compose._summary_label.text.contains("Near"), "summary reflects location lock")
-	_assert(not compose._summary_label.text.contains("Opens: Immediately\n") or true, "summary not misleading-only immediate when locked")
+	_assert(compose._summary_label.text.contains("Favorite park") or compose._summary_label.text.contains("Location"), "summary reflects location lock")
 	var compose2 := ComposeScrollScreen.new()
 	root.add_child(compose2)
 	compose2.setup(friends, false, draft)
@@ -90,16 +86,13 @@ func _test_location_draft_roundtrip() -> void:
 
 
 func _test_chest_lid_animation() -> void:
-	_assert(FileAccess.file_exists("res://assets/art/chest/chest_lid.png"), "lid asset packaged")
-	_assert(FileAccess.file_exists("res://assets/art/chest/chest_base.png"), "base asset packaged")
+	_assert(FileAccess.file_exists("res://assets/art/chest/chest_closed.png"), "closed plate packaged")
+	_assert(FileAccess.file_exists("res://assets/art/chest/chest_open.png"), "open plate packaged")
 	var chest := FileAccess.get_file_as_string("res://scripts/chest/treasure_chest.gd")
 	_assert(chest.contains("preload_assets"), "chest assets preloaded")
-	_assert(chest.contains("ChestLid") or chest.contains("_lid"), "lid node present")
-	_assert(chest.contains("ChestBody") or chest.contains("_body"), "body node present")
-	_assert(chest.contains("LID_OPEN_SCALE_Y"), "2.5D lid foreshortening hinge")
-	_assert(chest.contains("_apply_open_amount"), "time-based open amount")
-	_assert(chest.contains("Smoothstep ease for lid"), "smoothstep lid easing kept for hinge")
-	_assert(not chest.contains("FRAME_KEYS"), "static pose keyframe table removed")
+	_assert(chest.contains("FRAME_FILES"), "frame list present")
+	_assert(chest.contains("_show_frame_progress"), "time-based frame progress")
+	_assert(not chest.contains("LID_OPEN_SCALE_Y"), "broken foreshortening removed")
 	_assert(chest.contains("_emerge_scroll"), "scroll emergence kept")
 	_assert(chest.contains("play_open_empty_pulse"), "empty pulse kept")
 	var main := FileAccess.get_file_as_string("res://scripts/main.gd")
@@ -140,8 +133,8 @@ func _test_performance_contracts() -> void:
 
 
 func _test_version() -> void:
-	_assert(BuildFlags.APP_VERSION_CODE >= 14, "versionCode >= 14")
+	_assert(BuildFlags.APP_VERSION_CODE >= 15, "versionCode >= 15")
 	var preset := FileAccess.get_file_as_string("res://export_presets.cfg")
-	_assert(preset.contains("ChestOfLoveNotes-location-performance-fixes-debug.apk"), "APK filename")
-	_assert(preset.contains("version/code=14"), "export versionCode 14")
+	_assert(preset.contains("ChestOfLoveNotes-chest-location-lock-debug.apk"), "APK filename")
+	_assert(preset.contains("version/code=15"), "export versionCode 15")
 	_assert(preset.contains("access_fine_location=true"), "fine location permission enabled")

@@ -1,7 +1,7 @@
 extends Control
 class_name LoveNotesChest
-## Physical lid/body chest open — continuous hinge rotation, shared anchor.
-## Full-frame poses are never crossfaded. Assets are preloaded once.
+## Frame-based chest open — ONE full-chest plate at a time on a fixed canvas.
+## No lid scale/squash/perspective transforms. No dual-chest crossfade ghosts.
 
 signal tapped
 signal open_finished
@@ -12,10 +12,21 @@ enum ChestState { LOCKED_SILHOUETTE, AVAILABLE, OPENING, OPENED, READY, CLOSING 
 
 const ART := "res://assets/art/chest/"
 const SCROLL_ART := "res://assets/art/scroll/"
+## Shared source canvas for every open plate (1200×820).
 const FRAME_SIZE := Vector2(220, 150)
-## Front-facing lid plate: foreshorten on Y (2.5D hinge). Tiny Z tilt only for depth.
-const LID_OPEN_SCALE_Y := 0.10
-const LID_OPEN_TILT_DEG := -5.0
+## Valid same-canvas plates only — never invent warped intermediates.
+const FRAME_FILES := [
+	"chest_closed.png",
+	"chest_open_10.png",
+	"chest_open_25.png",
+	"chest_ajar.png",
+	"chest_half.png",
+	"chest_open.png",
+]
+## Nominal playback rate for the open sequence (elapsed-time driven).
+const OPEN_FPS := 24.0
+const OPEN_DURATION_SEC := 1.05
+const OPEN_DURATION_RM := 0.42
 
 @export var reduced_motion: bool = false
 
@@ -27,10 +38,8 @@ var _input_locked: bool = false
 var _label: Label
 var _root_visual: Control
 var _contact_shadow: TextureRect
-var _body: TextureRect
-var _interior: TextureRect
+var _frame_plate: TextureRect
 var _interior_glow: TextureRect
-var _lid: TextureRect
 var _front_lip: TextureRect
 var _highlight: TextureRect
 var _scroll_spawn: Control
@@ -46,8 +55,8 @@ var _open_amount: float = 0.0
 var _show_scroll_on_finish: bool = false
 var _anchor_rect: Rect2 = Rect2()
 var _cinematic_zoom: float = 1.0
-var _lid_closed_pos: Vector2 = Vector2.ZERO
-var _body_rect: Rect2 = Rect2()
+var _frame_index: int = 0
+var _frame_textures: Array[Texture2D] = []
 
 ## Process-wide preload so the first tap never decompresses textures.
 static var _tex_cache: Dictionary = {}
@@ -57,16 +66,13 @@ static var _preloaded: bool = false
 static func preload_assets() -> void:
 	if _preloaded:
 		return
+	for fname in FRAME_FILES:
+		_load_cached(ART + fname)
 	for path in [
-		ART + "chest_base.png",
-		ART + "chest_lid.png",
-		ART + "chest_interior.png",
 		ART + "chest_inner_glow.png",
 		ART + "chest_contact_shadow.png",
 		ART + "chest_front_lip.png",
 		ART + "chest_highlight.png",
-		ART + "chest_closed.png",
-		ART + "chest_open.png",
 		SCROLL_ART + "scroll_rolled.png",
 	]:
 		_load_cached(path)
@@ -90,6 +96,7 @@ func _ready() -> void:
 	modulate.a = 1.0
 	visible = true
 	preload_assets()
+	_cache_frame_textures()
 	_build_visuals()
 	_ready_visuals = true
 	_button = Button.new()
@@ -100,10 +107,16 @@ func _ready() -> void:
 	_button.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_button.pressed.connect(_on_pressed)
 	add_child(_button)
-	set_process(true)
+	set_process(not reduced_motion)
 	resized.connect(_layout_frames)
 	_layout_frames()
-	_apply_open_amount(0.0)
+	_show_frame_progress(0.0)
+
+
+func _cache_frame_textures() -> void:
+	_frame_textures.clear()
+	for fname in FRAME_FILES:
+		_frame_textures.append(_load_cached(ART + fname))
 
 
 func _tex(fname: String) -> Texture2D:
@@ -124,7 +137,7 @@ func _make_tr(tex: Texture2D, z: int, name: String) -> TextureRect:
 
 func _build_visuals() -> void:
 	_root_visual = Control.new()
-	_root_visual.name = "ChestRoot"
+	_root_visual.name = "ChestAnimationRoot"
 	_root_visual.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_root_visual.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_root_visual)
@@ -133,28 +146,17 @@ func _build_visuals() -> void:
 	_contact_shadow.modulate = Color(1, 1, 1, 0.88)
 	_root_visual.add_child(_contact_shadow)
 
-	_interior = _make_tr(_tex("chest_interior.png"), 1, "Interior")
-	_interior.modulate.a = 0.0
-	_root_visual.add_child(_interior)
-
 	_interior_glow = _make_tr(_tex("chest_inner_glow.png"), 1, "InteriorGlow")
 	_interior_glow.modulate = Color(1.15, 0.9, 0.55, 0.0)
 	_root_visual.add_child(_interior_glow)
 
-	## Prefer dedicated body plate; fall back to closed full frame.
-	var body_tex := _tex("chest_base.png")
-	if body_tex == null:
-		body_tex = _tex("chest_closed.png")
-	_body = _make_tr(body_tex, 2, "ChestBody")
-	_root_visual.add_child(_body)
-
-	var lid_tex := _tex("chest_lid.png")
-	if lid_tex == null:
-		lid_tex = _tex("chest_closed.png")
-	_lid = _make_tr(lid_tex, 5, "ChestLid")
-	_root_visual.add_child(_lid)
+	## Single plate — swap texture by index (never two full chests / ghost crossfade).
+	var first: Texture2D = _frame_textures[0] if not _frame_textures.is_empty() else null
+	_frame_plate = _make_tr(first, 2, "ChestFrame")
+	_root_visual.add_child(_frame_plate)
 
 	_scroll_spawn = Control.new()
+	_scroll_spawn.name = "ScrollSpawnPoint"
 	_scroll_spawn.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_scroll_spawn.z_index = 3
 	_scroll_spawn.visible = false
@@ -179,10 +181,10 @@ func _build_visuals() -> void:
 	_root_visual.add_child(_highlight)
 
 	_dust = _make_particles(Color(0.90, 0.78, 0.48, 0.42), 3, Vector2(0, -1), 12.0)
-	_dust.z_index = 3
+	_dust.z_index = 5
 	_root_visual.add_child(_dust)
 	_sparks = _make_particles(Color(1.0, 0.84, 0.48, 0.55), 2, Vector2(0, -1), 20.0)
-	_sparks.z_index = 3
+	_sparks.z_index = 5
 	_root_visual.add_child(_sparks)
 
 	_badge = Label.new()
@@ -235,20 +237,8 @@ func _layout_frames() -> void:
 	var top: float = (area.y - frame_h) * 0.42
 	_anchor_rect = Rect2(0, top, area.x, frame_h)
 
-	## Body sits in the lower ~62% of the frame; lid hinges along the upper rim.
-	_body_rect = Rect2(
-		_anchor_rect.position.x + _anchor_rect.size.x * 0.08,
-		_anchor_rect.position.y + frame_h * 0.28,
-		_anchor_rect.size.x * 0.84,
-		frame_h * 0.70
-	)
-	_place_rect(_body, _body_rect)
-	_place_rect(_interior, Rect2(
-		_body_rect.position.x + _body_rect.size.x * 0.08,
-		_body_rect.position.y + _body_rect.size.y * 0.08,
-		_body_rect.size.x * 0.84,
-		_body_rect.size.y * 0.55
-	))
+	## Every plate shares identical rect — base stays planted across frames.
+	_place_rect(_frame_plate, _anchor_rect)
 	_place_rect(_interior_glow, _anchor_rect)
 	_place_rect(_highlight, _anchor_rect)
 	_place_rect(_contact_shadow, Rect2(
@@ -264,19 +254,6 @@ func _layout_frames() -> void:
 		frame_h * 0.45
 	))
 
-	## Lid: full width of frame, hinged at its bottom edge (back of chest).
-	var lid_h := frame_h * 0.48
-	var lid_rect := Rect2(
-		_anchor_rect.position.x,
-		_anchor_rect.position.y + frame_h * 0.02,
-		_anchor_rect.size.x,
-		lid_h
-	)
-	_lid_closed_pos = lid_rect.position
-	_lid.position = lid_rect.position
-	_lid.size = lid_rect.size
-	_lid.pivot_offset = Vector2(lid_rect.size.x * 0.5, lid_rect.size.y * 0.92)
-
 	_dust.position = Vector2(area.x * 0.5, _anchor_rect.position.y + frame_h * 0.42)
 	_sparks.position = _dust.position
 	var scroll_w := area.x * 0.52
@@ -290,7 +267,6 @@ func _layout_frames() -> void:
 	if _badge:
 		_badge.position = Vector2(area.x * 0.72, top + frame_h * 0.08)
 		_badge.size = Vector2(40, 40)
-	_apply_open_amount(_open_amount)
 
 
 func _place_rect(node: Control, rect: Rect2) -> void:
@@ -328,18 +304,18 @@ func configure(state: ChestState, show_final_label: bool = false) -> void:
 			self_modulate = Color(0.55, 0.55, 0.75, 0.9)
 			_interior_glow.modulate.a = 0.1
 			_label.visible = false
-			_apply_open_amount(0.0)
+			_show_frame_progress(0.0)
 			set_process(false)
 		ChestState.AVAILABLE, ChestState.READY:
 			self_modulate = Color.WHITE
 			_interior_glow.modulate.a = 0.10
 			_label.visible = show_final_label
 			_label.text = "Your Chest"
-			_apply_open_amount(0.0)
+			_show_frame_progress(0.0)
 			set_process(not reduced_motion)
 		ChestState.OPENED:
 			self_modulate = Color.WHITE
-			_apply_open_amount(1.0)
+			_show_frame_progress(1.0)
 			_label.visible = false
 			_interior_glow.modulate.a = 0.65
 			_front_lip.modulate.a = 0.0
@@ -348,38 +324,39 @@ func configure(state: ChestState, show_final_label: bool = false) -> void:
 			set_process(false)
 
 
-func _apply_open_amount(open_amount: float) -> void:
-	## Continuous lid hinge — body stays planted; no dual full-chest dissolve.
-	## Front plates cannot look physical with a large Z-spin; foreshorten on Y instead.
+func _show_frame_progress(open_amount: float) -> void:
+	## Map elapsed open amount to a discrete plate — ONE plate visible.
 	_open_amount = clampf(open_amount, 0.0, 1.0)
-	if _lid == null or _body == null:
-		return
-	var t := _open_amount
-	## Smoothstep ease for lid travel (elapsed-time driven by tween).
-	var e := t * t * (3.0 - 2.0 * t)
-	_lid.scale = Vector2(1.0, lerpf(1.0, LID_OPEN_SCALE_Y, e))
-	_lid.rotation_degrees = lerpf(0.0, LID_OPEN_TILT_DEG, e)
-	## Slight lift so the foreshortened lid clears the rim.
-	_lid.position = _lid_closed_pos + Vector2(0.0, -frame_lift(e))
-	_lid.modulate.a = 1.0
-	_body.modulate.a = 1.0
-	_interior.modulate.a = clampf(e * 1.15, 0.0, 1.0)
+	var count := maxi(_frame_textures.size(), 1)
+	var idx := 0
+	if _open_amount >= 0.999:
+		idx = count - 1
+	elif _open_amount > 0.0:
+		idx = clampi(int(floor(_open_amount * float(count - 1) + 0.0001)), 0, count - 1)
+	_set_frame_index(idx)
 	var glow_a := 0.0
-	if t < 0.15:
-		glow_a = t * 0.55
-	elif t < 0.35:
-		glow_a = 0.08 + (t - 0.15) * 1.0
-	elif t < 0.65:
-		glow_a = 0.28 + (t - 0.35) * 0.9
+	if _open_amount < 0.2:
+		glow_a = _open_amount * 0.4
+	elif _open_amount < 0.55:
+		glow_a = 0.08 + (_open_amount - 0.2) * 1.1
 	else:
-		glow_a = 0.55 + (t - 0.65) * 0.65
-	_interior_glow.modulate = Color(1.18, 0.90, 0.52, clampf(glow_a, 0.0, 0.85))
+		glow_a = 0.45 + (_open_amount - 0.55) * 0.9
+	if _interior_glow:
+		_interior_glow.modulate = Color(1.18, 0.90, 0.52, clampf(glow_a, 0.0, 0.85))
 	if _contact_shadow:
-		_contact_shadow.modulate.a = 0.78 + t * 0.12
+		_contact_shadow.modulate.a = 0.78 + _open_amount * 0.12
 
 
-func frame_lift(e: float) -> float:
-	return _anchor_rect.size.y * 0.06 * e
+func _set_frame_index(idx: int) -> void:
+	if _frame_textures.is_empty() or _frame_plate == null:
+		return
+	idx = clampi(idx, 0, _frame_textures.size() - 1)
+	_frame_index = idx
+	var tex: Texture2D = _frame_textures[idx]
+	if tex != null and _frame_plate.texture != tex:
+		_frame_plate.texture = tex
+	_frame_plate.modulate.a = 1.0
+	_frame_plate.visible = true
 
 
 func _reset_pose() -> void:
@@ -387,14 +364,13 @@ func _reset_pose() -> void:
 		_root_visual.scale = Vector2.ONE
 		_root_visual.position = Vector2.ZERO
 		_root_visual.rotation = 0.0
-	if _lid:
-		_lid.scale = Vector2.ONE
-		_lid.rotation_degrees = 0.0
 	_cinematic_zoom = 1.0
 	_layout_frames()
 	if _rolled_scroll:
 		_rolled_scroll.modulate.a = 0.0
 		_rolled_scroll.visible = false
+		_rolled_scroll.scale = Vector2.ONE
+		_rolled_scroll.rotation_degrees = 0.0
 	if _scroll_spawn:
 		_scroll_spawn.visible = false
 	if _front_lip:
@@ -503,10 +479,10 @@ func play_close_animation() -> void:
 	hide_rolled_scroll()
 	var dur := 0.28 if reduced_motion else 0.55
 	var tw := create_tween()
-	tw.tween_method(_apply_open_amount, _open_amount, 0.0, dur).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
+	tw.tween_method(_show_frame_progress, _open_amount, 0.0, dur).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
 	tw.parallel().tween_method(_apply_centered_zoom, _cinematic_zoom, 1.0, dur)
 	await tw.finished
-	_apply_open_amount(0.0)
+	_show_frame_progress(0.0)
 	_apply_centered_zoom(1.0)
 	chest_state = ChestState.READY
 	animating = false
@@ -555,12 +531,12 @@ func apply_ready_idle_state() -> void:
 
 
 func _open_short() -> void:
-	_apply_open_amount(0.0)
+	_show_frame_progress(0.0)
 	_layout_frames()
 	var tw := create_tween()
 	tw.set_parallel(true)
-	tw.tween_method(_apply_open_amount, 0.0, 1.0, 0.38).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-	tw.tween_method(_apply_centered_zoom, 1.0, 1.04, 0.38).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tw.tween_method(_show_frame_progress, 0.0, 1.0, OPEN_DURATION_RM).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tw.tween_method(_apply_centered_zoom, 1.0, 1.04, OPEN_DURATION_RM).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	await tw.finished
 	if _show_scroll_on_finish and not _skip:
 		await _emerge_scroll()
@@ -578,41 +554,40 @@ func _open_full() -> void:
 		_apply_finished_state()
 		return
 	var enlarge := create_tween()
-	enlarge.tween_method(_apply_centered_zoom, 0.985, 1.06, 0.28).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	enlarge.tween_method(_apply_centered_zoom, 0.985, 1.06, 0.22).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 	await enlarge.finished
 	if _skip:
 		_apply_finished_state()
 		return
 
 	HapticHelper.lock_release()
-	_front_lip.modulate.a = 0.35
-	## Continuous lid tween — updates every rendered frame via tween_method.
+	_front_lip.modulate.a = 0.25
+	## Elapsed-time tween advances discrete plates (~OPEN_FPS nominal with 6 keys).
 	var lid := create_tween()
-	lid.tween_method(_apply_open_amount, 0.0, 1.0, 1.15).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
-	## Soft burst near mid-open without pausing the lid tween on a timer gate.
-	lid.parallel().tween_callback(_emit_burst).set_delay(0.42)
+	lid.tween_method(_show_frame_progress, 0.0, 1.0, OPEN_DURATION_SEC).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
+	lid.parallel().tween_callback(_emit_burst).set_delay(OPEN_DURATION_SEC * 0.45)
 	await lid.finished
 	if _skip:
 		_apply_finished_state()
 		return
 	var hold := create_tween()
-	hold.tween_property(_interior_glow, "modulate:a", 0.88, 0.18).set_trans(Tween.TRANS_SINE)
+	hold.tween_property(_interior_glow, "modulate:a", 0.88, 0.16).set_trans(Tween.TRANS_SINE)
 	await hold.finished
 	if _show_scroll_on_finish and not _skip:
 		await _emerge_scroll()
 		scroll_emerged.emit(get_scroll_global_center())
 	else:
-		await get_tree().create_timer(0.12).timeout
+		await get_tree().create_timer(0.10).timeout
 	_front_lip.modulate.a = 0.0
 
 
 func _emerge_scroll() -> void:
 	if _rolled_scroll == null:
 		return
-	## Only after lid is substantially open.
-	if _open_amount < 0.85:
+	## Only after lid is substantially open (~70–80%).
+	if _open_amount < 0.75:
 		var catchup := create_tween()
-		catchup.tween_method(_apply_open_amount, _open_amount, 1.0, 0.12)
+		catchup.tween_method(_show_frame_progress, _open_amount, 1.0, 0.12)
 		await catchup.finished
 	_scroll_spawn.visible = true
 	_rolled_scroll.visible = true
@@ -656,7 +631,7 @@ func hide_rolled_scroll() -> void:
 
 
 func _apply_finished_state() -> void:
-	_apply_open_amount(1.0)
+	_show_frame_progress(1.0)
 	_apply_centered_zoom(1.06 if not reduced_motion else 1.03)
 	_front_lip.modulate.a = 0.0
 	if _show_scroll_on_finish and _rolled_scroll:
@@ -684,5 +659,4 @@ func request_skip() -> void:
 
 
 func frame_count() -> int:
-	## Compatibility for older tests — layered chest has body+lid.
-	return 2
+	return _frame_textures.size()

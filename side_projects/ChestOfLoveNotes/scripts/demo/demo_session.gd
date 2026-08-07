@@ -387,7 +387,8 @@ func send_scroll(
 	location_name: String = "",
 	location_lat: float = 0.0,
 	location_lng: float = 0.0,
-	location_radius_m: int = 500
+	location_radius_m: int = 500,
+	location_address: String = ""
 ) -> Dictionary:
 	if body.strip_edges().is_empty() or body.length() > 5000:
 		return {"ok": false, "error": "Invalid message length."}
@@ -395,7 +396,7 @@ func send_scroll(
 		return {"ok": false, "error": "Invalid unlock time."}
 	if has_location_lock:
 		if location_name.strip_edges().is_empty():
-			return {"ok": false, "error": "Location Lock needs a place name."}
+			return {"ok": false, "error": "Select a location from the search results or choose one on the map."}
 		if absf(location_lat) > 90.0 or absf(location_lng) > 180.0:
 			return {"ok": false, "error": "Invalid Location Lock coordinates."}
 	var friends := get_friends()
@@ -412,6 +413,7 @@ func send_scroll(
 		meta["_demo_password"] = magic_password
 	meta["has_location_lock"] = has_location_lock
 	meta["location_name"] = location_name.strip_edges()
+	meta["location_address"] = location_address.strip_edges()
 	meta["location_lat"] = location_lat
 	meta["location_lng"] = location_lng
 	meta["location_radius_m"] = location_radius_m
@@ -461,12 +463,14 @@ func open_scroll(
 			var tlat := float(s.get("location_lat", 0.0))
 			var tlng := float(s.get("location_lng", 0.0))
 			var radius := int(s.get("location_radius_m", 500))
-			if not LocationHelper.within_radius(location_lat, location_lng, tlat, tlng, radius):
+			var dist := LocationHelper.haversine_m(location_lat, location_lng, tlat, tlng)
+			if dist > float(radius):
 				return {
 					"ok": false,
 					"locked": true,
 					"location_locked": true,
-					"error": "You need to be near %s to open this scroll." % str(s.get("location_name", "the locked place")),
+					"distance_m": dist,
+					"error": "You're %s from the unlock location." % LocationHelper.format_distance_away(dist),
 				}
 		if bool(s.has_magic_password):
 			if not _password_allowed(scroll_id):

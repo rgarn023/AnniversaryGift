@@ -17,6 +17,7 @@ interface Body {
   /** Optional Location Lock — recipient must be near lat/lng to open. */
   has_location_lock?: boolean;
   location_name?: string;
+  location_address?: string;
   location_lat?: number;
   location_lng?: number;
   location_radius_m?: number;
@@ -88,6 +89,7 @@ Deno.serve(async (req) => {
 
     let hasLocationLock = Boolean(body.has_location_lock);
     let locationName = (body.location_name ?? "").trim().slice(0, 120);
+    let locationAddress = (body.location_address ?? "").trim().slice(0, 240);
     let locationLat: number | null = null;
     let locationLng: number | null = null;
     let locationRadiusM = 500;
@@ -98,7 +100,7 @@ Deno.serve(async (req) => {
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
         throw new AppError(
           "invalid_location",
-          "Location Lock needs a valid place coordinate",
+          "Select a location from the search results or choose one on the map.",
           400,
         );
       }
@@ -116,6 +118,7 @@ Deno.serve(async (req) => {
       locationRadiusM = Math.round(radius);
     } else {
       locationName = "";
+      locationAddress = "";
     }
 
     const { data: friends } = await service.rpc("are_friends", {
@@ -146,6 +149,7 @@ Deno.serve(async (req) => {
         has_password: hasPassword,
         has_location_lock: hasLocationLock,
         location_name: locationName,
+        location_address: locationAddress,
         location_lat: locationLat,
         location_lng: locationLng,
         location_radius_m: locationRadiusM,

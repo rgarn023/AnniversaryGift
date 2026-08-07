@@ -29,6 +29,7 @@ build/*.idsig
 !build/ChestOfLoveNotes-targeted-fixes-debug.apk
 !build/ChestOfLoveNotes-profile-compose-sent-chest-fixes-debug.apk
 !build/ChestOfLoveNotes-location-performance-fixes-debug.apk
+!build/ChestOfLoveNotes-chest-location-lock-debug.apk
 
 # Android Gradle template
 android/build/

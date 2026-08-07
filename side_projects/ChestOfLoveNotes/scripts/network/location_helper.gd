@@ -1,12 +1,15 @@
 extends RefCounted
 class_name LocationHelper
-## Battery-conscious location access for Location Lock.
-## Permission is requested only when Compose/Open explicitly needs a fix.
+## Battery-conscious device location for Location Lock.
+## Permission is requested only when Compose/Open explicitly needs a GPS fix.
+## Place search does NOT use this helper.
 
 const PLUGIN_NAME := "ChestLocation"
 const DEFAULT_RADIUS_M := 500
+const RADIUS_OPTIONS: Array[int] = [100, 250, 500, 1000]
 const PERM_FINE := "android.permission.ACCESS_FINE_LOCATION"
 const PERM_COARSE := "android.permission.ACCESS_COARSE_LOCATION"
+const MAX_ACCEPTABLE_ACCURACY_M := 200.0
 
 ## Desktop / headless mock (never used to falsely unlock online scrolls).
 const MOCK_LAT := 33.4484
@@ -27,6 +30,21 @@ static func within_radius(lat: float, lng: float, target_lat: float, target_lng:
 	if radius_m <= 0:
 		return false
 	return haversine_m(lat, lng, target_lat, target_lng) <= float(radius_m)
+
+
+static func format_radius(meters: int) -> String:
+	if meters >= 1000:
+		var km := float(meters) / 1000.0
+		if is_equal_approx(km, floor(km)):
+			return "%d km" % int(km)
+		return "%.1f km" % km
+	return "%d m" % meters
+
+
+static func format_distance_away(meters: float) -> String:
+	if meters < 1000.0:
+		return "about %d m away" % int(round(meters))
+	return "about %.1f km away" % (meters / 1000.0)
 
 
 static func _plugin():
@@ -57,7 +75,7 @@ static func request_permission_if_needed() -> String:
 	return permission_status()
 
 
-static func get_current_fix() -> Dictionary:
+static func get_current_fix(require_accuracy: bool = true) -> Dictionary:
 	if OS.get_name() != "Android":
 		return {
 			"ok": true,
@@ -69,30 +87,42 @@ static func get_current_fix() -> Dictionary:
 	if permission_status() != "granted":
 		return {
 			"ok": false,
-			"error": "Location permission is required for Location Lock.",
+			"error": "Location access is needed only to verify whether you're near the unlock location.",
 			"denied": true,
 		}
 	var p = _plugin()
 	if p == null or not p.has_method("get_last_known_location"):
 		return {
 			"ok": false,
-			"error": "Location services are unavailable on this device.",
+			"error": "Turn on Location Services to verify this scroll.",
 			"unavailable": true,
 		}
 	var raw := str(p.get_last_known_location())
 	var parts := raw.split("|")
 	if parts.is_empty():
-		return {"ok": false, "error": "Location is temporarily unavailable.", "unavailable": true}
+		return {"ok": false, "error": "We couldn't verify your location. Try again.", "unavailable": true}
 	if parts[0] == "ok" and parts.size() >= 4:
+		var accuracy := float(parts[3])
+		if require_accuracy and accuracy > 0.0 and accuracy > MAX_ACCEPTABLE_ACCURACY_M:
+			return {
+				"ok": false,
+				"error": "Location accuracy is too low right now. Try again outdoors.",
+				"inaccurate": true,
+				"accuracy_m": accuracy,
+			}
 		return {
 			"ok": true,
 			"lat": float(parts[1]),
 			"lng": float(parts[2]),
-			"accuracy_m": float(parts[3]),
+			"accuracy_m": accuracy,
 			"mock": false,
 		}
 	var code := str(parts[2]) if parts.size() >= 3 else "unavailable"
-	var msg := str(parts[1]) if parts.size() >= 2 else "Location is temporarily unavailable."
+	var msg := str(parts[1]) if parts.size() >= 2 else "We couldn't verify your location. Try again."
+	if code == "disabled":
+		msg = "Turn on Location Services to verify this scroll."
+	elif code == "denied":
+		msg = "Location access is needed only to verify whether you're near the unlock location."
 	return {
 		"ok": false,
 		"error": msg,
@@ -102,10 +132,46 @@ static func get_current_fix() -> Dictionary:
 	}
 
 
-static func format_lock_summary(location_name: String, has_schedule: bool, schedule_label: String) -> String:
+static func format_lock_summary(location_name: String, has_schedule: bool, schedule_label: String, radius_m: int = DEFAULT_RADIUS_M) -> String:
 	var place := location_name.strip_edges()
 	if place.is_empty():
 		place = "a set place"
+	var near := "Near %s (within %s)" % [place, format_radius(radius_m)]
 	if has_schedule:
-		return "Near %s · %s" % [place, schedule_label]
-	return "Near %s" % place
+		return "%s · %s" % [near, schedule_label]
+	return near
+
+
+static func evaluate_unlock_requirements(item: Dictionary, now_unix: int, fix: Dictionary = {}) -> Dictionary:
+	## Central AND of active requirements. Fail closed on location errors.
+	var reasons: PackedStringArray = PackedStringArray()
+	var unlock_unix := int(item.get("unlock_at_unix", item.get("unlock_unix", 0)))
+	if unlock_unix <= 0:
+		var unlock_at := str(item.get("unlock_at", ""))
+		if not unlock_at.is_empty():
+			unlock_unix = int(Time.get_unix_time_from_datetime_string(unlock_at))
+	if unlock_unix > now_unix:
+		reasons.append("time")
+	if bool(item.get("has_location_lock", false)):
+		var tlat := float(item.get("location_lat", NAN))
+		var tlng := float(item.get("location_lng", NAN))
+		var radius := int(item.get("location_radius_m", DEFAULT_RADIUS_M))
+		if not is_finite(tlat) or not is_finite(tlng):
+			reasons.append("location_unconfigured")
+		elif not bool(fix.get("ok", false)):
+			reasons.append("location_unavailable")
+		else:
+			var dist := haversine_m(float(fix.get("lat")), float(fix.get("lng")), tlat, tlng)
+			if dist > float(radius):
+				reasons.append("location_far")
+				return {
+					"ok": false,
+					"reasons": reasons,
+					"distance_m": dist,
+					"message": "You're %s from the unlock location." % format_distance_away(dist),
+				}
+	## Magic Password is verified at open time (never OR'd with location/time).
+	if bool(item.get("has_password", false)) or bool(item.get("has_magic_password", false)):
+		if not bool(item.get("password_ok", false)):
+			reasons.append("password")
+	return {"ok": reasons.is_empty(), "reasons": reasons}
