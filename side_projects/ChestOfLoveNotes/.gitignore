@@ -22,6 +22,7 @@ build/*.idsig
 !build/ChestOfLoveNotes-private-onboarding-debug.apk
 !build/ChestOfLoveNotes-mobile-compose-debug.apk
 !build/ChestOfLoveNotes-secure-session-debug.apk
+!build/ChestOfLoveNotes-mobile-accessibility-session-chest-debug.apk
 
 # Android Gradle template
 android/build/

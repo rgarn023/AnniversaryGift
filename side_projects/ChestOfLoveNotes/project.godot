@@ -7,7 +7,7 @@ config_version=5
 
 config/name="Chest of Love Notes"
 config/description="Send animated scroll love notes to friends with scheduled unlock times."
-config/version="0.1.3-secure-session"
+config/version="0.1.4-mobile-accessibility-session-chest"
 run/main_scene="res://scenes/Main.tscn"
 config/features=PackedStringArray("4.7", "Mobile")
 boot_splash/bg_color=Color(0.05, 0.03, 0.12, 1)

@@ -18,8 +18,10 @@ var _reveal_timers: Dictionary = {}
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	MobileUi.ensure_loaded()
 	state = AppState.new()
 	state.bootstrap()
+	state.reduced_motion = MobileUi.reduced_motion()
 	_build_chrome()
 	_scroll_viewer = LoveNotesScrollViewer.new()
 	_scroll_viewer.set_reduced_motion(state.reduced_motion)
@@ -27,13 +29,17 @@ func _ready() -> void:
 	add_child(_scroll_viewer)
 	if state.api:
 		state.api.session_invalidated.connect(_on_session_invalidated)
+	# Never show Sign In while restore is pending.
 	await _startup_navigate()
 
 
 func _startup_navigate() -> void:
 	if state.is_online():
 		_show_session_loading()
+		await get_tree().process_frame
+		_log_secure_debug("startup_begin")
 		var restore: Dictionary = await state.restore_session_if_possible()
+		_log_secure_debug("startup_after_restore")
 		if bool(restore.get("ok", false)):
 			if bool(restore.get("profile_exists", false)):
 				_show_main_chest()
@@ -45,19 +51,39 @@ func _startup_navigate() -> void:
 	_show_welcome()
 
 
+func _log_secure_debug(tag: String) -> void:
+	if not OS.is_debug_build():
+		return
+	var snap: Dictionary = state.diagnostics_snapshot()
+	# Safe YES/NO only — never tokens/passwords/session JSON.
+	print(
+		"[COLN-SECURE:%s] plugin=%s available=%s has_session=%s decrypt=%s refresh_attempted=%s refresh_ok=%s membership=%s profile=%s"
+		% [
+			tag,
+			"YES" if bool(snap.get("secure_plugin_found", false)) else "NO",
+			"YES" if bool(snap.get("secure_storage_available", false)) else "NO",
+			"YES" if bool(snap.get("saved_session_exists", false)) else "NO",
+			"YES" if bool(snap.get("session_decrypt_ok", false)) else "NO",
+			"YES" if bool(snap.get("refresh_attempted", false)) else "NO",
+			"YES" if bool(snap.get("refresh_succeeded", false)) else "NO",
+			"YES" if bool(snap.get("membership_revalidated", false)) else "NO",
+			"YES" if bool(snap.get("profile_loaded", false)) else "NO",
+		]
+	)
+
+
 func _show_session_loading() -> void:
 	_current_screen = "loading"
 	_clear_screen()
 	var box := VBoxContainer.new()
 	box.set_anchors_preset(Control.PRESET_CENTER)
-	box.position = Vector2(-320, -120)
-	box.size = Vector2(640, 240)
+	box.position = Vector2(-360, -140)
+	box.size = Vector2(720, 280)
 	_screen_host.add_child(box)
 	var lab := Label.new()
-	lab.text = "Restoring secure session…"
+	lab.text = "Opening your chest…"
 	lab.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	lab.add_theme_font_size_override("font_size", 28)
-	lab.add_theme_color_override("font_color", Color(0.98, 0.86, 0.45))
+	MobileUi.apply_label(lab, MobileUi.SIZE_MAJOR_HEADING, MobileUi.COLOR_TITLE)
 	box.add_child(lab)
 
 
@@ -143,24 +169,12 @@ func _body_font() -> Font:
 	return null
 
 
-func _make_button(text: String, cb: Callable, min_size: Vector2 = Vector2(320, 72)) -> Button:
+func _make_button(text: String, cb: Callable, min_size: Vector2 = Vector2(320, 60)) -> Button:
 	var b := Button.new()
 	b.text = text
-	b.custom_minimum_size = min_size
-	b.focus_mode = Control.FOCUS_NONE
-	b.add_theme_font_size_override("font_size", 28)
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.42, 0.24, 0.14, 0.95)
-	style.set_corner_radius_all(16)
-	style.content_margin_left = 18
-	style.content_margin_right = 18
-	style.content_margin_top = 12
-	style.content_margin_bottom = 12
-	b.add_theme_stylebox_override("normal", style)
-	var hover := style.duplicate()
-	hover.bg_color = Color(0.52, 0.32, 0.18, 0.98)
-	b.add_theme_stylebox_override("hover", hover)
-	b.add_theme_stylebox_override("pressed", hover)
+	var h := maxi(MobileUi.TOUCH_MIN, int(min_size.y))
+	b.custom_minimum_size = Vector2(maxi(MobileUi.TOUCH_MIN, int(min_size.x)), MobileUi.font_touch(h))
+	MobileUi.style_button(b, h)
 	b.pressed.connect(cb)
 	return b
 
@@ -387,11 +401,16 @@ func _after_verified_sign_in() -> void:
 		_show_toast(str(profile_result.get("error", "Could not load profile.")))
 		_show_welcome()
 		return
-	# Persist after membership+profile success; warn if Keystore unavailable.
-	state.tokens.persist_if_needed()
-	var persist_warn := state.maybe_warn_persist_failure()
-	if not persist_warn.is_empty():
-		_show_toast(persist_warn)
+	# Hard-require Keystore persistence when Keep Me Signed In is ON.
+	var persist: Dictionary = state.persist_session_verified()
+	_log_secure_debug("after_signin_persist")
+	if not bool(persist.get("ok", false)):
+		var warn := str(persist.get("warning", state.maybe_warn_persist_failure()))
+		if warn.is_empty():
+			warn = "Secure sign-in storage failed. You’ll need to sign in again after closing the app."
+		_show_toast(warn)
+	elif OS.is_debug_build() and bool(persist.get("persisted", false)):
+		_show_toast("Secure session persisted successfully.")
 	if not bool(profile_result.get("exists", false)):
 		_show_profile_setup()
 		return
@@ -470,21 +489,34 @@ func _show_main_chest() -> void:
 		return
 	_current_screen = "main_chest"
 	_clear_screen()
-	var root := Control.new()
-	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_screen_host.add_child(root)
+	var margin := MarginContainer.new()
+	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	MobileUi.apply_safe_margins(margin, MobileUi.font_touch(MobileUi.TOUCH_NAV_H) + 8)
+	_screen_host.add_child(margin)
+	var root := VBoxContainer.new()
+	root.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	root.add_theme_constant_override("separation", 12)
+	margin.add_child(root)
 
+	# Header
+	var header := HBoxContainer.new()
+	header.custom_minimum_size.y = MobileUi.font_touch(52)
+	root.add_child(header)
 	var title := Label.new()
 	title.text = "Chest of Love Notes"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	title.position = Vector2(-420, 40)
-	title.size = Vector2(840, 80)
-	title.add_theme_font_size_override("font_size", 48)
-	title.add_theme_color_override("font_color", Color(0.98, 0.86, 0.45))
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	MobileUi.apply_label(title, MobileUi.SIZE_SCREEN_TITLE, MobileUi.COLOR_TITLE)
 	if _title_font():
 		title.add_theme_font_override("font", _title_font())
-	root.add_child(title)
+	header.add_child(title)
+	var refresh_btn := Button.new()
+	refresh_btn.text = "↻"
+	refresh_btn.tooltip_text = "Refresh"
+	refresh_btn.custom_minimum_size = Vector2(MobileUi.font_touch(48), MobileUi.font_touch(48))
+	MobileUi.style_button(refresh_btn, 48)
+	refresh_btn.pressed.connect(func() -> void: _show_main_chest())
+	header.add_child(refresh_btn)
 
 	var counts := {"unread": 0, "locked": 0, "requests": 0}
 	if state.is_demo():
@@ -500,71 +532,130 @@ func _show_main_chest() -> void:
 			counts.requests = fr.size()
 		else:
 			_show_toast(str(chest_result.get("error", "Could not refresh chest.")))
-	var stats := Label.new()
-	stats.text = "Unread %d   ·   Locked %d   ·   Requests %d" % [
-		counts.unread, counts.locked, counts.requests
-	]
-	stats.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	stats.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	stats.position = Vector2(-420, 120)
-	stats.size = Vector2(840, 48)
-	stats.add_theme_font_size_override("font_size", 26)
-	stats.add_theme_color_override("font_color", Color(0.9, 0.84, 0.95))
-	root.add_child(stats)
+
+	# Summary card
+	var summary := PanelContainer.new()
+	summary.add_theme_stylebox_override("panel", MobileUi.card_style())
+	root.add_child(summary)
+	var sum_row := HBoxContainer.new()
+	sum_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	sum_row.add_theme_constant_override("separation", 8)
+	summary.add_child(sum_row)
+	for item in [
+		["Unread", counts.unread],
+		["Locked", counts.locked],
+		["Requests", counts.requests],
+	]:
+		var cell := VBoxContainer.new()
+		cell.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		cell.add_theme_constant_override("separation", 2)
+		var num := Label.new()
+		num.text = str(item[1])
+		num.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		MobileUi.apply_label(num, MobileUi.SIZE_STAT_NUMBER, MobileUi.COLOR_TITLE)
+		cell.add_child(num)
+		var lab := Label.new()
+		lab.text = str(item[0])
+		lab.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		MobileUi.apply_label(lab, MobileUi.SIZE_STAT_LABEL, MobileUi.COLOR_SECONDARY)
+		cell.add_child(lab)
+		sum_row.add_child(cell)
+
+	# Chest area (expands)
+	var chest_area := Control.new()
+	chest_area.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	chest_area.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	root.add_child(chest_area)
+	var your := Label.new()
+	your.text = "Your Chest"
+	your.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	your.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	your.position = Vector2(-200, 8)
+	your.size = Vector2(400, 36)
+	MobileUi.apply_label(your, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY)
+	chest_area.add_child(your)
 
 	_chest = LoveNotesChest.new()
-	_chest.custom_minimum_size = Vector2(520, 520)
-	_chest.size = Vector2(520, 520)
+	_chest.reduced_motion = state.reduced_motion
 	_chest.set_anchors_preset(Control.PRESET_CENTER)
-	_chest.position = Vector2(-260, -80)
+	# ~52% of typical phone width in logical space; grows with area.
+	var chest_side := 560
+	_chest.custom_minimum_size = Vector2(chest_side, chest_side)
+	_chest.size = Vector2(chest_side, chest_side)
+	_chest.position = Vector2(-chest_side * 0.5, -chest_side * 0.42)
 	_chest.z_index = 5
 	_chest.tapped.connect(_on_chest_tapped)
-	root.add_child(_chest)
-	_chest.configure(LoveNotesChest.ChestState.READY, true)
-
-	var actions := HBoxContainer.new()
-	actions.alignment = BoxContainer.ALIGNMENT_CENTER
-	actions.add_theme_constant_override("separation", 16)
-	actions.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	actions.position = Vector2(-460, -280)
-	actions.size = Vector2(920, 90)
-	root.add_child(actions)
-	actions.add_child(_make_button("Compose", _show_compose, Vector2(220, 72)))
-	actions.add_child(_make_button("Friends", _show_friends, Vector2(220, 72)))
-	actions.add_child(_make_button("Sent", _show_sent, Vector2(180, 72)))
-	actions.add_child(_make_button("Profile", _show_profile, Vector2(200, 72)))
+	chest_area.add_child(_chest)
+	_chest.configure(LoveNotesChest.ChestState.READY, false)
+	_chest.set_unread_badge(int(counts.unread))
 
 	if state.is_demo():
 		var demo_row := HBoxContainer.new()
 		demo_row.alignment = BoxContainer.ALIGNMENT_CENTER
-		demo_row.add_theme_constant_override("separation", 12)
-		demo_row.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-		demo_row.position = Vector2(-420, -180)
-		demo_row.size = Vector2(840, 70)
 		root.add_child(demo_row)
-		demo_row.add_child(_make_button("+15 min", func() -> void:
+		var adv := _make_button("+15 min", func() -> void:
 			state.demo.advance_minutes(15)
 			_show_toast("Demo time advanced 15 minutes")
 			_show_main_chest()
-		, Vector2(200, 64)))
-		demo_row.add_child(_make_button("Refresh", _show_main_chest, Vector2(180, 64)))
-	elif state.is_online():
-		var online_row := HBoxContainer.new()
-		online_row.alignment = BoxContainer.ALIGNMENT_CENTER
-		online_row.add_theme_constant_override("separation", 12)
-		online_row.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-		online_row.position = Vector2(-420, -180)
-		online_row.size = Vector2(840, 70)
-		root.add_child(online_row)
-		online_row.add_child(_make_button("Refresh", _show_main_chest, Vector2(180, 64)))
+		, Vector2(200, MobileUi.TOUCH_PRIMARY_H))
+		demo_row.add_child(adv)
+
+	# Bottom navigation (outside margin bottom is reserved)
+	_add_bottom_nav("chest")
+
+
+func _add_bottom_nav(selected: String) -> void:
+	var nav := PanelContainer.new()
+	nav.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	nav.offset_top = -MobileUi.font_touch(MobileUi.TOUCH_NAV_H)
+	var nav_style := StyleBoxFlat.new()
+	nav_style.bg_color = MobileUi.COLOR_NAV_BG
+	nav_style.set_border_width_all(0)
+	nav_style.border_width_top = 2
+	nav_style.border_color = Color(0.45, 0.34, 0.58, 0.7)
+	nav.add_theme_stylebox_override("panel", nav_style)
+	_screen_host.add_child(nav)
+	var safe := SafeAreaHelper.display_insets_viewport()
+	nav.offset_bottom = -int(safe.w)
+	nav.offset_top = -MobileUi.font_touch(MobileUi.TOUCH_NAV_H) - int(safe.w)
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 4)
+	nav.add_child(row)
+	var tabs := [
+		["chest", "Chest", _show_main_chest],
+		["compose", "Compose", _show_compose],
+		["friends", "Friends", _show_friends],
+		["sent", "Sent", _show_sent],
+		["profile", "Profile", _show_profile],
+	]
+	for t in tabs:
+		var b := Button.new()
+		b.text = str(t[1])
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		b.custom_minimum_size = Vector2(0, MobileUi.font_touch(MobileUi.TOUCH_NAV_H) - 8)
+		b.focus_mode = Control.FOCUS_NONE
+		b.add_theme_font_size_override("font_size", MobileUi.font(MobileUi.SIZE_NAV_LABEL))
+		var sel := str(t[0]) == selected
+		b.add_theme_color_override("font_color", MobileUi.COLOR_NAV_SELECTED if sel else MobileUi.COLOR_NAV_IDLE)
+		var flat := StyleBoxFlat.new()
+		flat.bg_color = Color(0.18, 0.12, 0.28, 0.95) if sel else Color(0, 0, 0, 0)
+		flat.set_corner_radius_all(12)
+		b.add_theme_stylebox_override("normal", flat)
+		b.add_theme_stylebox_override("hover", flat)
+		b.add_theme_stylebox_override("pressed", flat)
+		var cb: Callable = t[2]
+		b.pressed.connect(cb)
+		row.add_child(b)
 
 
 func _on_chest_tapped() -> void:
 	if not _guard_private_chest():
 		return
-	if _chest.animating:
+	if _chest == null or _chest.animating:
 		return
-	await _chest.play_open_animation(true)
+	# Full physical opening unless reduced motion.
+	await _chest.play_open_animation(state.reduced_motion)
 	_show_inventory()
 
 
@@ -666,35 +757,47 @@ func _show_inventory() -> void:
 		return
 	_current_screen = "inventory"
 	_clear_screen()
+	var margin := MarginContainer.new()
+	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	MobileUi.apply_safe_margins(margin)
+	_screen_host.add_child(margin)
 	var root := VBoxContainer.new()
-	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	root.offset_left = 28
-	root.offset_right = -28
-	root.offset_top = 24
-	root.offset_bottom = -24
-	root.add_theme_constant_override("separation", 12)
-	_screen_host.add_child(root)
+	root.add_theme_constant_override("separation", 14)
+	margin.add_child(root)
 
 	var header := HBoxContainer.new()
 	root.add_child(header)
 	var title := Label.new()
 	title.text = "Your Chest"
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	title.add_theme_font_size_override("font_size", 40)
-	title.add_theme_color_override("font_color", Color(0.98, 0.86, 0.45))
+	MobileUi.apply_label(title, MobileUi.SIZE_SCREEN_TITLE, MobileUi.COLOR_TITLE)
 	header.add_child(title)
-	header.add_child(_make_button("Back", _show_main_chest, Vector2(160, 64)))
+	header.add_child(_make_button("Back", _show_main_chest, Vector2(160, MobileUi.TOUCH_PRIMARY_H)))
 
+	# Large filter chips (horizontally scrollable)
+	var chip_scroll := ScrollContainer.new()
+	chip_scroll.custom_minimum_size.y = MobileUi.font_touch(56)
+	chip_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	chip_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	root.add_child(chip_scroll)
 	var filters := HBoxContainer.new()
-	filters.add_theme_constant_override("separation", 8)
-	root.add_child(filters)
-	for f in ["all", "unread", "locked", "requests"]:
-		var fname: String = str(f)
-		filters.add_child(_make_button(fname.capitalize(), func() -> void:
+	filters.add_theme_constant_override("separation", 10)
+	chip_scroll.add_child(filters)
+	for f in [
+		["all", "Current"],
+		["unread", "Unread"],
+		["locked", "Locked"],
+		["requests", "Requests"],
+	]:
+		var fname: String = str(f[0])
+		var chip := _make_button(str(f[1]), func() -> void:
 			_inventory_filter = fname
 			_show_inventory()
-		, Vector2(140, 56)))
-	filters.add_child(_make_button("Saved", _show_saved, Vector2(140, 56)))
+		, Vector2(150, 52))
+		if _inventory_filter == fname:
+			chip.add_theme_color_override("font_color", MobileUi.COLOR_TITLE)
+		filters.add_child(chip)
+	filters.add_child(_make_button("Saved", _show_saved, Vector2(140, 52)))
 
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -1267,6 +1370,9 @@ func _show_friends() -> void:
 	root.add_child(code)
 
 
+	_add_bottom_nav("friends")
+
+
 func _show_sent() -> void:
 	if not _guard_private_chest():
 		return
@@ -1313,60 +1419,61 @@ func _show_sent() -> void:
 		empty.add_theme_font_size_override("font_size", 28)
 		empty.add_theme_color_override("font_color", Color(0.85, 0.8, 0.9))
 		root.add_child(empty)
-		return
-	for s in sent_items:
-		if typeof(s) != TYPE_DICTIONARY:
-			continue
-		var panel := PanelContainer.new()
-		var style := StyleBoxFlat.new()
-		style.bg_color = Color(0.12, 0.08, 0.16, 0.92)
-		style.set_corner_radius_all(14)
-		style.content_margin_left = 16
-		style.content_margin_right = 16
-		style.content_margin_top = 12
-		style.content_margin_bottom = 12
-		panel.add_theme_stylebox_override("panel", style)
-		var col := VBoxContainer.new()
-		panel.add_child(col)
-		var recipient: Dictionary = s.get("recipient", {}) if typeof(s.get("recipient")) == TYPE_DICTIONARY else {}
-		var unlock_at := str(s.get("unlock_at", ""))
-		var unlock_unix := int(s.get("unlock_at_unix", 0))
-		if unlock_unix == 0 and not unlock_at.is_empty():
-			unlock_unix = int(Time.get_unix_time_from_datetime_string(unlock_at))
-		var row := Label.new()
-		row.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		row.text = "%s → %s · opens %s · opened=%d" % [
-			str(s.get("title", "")),
-			str(s.get("recipient_display_name", recipient.get("display_name", ""))),
-			Time.get_datetime_string_from_unix_time(unlock_unix, false) if unlock_unix > 0 else unlock_at,
-			int(s.get("opened_count", 0)),
-		]
-		row.add_theme_font_size_override("font_size", 22)
-		row.add_theme_color_override("font_color", Color(0.9, 0.85, 0.95))
-		col.add_child(row)
-		var sid := str(s.get("id", ""))
-		var has_pw := bool(s.get("has_password", false))
-		if has_pw:
-			col.add_child(_build_sent_password_reveal_row(sid, s))
-		col.add_child(_make_button("Hide from Sent", func() -> void:
-			if state.is_demo():
-				var result := state.demo.delete_sent_scroll(sid)
-				if bool(result.get("ok", false)):
-					_show_toast("Hidden from your Sent history")
-					_show_sent()
+	else:
+		for s in sent_items:
+			if typeof(s) != TYPE_DICTIONARY:
+				continue
+			var panel := PanelContainer.new()
+			var style := StyleBoxFlat.new()
+			style.bg_color = Color(0.12, 0.08, 0.16, 0.92)
+			style.set_corner_radius_all(14)
+			style.content_margin_left = 16
+			style.content_margin_right = 16
+			style.content_margin_top = 12
+			style.content_margin_bottom = 12
+			panel.add_theme_stylebox_override("panel", style)
+			var col := VBoxContainer.new()
+			panel.add_child(col)
+			var recipient: Dictionary = s.get("recipient", {}) if typeof(s.get("recipient")) == TYPE_DICTIONARY else {}
+			var unlock_at := str(s.get("unlock_at", ""))
+			var unlock_unix := int(s.get("unlock_at_unix", 0))
+			if unlock_unix == 0 and not unlock_at.is_empty():
+				unlock_unix = int(Time.get_unix_time_from_datetime_string(unlock_at))
+			var row := Label.new()
+			row.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			row.text = "%s → %s · opens %s · opened=%d" % [
+				str(s.get("title", "")),
+				str(s.get("recipient_display_name", recipient.get("display_name", ""))),
+				Time.get_datetime_string_from_unix_time(unlock_unix, false) if unlock_unix > 0 else unlock_at,
+				int(s.get("opened_count", 0)),
+			]
+			row.add_theme_font_size_override("font_size", 22)
+			row.add_theme_color_override("font_color", Color(0.9, 0.85, 0.95))
+			col.add_child(row)
+			var sid := str(s.get("id", ""))
+			var has_pw := bool(s.get("has_password", false))
+			if has_pw:
+				col.add_child(_build_sent_password_reveal_row(sid, s))
+			col.add_child(_make_button("Hide from Sent", func() -> void:
+				if state.is_demo():
+					var result := state.demo.delete_sent_scroll(sid)
+					if bool(result.get("ok", false)):
+						_show_toast("Hidden from your Sent history")
+						_show_sent()
+					else:
+						_show_toast(str(result.get("error", "Could not hide sent scroll.")))
+				elif state.is_online():
+					var result: Dictionary = await state.scrolls.delete_sent_scroll(sid)
+					if bool(result.get("ok", false)):
+						_show_toast("Hidden from your Sent history")
+						_show_sent()
+					else:
+						_show_toast(str(result.get("error", "Could not hide sent scroll.")))
 				else:
-					_show_toast(str(result.get("error", "Could not hide sent scroll.")))
-			elif state.is_online():
-				var result: Dictionary = await state.scrolls.delete_sent_scroll(sid)
-				if bool(result.get("ok", false)):
-					_show_toast("Hidden from your Sent history")
-					_show_sent()
-				else:
-					_show_toast(str(result.get("error", "Could not hide sent scroll.")))
-			else:
-				_show_toast("Backend is not configured.")
-		, Vector2(240, 56)))
-		root.add_child(panel)
+					_show_toast("Backend is not configured.")
+			, Vector2(240, 56)))
+			root.add_child(panel)
+	_add_bottom_nav("sent")
 
 
 func _build_sent_password_reveal_row(scroll_id: String, item: Dictionary) -> VBoxContainer:
@@ -1536,16 +1643,51 @@ func _show_profile() -> void:
 	info.add_theme_font_size_override("font_size", 26)
 	info.add_theme_color_override("font_color", Color(0.92, 0.88, 0.96))
 	root.add_child(info)
+	# Accessibility settings
+	var text_row := HBoxContainer.new()
+	text_row.custom_minimum_size.y = MobileUi.font_touch(56)
+	root.add_child(text_row)
+	var text_lab := Label.new()
+	text_lab.text = "Text Size"
+	text_lab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	MobileUi.apply_label(text_lab, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY)
+	text_row.add_child(text_lab)
+	var text_btn := _make_button(MobileUi.text_size_label(), func() -> void:
+		MobileUi.cycle_text_size()
+		_show_toast("Text Size: %s" % MobileUi.text_size_label())
+		_show_profile()
+	, Vector2(200, MobileUi.TOUCH_PRIMARY_H))
+	text_row.add_child(text_btn)
+
+	var motion_row := HBoxContainer.new()
+	motion_row.custom_minimum_size.y = MobileUi.font_touch(56)
+	root.add_child(motion_row)
+	var motion_lab := Label.new()
+	motion_lab.text = "Reduced Motion"
+	motion_lab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	MobileUi.apply_label(motion_lab, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY)
+	motion_row.add_child(motion_lab)
+	var motion_toggle := CheckButton.new()
+	motion_toggle.button_pressed = MobileUi.reduced_motion()
+	motion_toggle.custom_minimum_size = Vector2(72, 48)
+	motion_toggle.focus_mode = Control.FOCUS_NONE
+	motion_toggle.toggled.connect(func(on: bool) -> void:
+		MobileUi.set_reduced_motion(on)
+		state.reduced_motion = on
+		if _scroll_viewer:
+			_scroll_viewer.set_reduced_motion(on)
+		_show_toast("Reduced Motion is %s" % ("ON" if on else "OFF"))
+	)
+	motion_row.add_child(motion_toggle)
+
 	if state.is_online():
 		var keep_row := HBoxContainer.new()
-		keep_row.custom_minimum_size = Vector2(0, 56)
+		keep_row.custom_minimum_size.y = MobileUi.font_touch(56)
 		root.add_child(keep_row)
 		var keep_lab := Label.new()
 		keep_lab.text = "Keep Me Signed In"
 		keep_lab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		keep_lab.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		keep_lab.add_theme_font_size_override("font_size", 22)
-		keep_lab.add_theme_color_override("font_color", Color(0.92, 0.88, 0.96))
+		MobileUi.apply_label(keep_lab, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY)
 		keep_row.add_child(keep_lab)
 		var keep_toggle := CheckButton.new()
 		keep_toggle.button_pressed = state.tokens.keep_me_signed_in
@@ -1567,6 +1709,7 @@ func _show_profile() -> void:
 	))
 	if state.membership.is_member or state.is_demo():
 		root.add_child(_make_button("Back", _show_main_chest))
+		_add_bottom_nav("profile")
 	else:
 		root.add_child(_make_button("Back", _show_welcome))
 
@@ -1599,43 +1742,37 @@ func _show_diagnostics() -> void:
 	var refresh_status := func() -> void:
 		var snap: Dictionary = state.diagnostics_snapshot()
 		status.text = (
-			"Backend configuration loaded: %s\n"
-			+ "Backend host: %s\n"
-			+ "Secure Storage Available: %s\n"
-			+ "Saved Session Exists: %s\n"
-			+ "Session Restored: %s\n"
-			+ "Session Refresh Performed: %s\n"
+			"Secure plugin found: %s\n"
+			+ "Secure storage available: %s\n"
+			+ "Secure session exists: %s\n"
+			+ "Secure session decrypt succeeded: %s\n"
+			+ "Refresh attempted: %s\n"
+			+ "Refresh succeeded: %s\n"
+			+ "Membership revalidated: %s\n"
+			+ "Profile loaded: %s\n"
 			+ "Keep Me Signed In: %s\n"
-			+ "Memory-only session: %s\n"
-			+ "Signed in: %s\n"
-			+ "Email confirmed: %s\n"
-			+ "Private Membership Valid: %s\n"
-			+ "Private role: %s\n"
-			+ "Profile exists: %s\n"
+			+ "Text Size: %s\n"
+			+ "Reduced Motion: %s\n"
+			+ "Backend host: %s\n"
 			+ "Last Auth HTTP Status: %s\n"
 			+ "Last Safe Auth Error: %s\n"
-			+ "Last function name: %s\n"
-			+ "Private Onboarding Build: %s\n"
-			+ "Local Demo Mode disabled: %s"
+			+ "Last persist error: %s"
 		) % [
-			"Yes" if bool(snap.backend_configured) else "No",
-			str(snap.backend_host),
-			"Yes" if bool(snap.secure_storage_available) else "No",
-			"Yes" if bool(snap.saved_session_exists) else "No",
-			"Yes" if bool(snap.session_restored) else "No",
-			"Yes" if bool(snap.session_refresh_performed) else "No",
-			"ON" if bool(snap.keep_me_signed_in) else "OFF",
-			"Yes" if bool(snap.memory_only) else "No",
-			"Yes" if bool(snap.signed_in) else "No",
-			"Yes" if bool(snap.email_confirmed) else "No",
-			"Yes" if bool(snap.membership_approved) else "No",
-			str(snap.private_role) if str(snap.private_role) != "" else "(none)",
-			"Yes" if bool(snap.profile_exists) else "No",
-			str(snap.last_http_status),
-			str(snap.last_safe_error) if str(snap.last_safe_error) != "" else "(none)",
-			str(snap.last_function),
-			"Yes" if bool(snap.private_onboarding_build) else "No",
-			"Yes" if bool(snap.demo_disabled) else "No",
+			"YES" if bool(snap.get("secure_plugin_found", false)) else "NO",
+			"YES" if bool(snap.get("secure_storage_available", false)) else "NO",
+			"YES" if bool(snap.get("saved_session_exists", false)) else "NO",
+			"YES" if bool(snap.get("session_decrypt_ok", false)) else "NO",
+			"YES" if bool(snap.get("refresh_attempted", false)) else "NO",
+			"YES" if bool(snap.get("refresh_succeeded", false)) else "NO",
+			"YES" if bool(snap.get("membership_revalidated", false)) else "NO",
+			"YES" if bool(snap.get("profile_loaded", false)) else "NO",
+			"ON" if bool(snap.get("keep_me_signed_in", false)) else "OFF",
+			str(snap.get("text_size", "Standard")),
+			"ON" if bool(snap.get("reduced_motion", false)) else "OFF",
+			str(snap.get("backend_host", "")),
+			str(snap.get("last_http_status", 0)),
+			str(snap.get("last_safe_error", "")) if str(snap.get("last_safe_error", "")) != "" else "(none)",
+			str(snap.get("last_persist_error", "")) if str(snap.get("last_persist_error", "")) != "" else "(none)",
 		]
 	refresh_status.call()
 	root.add_child(_make_button("Test Backend", func() -> void:

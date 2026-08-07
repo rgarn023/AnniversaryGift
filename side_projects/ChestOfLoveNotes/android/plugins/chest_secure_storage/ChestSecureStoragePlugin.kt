@@ -96,12 +96,16 @@ class ChestSecureStoragePlugin(godot: Godot) : GodotPlugin(godot) {
 			cipher.init(Cipher.ENCRYPT_MODE, key)
 			val iv = cipher.iv
 			val ciphertext = cipher.doFinal(jsonString.toByteArray(Charsets.UTF_8))
-			prefs().edit()
+			// commit() — must flush before process death after sign-in.
+			val ok = prefs().edit()
 				.putString(PREF_CIPHERTEXT, Base64.encodeToString(ciphertext, Base64.NO_WRAP))
 				.putString(PREF_IV, Base64.encodeToString(iv, Base64.NO_WRAP))
 				.putInt(PREF_VERSION, STORAGE_VERSION)
-				.apply()
-			true
+				.commit()
+			if (!ok) {
+				Log.w(TAG, "secure_store_session commit returned false")
+			}
+			ok
 		} catch (e: Exception) {
 			Log.w(TAG, "secure_store_session failed: ${e.javaClass.simpleName}")
 			false
@@ -127,7 +131,7 @@ class ChestSecureStoragePlugin(godot: Godot) : GodotPlugin(godot) {
 				prefs().edit()
 					.remove(PREF_CIPHERTEXT)
 					.remove(PREF_IV)
-					.apply()
+					.commit()
 			} catch (_: Exception) {
 				// ignore cleanup failures
 			}
@@ -142,8 +146,7 @@ class ChestSecureStoragePlugin(godot: Godot) : GodotPlugin(godot) {
 				.remove(PREF_CIPHERTEXT)
 				.remove(PREF_IV)
 				.remove(PREF_VERSION)
-				.apply()
-			true
+				.commit()
 		} catch (e: Exception) {
 			Log.w(TAG, "secure_delete_session failed: ${e.javaClass.simpleName}")
 			false

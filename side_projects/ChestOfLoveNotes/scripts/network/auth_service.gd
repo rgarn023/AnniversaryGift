@@ -89,7 +89,7 @@ func sign_in(email: String, password: String) -> Dictionary:
 			"error": "Please confirm your email before signing in.",
 			"needs_confirmation": true,
 		}
-	tokens.persist_if_needed()
+	# Persistence is verified after membership in the UI layer.
 	return {"ok": true, "error": "", "user_id": tokens.user_id}
 
 

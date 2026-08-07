@@ -206,7 +206,7 @@ func _build_ui() -> void:
 
 	_validation_label = Label.new()
 	_validation_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_validation_label.add_theme_font_size_override("font_size", 15)
+	_validation_label.add_theme_font_size_override("font_size", 16)
 	_validation_label.add_theme_color_override("font_color", COL_ERROR)
 	_validation_label.visible = false
 	_form.add_child(_validation_label)
@@ -233,7 +233,7 @@ func _build_header() -> VBoxContainer:
 		var chip := Label.new()
 		chip.text = "Private Onboarding Build"
 		chip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		chip.add_theme_font_size_override("font_size", 13)
+		chip.add_theme_font_size_override("font_size", 16)
 		chip.add_theme_color_override("font_color", Color(1.0, 0.78, 0.45, 0.85))
 		wrap.add_child(chip)
 
@@ -255,7 +255,7 @@ func _build_header() -> VBoxContainer:
 	heading.text = "Compose Scroll"
 	heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	heading.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	heading.add_theme_font_size_override("font_size", 28)
+	heading.add_theme_font_size_override("font_size", 30)
 	heading.add_theme_color_override("font_color", COL_GOLD)
 	if _title_font:
 		heading.add_theme_font_override("font", _title_font)
@@ -268,7 +268,7 @@ func _build_recipient_card() -> PanelContainer:
 	var col := _card_body(card)
 	col.add_child(_section_heading("Send To"))
 	_recipient_btn = Button.new()
-	_recipient_btn.custom_minimum_size = Vector2(0, 60)
+	_recipient_btn.custom_minimum_size = Vector2(0, 64)
 	_recipient_btn.focus_mode = Control.FOCUS_NONE
 	_recipient_btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	_style_row_button(_recipient_btn)
@@ -289,15 +289,15 @@ func _build_title_card() -> PanelContainer:
 	opt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	opt.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	opt.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	opt.add_theme_font_size_override("font_size", 14)
+	opt.add_theme_font_size_override("font_size", 16)
 	opt.add_theme_color_override("font_color", COL_SUPPORT)
 	head.add_child(opt)
 	col.add_child(head)
 	_title_edit = LineEdit.new()
 	_title_edit.placeholder_text = "Give your scroll a title..."
 	_title_edit.max_length = MAX_TITLE
-	_title_edit.custom_minimum_size = Vector2(0, 54)
-	_title_edit.add_theme_font_size_override("font_size", 17)
+	_title_edit.custom_minimum_size = Vector2(0, 56)
+	_title_edit.add_theme_font_size_override("font_size", 19)
 	_style_line_edit(_title_edit)
 	_title_edit.text_changed.connect(func(_t: String) -> void:
 		_title_count.text = "%d / %d" % [_title_edit.text.length(), MAX_TITLE]
@@ -308,7 +308,7 @@ func _build_title_card() -> PanelContainer:
 	_title_count = Label.new()
 	_title_count.text = "0 / %d" % MAX_TITLE
 	_title_count.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	_title_count.add_theme_font_size_override("font_size", 13)
+	_title_count.add_theme_font_size_override("font_size", 16)
 	_title_count.add_theme_color_override("font_color", COL_SUPPORT)
 	col.add_child(_title_count)
 	return card
@@ -322,9 +322,9 @@ func _build_message_card() -> PanelContainer:
 	_message_edit.placeholder_text = "Write your love note..."
 	_message_edit.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
 	_message_edit.scroll_fit_content_height = false
-	_message_edit.custom_minimum_size = Vector2(0, 260)
+	_message_edit.custom_minimum_size = Vector2(0, 280)
 	_message_edit.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-	_message_edit.add_theme_font_size_override("font_size", 17)
+	_message_edit.add_theme_font_size_override("font_size", 19)
 	_style_text_edit(_message_edit)
 	_message_edit.text_changed.connect(func() -> void:
 		if _message_edit.text.length() > MAX_MESSAGE:
@@ -338,7 +338,7 @@ func _build_message_card() -> PanelContainer:
 	_message_count = Label.new()
 	_message_count.text = "0 / %d" % MAX_MESSAGE
 	_message_count.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	_message_count.add_theme_font_size_override("font_size", 13)
+	_message_count.add_theme_font_size_override("font_size", 16)
 	_message_count.add_theme_color_override("font_color", COL_SUPPORT)
 	col.add_child(_message_count)
 	return _message_card
@@ -353,7 +353,7 @@ func _build_delivery_card() -> PanelContainer:
 	_open_immediately.text = "Open Immediately"
 	_open_immediately.button_pressed = true
 	_open_immediately.custom_minimum_size = Vector2(0, 52)
-	_open_immediately.add_theme_font_size_override("font_size", 17)
+	_open_immediately.add_theme_font_size_override("font_size", 19)
 	_open_immediately.add_theme_color_override("font_color", COL_TEXT)
 	_open_immediately.toggled.connect(func(on: bool) -> void:
 		_delivery_controls.modulate.a = 0.45 if on else 1.0
@@ -402,7 +402,7 @@ func _build_delivery_card() -> PanelContainer:
 		b.custom_minimum_size = Vector2(0, 48)
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.focus_mode = Control.FOCUS_NONE
-		b.add_theme_font_size_override("font_size", 14)
+		b.add_theme_font_size_override("font_size", 16)
 		_style_secondary_button(b)
 		var secs: int = int(item.secs)
 		b.pressed.connect(func() -> void:
@@ -416,7 +416,7 @@ func _build_delivery_card() -> PanelContainer:
 	_tz_label = Label.new()
 	_tz_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_tz_label.text = "%s\nWe'll convert this securely for delivery." % _timezone_friendly_name()
-	_tz_label.add_theme_font_size_override("font_size", 14)
+	_tz_label.add_theme_font_size_override("font_size", 16)
 	_tz_label.add_theme_color_override("font_color", COL_SUPPORT)
 	col.add_child(_tz_label)
 	return card
@@ -434,7 +434,7 @@ func _build_password_card() -> PanelContainer:
 	toggle_label.text = "Require a Magic Password"
 	toggle_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	toggle_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	toggle_label.add_theme_font_size_override("font_size", 17)
+	toggle_label.add_theme_font_size_override("font_size", 19)
 	toggle_label.add_theme_color_override("font_color", COL_TEXT)
 	toggle_row.add_child(toggle_label)
 	_pw_toggle = CheckButton.new()
@@ -458,7 +458,7 @@ func _build_password_card() -> PanelContainer:
 	var help := Label.new()
 	help.text = "The recipient will need this password every time they open the scroll."
 	help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	help.add_theme_font_size_override("font_size", 14)
+	help.add_theme_font_size_override("font_size", 16)
 	help.add_theme_color_override("font_color", COL_SUPPORT)
 	_pw_fields.add_child(help)
 
@@ -469,9 +469,9 @@ func _build_password_card() -> PanelContainer:
 	_pw_edit = LineEdit.new()
 	_pw_edit.secret = true
 	_pw_edit.placeholder_text = "Enter password"
-	_pw_edit.custom_minimum_size = Vector2(0, 54)
+	_pw_edit.custom_minimum_size = Vector2(0, 56)
 	_pw_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_pw_edit.add_theme_font_size_override("font_size", 17)
+	_pw_edit.add_theme_font_size_override("font_size", 19)
 	_style_line_edit(_pw_edit)
 	_pw_edit.text_changed.connect(func(_t: String) -> void: _update_validation())
 	pw_row.add_child(_pw_edit)
@@ -492,9 +492,9 @@ func _build_password_card() -> PanelContainer:
 	_pw2_edit = LineEdit.new()
 	_pw2_edit.secret = true
 	_pw2_edit.placeholder_text = "Confirm password"
-	_pw2_edit.custom_minimum_size = Vector2(0, 54)
+	_pw2_edit.custom_minimum_size = Vector2(0, 56)
 	_pw2_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_pw2_edit.add_theme_font_size_override("font_size", 17)
+	_pw2_edit.add_theme_font_size_override("font_size", 19)
 	_style_line_edit(_pw2_edit)
 	_pw2_edit.text_changed.connect(func(_t: String) -> void: _update_validation())
 	pw2_row.add_child(_pw2_edit)
@@ -511,7 +511,7 @@ func _build_password_card() -> PanelContainer:
 	var warn := Label.new()
 	warn.text = "Important: Share this password privately. You can reveal it later from your Sent Scrolls."
 	warn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	warn.add_theme_font_size_override("font_size", 14)
+	warn.add_theme_font_size_override("font_size", 16)
 	warn.add_theme_color_override("font_color", COL_WARN)
 	_pw_fields.add_child(warn)
 	return card
@@ -523,7 +523,7 @@ func _build_summary_card() -> PanelContainer:
 	col.add_child(_section_heading("Ready Check"))
 	_summary_label = Label.new()
 	_summary_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_summary_label.add_theme_font_size_override("font_size", 15)
+	_summary_label.add_theme_font_size_override("font_size", 16)
 	_summary_label.add_theme_color_override("font_color", COL_SUPPORT)
 	col.add_child(_summary_label)
 	return card
@@ -547,16 +547,16 @@ func _build_bottom_actions() -> PanelContainer:
 
 	_preview_btn = Button.new()
 	_preview_btn.text = "Preview Scroll"
-	_preview_btn.custom_minimum_size = Vector2(0, 52)
+	_preview_btn.custom_minimum_size = Vector2(0, 56)
 	_preview_btn.focus_mode = Control.FOCUS_NONE
-	_preview_btn.add_theme_font_size_override("font_size", 17)
+	_preview_btn.add_theme_font_size_override("font_size", 19)
 	_style_secondary_button(_preview_btn)
 	_preview_btn.pressed.connect(_on_preview_pressed)
 	col.add_child(_preview_btn)
 
 	_send_btn = Button.new()
 	_send_btn.text = "Send Scroll"
-	_send_btn.custom_minimum_size = Vector2(0, 60)
+	_send_btn.custom_minimum_size = Vector2(0, 64)
 	_send_btn.focus_mode = Control.FOCUS_NONE
 	_send_btn.add_theme_font_size_override("font_size", 19)
 	_style_primary_button(_send_btn)
@@ -604,7 +604,7 @@ func _section_heading(text: String) -> Label:
 func _field_caption(text: String) -> Label:
 	var lab := Label.new()
 	lab.text = text
-	lab.add_theme_font_size_override("font_size", 14)
+	lab.add_theme_font_size_override("font_size", 16)
 	lab.add_theme_color_override("font_color", COL_SUPPORT)
 	return lab
 
@@ -641,7 +641,7 @@ func _style_row_button(b: Button) -> void:
 	b.add_theme_stylebox_override("disabled", style)
 	b.add_theme_color_override("font_color", COL_TEXT)
 	b.add_theme_color_override("font_disabled_color", COL_SUPPORT)
-	b.add_theme_font_size_override("font_size", 17)
+	b.add_theme_font_size_override("font_size", 19)
 
 
 func _style_line_edit(le: LineEdit) -> void:
@@ -906,7 +906,7 @@ func _open_friend_picker() -> void:
 		var empty := Label.new()
 		empty.text = "No accepted friends yet."
 		empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		empty.add_theme_font_size_override("font_size", 17)
+		empty.add_theme_font_size_override("font_size", 19)
 		empty.add_theme_color_override("font_color", COL_SUPPORT)
 		list.add_child(empty)
 	else:

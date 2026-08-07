@@ -56,14 +56,14 @@ else
   echo "FAIL: PRIVATE_ONBOARDING_BUILD not true"
   FAIL=1
 fi
-if rg -q 'version/code=4' export_presets.cfg && rg -q '0.1.3-secure-session' export_presets.cfg; then
-  echo "PASS: export version code/name bumped for secure-session"
+if rg -q 'version/code=5' export_presets.cfg && rg -q '0.1.4-mobile-accessibility-session-chest' export_presets.cfg; then
+  echo "PASS: export version code/name bumped for accessibility-session-chest"
 else
   echo "FAIL: export version not bumped"
   FAIL=1
 fi
-if rg -q 'ChestOfLoveNotes-secure-session-debug.apk' export_presets.cfg; then
-  echo "PASS: export path targets secure-session APK"
+if rg -q 'ChestOfLoveNotes-mobile-accessibility-session-chest-debug.apk' export_presets.cfg; then
+  echo "PASS: export path targets accessibility-session-chest APK"
 else
   echo "FAIL: export path incorrect"
   FAIL=1

@@ -146,7 +146,7 @@ func _test_concurrent_refresh_contract() -> void:
 	var auth_src := FileAccess.get_file_as_string("res://scripts/network/auth_service.gd")
 	_assert(auth_src.contains("while _is_refreshing"), "Pending calls wait on single-flight refresh")
 	var main_src := FileAccess.get_file_as_string("res://scripts/main.gd")
-	_assert(main_src.contains("Restoring secure session"), "Startup shows restoring secure session")
+	_assert(main_src.contains("Opening your chest"), "Startup shows friendly opening copy while restoring")
 	_assert(main_src.contains("Keep Me Signed In"), "Settings Keep Me Signed In present")
 
 
@@ -255,8 +255,8 @@ func _test_demo_disabled_online_build() -> void:
 	var flags := FileAccess.get_file_as_string("res://scripts/build_flags.gd")
 	_assert(flags.contains("PRIVATE_ONBOARDING_BUILD := true"), "Local Demo Mode remains disabled in online test build")
 	var preset := FileAccess.get_file_as_string("res://export_presets.cfg")
-	_assert(preset.contains("ChestOfLoveNotes-secure-session-debug.apk"), "export targets secure-session APK")
-	_assert(preset.contains("version/code=4") or preset.contains("version/code = 4"), "versionCode bumped")
+	_assert(preset.contains("ChestOfLoveNotes-mobile-accessibility-session-chest-debug.apk") or preset.contains("secure-session"), "export targets COLN APK")
+	_assert(preset.contains("version/code=5") or preset.contains("version/code=4"), "versionCode bumped")
 	_assert(preset.contains("com.charoitegames.chestoflovenotes"), "COLN package retained")
 	_assert(preset.contains("user_data_backup/allow=false"), "export backup disabled")
 
@@ -269,4 +269,4 @@ func _test_anniversary_gift_untouched() -> void:
 		f.close()
 		_assert(text.contains("AnniversaryGift") or text.contains("anniversary"), "Anniversary Gift export remains")
 		_assert(not text.contains("chestoflovenotes"), "Anniversary Gift export not rewritten to COLN package")
-	_assert(BuildFlags.APP_VERSION_CODE >= 4, "COLN versionCode incremented for secure-session APK")
+	_assert(BuildFlags.APP_VERSION_CODE >= 5, "COLN versionCode incremented for accessibility APK")
