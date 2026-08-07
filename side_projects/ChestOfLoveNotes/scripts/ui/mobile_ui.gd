@@ -245,7 +245,7 @@ static func configure_scroll(scroll: ScrollContainer, horizontal: bool = false) 
 	## After children exist, make non-interactive surfaces pass drag to ScrollContainer.
 	scroll.child_entered_tree.connect(func(node: Node) -> void:
 		if node is Control:
-			call_deferred("_pass_drag_through", node as Control)
+			_pass_drag_through(node as Control)
 	)
 	for child in scroll.get_children():
 		if child is Control:

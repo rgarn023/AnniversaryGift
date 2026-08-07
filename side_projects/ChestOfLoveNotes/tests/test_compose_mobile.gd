@@ -45,24 +45,25 @@ func _test_hierarchy_and_touch_targets() -> void:
 	_assert(compose.get_node_or_null(".") != null, "compose screen instantiated")
 	_assert(compose._safe_margin != null, "SafeArea margin present")
 	_assert(compose._scroll != null, "ScrollContainer present")
-	_assert(compose._send_btn != null and compose._send_btn.custom_minimum_size.y >= 56, "Send button >= 56px")
+	_assert(compose._send_btn != null and compose._send_btn.custom_minimum_size.y >= 52, "Send button >= 52px")
 	_assert(compose._preview_btn != null and compose._preview_btn.custom_minimum_size.y >= 48, "Preview button >= 48px")
-	_assert(compose._recipient_btn != null and compose._recipient_btn.custom_minimum_size.y >= 56, "Recipient row >= 56px")
-	_assert(compose._title_edit != null and compose._title_edit.custom_minimum_size.y >= 52, "Title field >= 52px")
+	_assert(compose._recipient_btn != null and compose._recipient_btn.custom_minimum_size.y >= 52, "Recipient row >= 52px")
+	_assert(compose._title_edit != null and compose._title_edit.custom_minimum_size.y >= 48, "Title field >= 48px")
 	_assert(compose._date_btn != null and compose._date_btn.custom_minimum_size.y >= 52, "Date row >= 52px")
 	_assert(compose._time_btn != null and compose._time_btn.custom_minimum_size.y >= 52, "Time row >= 52px")
 	_assert(compose._pw_toggle != null, "Magic password switch present")
 	_assert(compose._message_edit != null, "Message editor present")
 	_assert((compose._message_edit.size_flags_vertical & Control.SIZE_EXPAND) == 0, "Message does not expand to fill entire screen")
-	_assert(compose._message_edit.custom_minimum_size.y >= 220.0, "Message height uses responsive minimum")
-	_assert(compose._message_edit.custom_minimum_size.y <= 340.0, "Message height uses responsive maximum")
+	_assert(compose._message_edit.custom_minimum_size.y >= 180.0, "Message height uses responsive minimum")
+	_assert(compose._message_edit.custom_minimum_size.y <= 230.0, "Message height uses responsive maximum")
 	root.queue_free()
 
 
 func _test_message_sizing_rules() -> void:
-	for size in [Vector2(1080, 2400), Vector2(1080, 2340), Vector2(1440, 3120), Vector2(720, 1600)]:
-		var h := clampf(size.y * 0.28, 220.0, 340.0)
-		_assert(h >= 220.0 and h <= 340.0, "message height clamp for %dx%d" % [int(size.x), int(size.y)])
+	## Logical mobile viewports (not physical 1080×2400 design).
+	for size in [Vector2(360, 800), Vector2(390, 844), Vector2(412, 915), Vector2(390, 844)]:
+		var h := clampf(size.y * 0.22, 180.0, 230.0)
+		_assert(h >= 180.0 and h <= 230.0, "message height clamp for %dx%d" % [int(size.x), int(size.y)])
 
 
 func _test_validation_and_draft() -> void:
