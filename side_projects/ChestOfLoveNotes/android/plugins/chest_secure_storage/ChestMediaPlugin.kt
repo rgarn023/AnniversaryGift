@@ -15,7 +15,7 @@ import java.io.FileOutputStream
 
 /**
  * Android Photo Picker / image-only gallery selection for scroll attachments.
- * Prefer system Photo Picker (API 33+); fallback to ACTION_GET_CONTENT image/*.
+ * Prefer system Photo Picker (API 33+); fallback to ACTION_GET_CONTENT for images.
  */
 class ChestMediaPlugin(godot: Godot) : GodotPlugin(godot) {
 
@@ -34,14 +34,12 @@ class ChestMediaPlugin(godot: Godot) : GodotPlugin(godot) {
 		)
 	}
 
-	private fun activity(): Activity? = godot.activity
-
 	@UsedByGodot
 	fun media_plugin_available(): Boolean = true
 
 	@UsedByGodot
 	fun pick_images(maxCount: Int): Boolean {
-		val act = activity() ?: return false
+		val act = getActivity() ?: return false
 		val limit = maxCount.coerceIn(1, 5)
 		return try {
 			val intent = if (Build.VERSION.SDK_INT >= 33) {
@@ -99,7 +97,7 @@ class ChestMediaPlugin(godot: Godot) : GodotPlugin(godot) {
 	}
 
 	private fun copyUriToCache(uri: Uri): String? {
-		val act = activity() ?: return null
+		val act = getActivity() ?: return null
 		return try {
 			val resolver = act.contentResolver
 			val mime = resolver.getType(uri) ?: "image/jpeg"
