@@ -1010,12 +1010,19 @@ func _ui_state_for_online_scroll(item: Dictionary) -> String:
 		return "friend_request"
 	if bool(item.get("is_read", false)) or bool(item.get("is_opened", false)):
 		return "opened"
-	## Time gate first. Location/password are checked at open time (AND with schedule).
+	## Time gate first.
 	if not bool(item.get("is_unlockable", true)):
+		return "locked"
+	## Activity / Focus incomplete → stay on lock checklist (AND with other locks).
+	var sid := str(item.get("id", ""))
+	if bool(item.get("activity_lock_enabled", false)) and not ActivityLockHelper.is_complete(sid, float(item.get("activity_target_km", 1.0))):
+		return "locked"
+	if bool(item.get("focus_lock_enabled", false)) and not FocusLockHelper.is_complete(sid):
+		return "locked"
+	if bool(item.get("has_location_lock", false)):
 		return "locked"
 	if bool(item.get("has_password", false)) or bool(item.get("has_magic_password", false)):
 		return "password_unlocked_unread"
-	## Location-locked but time-ready: allow open attempt (foreground GPS only then).
 	return "unlocked_unread"
 
 
@@ -1028,6 +1035,10 @@ func _normalize_online_scroll_item(raw: Dictionary) -> Dictionary:
 	var item := raw.duplicate(true)
 	item["state"] = _ui_state_for_online_scroll(raw)
 	item["has_magic_password"] = bool(raw.get("has_password", false)) or bool(raw.get("has_magic_password", false))
+	item["activity_lock_enabled"] = bool(raw.get("activity_lock_enabled", false))
+	item["activity_target_km"] = float(raw.get("activity_target_km", 0.0))
+	item["focus_lock_enabled"] = bool(raw.get("focus_lock_enabled", false))
+	item["focus_duration_hours"] = int(raw.get("focus_duration_hours", 0))
 	item["sender_display_name"] = str(sender.get("display_name", raw.get("sender_display_name", "Friend")))
 	item["unlock_at_unix"] = unlock_unix
 	item["kind"] = str(raw.get("kind", "love_note"))
@@ -1386,26 +1397,143 @@ func _open_chest_item(item: Dictionary) -> void:
 
 
 func _show_locked_details(item: Dictionary) -> void:
-	var unlock_note := "Unlock is authorized by server time."
-	if state.is_demo():
-		unlock_note = "Unlock is authorized by server time (demo clock here)."
+	## Refresh Focus/Activity status before showing checklist.
+	var sid := str(item.get("id", ""))
+	if bool(item.get("focus_lock_enabled", false)) and not sid.is_empty():
+		FocusLockHelper.evaluate(sid)
+	var fix := {}
+	if bool(item.get("has_location_lock", false)):
+		fix = LocationHelper.get_current_fix(false)
+	var eval := ScrollLockEvaluator.evaluate(item, int(Time.get_unix_time_from_system()), fix)
 	var lines: PackedStringArray = PackedStringArray([
 		"From: %s" % str(item.get("sender_display_name", "")),
 		"Title: %s" % str(item.get("title", "")),
-		"This message body is not available yet.",
-		unlock_note,
-		"Magic password: %s" % ("Yes" if bool(item.get("has_magic_password", false)) or bool(item.get("has_password", false)) else "No"),
+		"",
+		"This scroll has %d locks" % int(eval.get("active_count", 0)),
+		"",
 	])
-	if bool(item.get("has_location_lock", false)):
-		var place := str(item.get("location_name", "")).strip_edges()
-		var addr := str(item.get("location_address", "")).strip_edges()
-		var radius := int(item.get("location_radius_m", LocationHelper.DEFAULT_RADIUS_M))
-		if place.is_empty():
-			place = "a set place"
-		lines.append("Location Lock: near %s (within %s)" % [place, LocationHelper.format_radius(radius)])
-		if not addr.is_empty():
-			lines.append("Address: %s" % addr)
-	_show_modal_panel("Sealed Scroll", lines, "Close", func() -> void: _hide_overlay())
+	for c in eval.get("checks", []):
+		if typeof(c) != TYPE_DICTIONARY:
+			continue
+		var active := bool(c.get("active", false)) or str(c.get("id")) == "schedule"
+		if not active:
+			continue
+		var mark := "✓" if bool(c.get("ok", false)) else "○"
+		var label := str(c.get("label", ""))
+		var detail := str(c.get("detail", "")).strip_edges()
+		if not detail.is_empty() and not bool(c.get("ok", false)):
+			lines.append("%s %s — %s" % [mark, label, detail])
+		else:
+			lines.append("%s %s" % [mark, label])
+	_show_lock_actions_panel(item, lines, eval)
+
+
+func _show_lock_actions_panel(item: Dictionary, lines: PackedStringArray, eval: Dictionary) -> void:
+	_overlay.visible = true
+	for c in _overlay.get_children():
+		c.queue_free()
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.75)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_overlay.add_child(dim)
+	var margin := MarginContainer.new()
+	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	MobileUi.apply_safe_margins(margin, 16)
+	_overlay.add_child(margin)
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	MobileUi.configure_scroll(scroll)
+	margin.add_child(scroll)
+	var box := VBoxContainer.new()
+	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	box.add_theme_constant_override("separation", 12)
+	scroll.add_child(box)
+	var title := Label.new()
+	title.text = "Sealed Scroll"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 24)
+	title.add_theme_color_override("font_color", Color(0.98, 0.86, 0.45))
+	box.add_child(title)
+	var body := Label.new()
+	body.text = "\n".join(lines)
+	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	body.add_theme_font_size_override("font_size", 17)
+	body.add_theme_color_override("font_color", Color(0.94, 0.9, 0.96))
+	box.add_child(body)
+	var sid := str(item.get("id", ""))
+	if bool(item.get("activity_lock_enabled", false)):
+		var prog := ActivityLockHelper.get_progress(sid)
+		var target := float(item.get("activity_target_km", ActivityLockHelper.DEFAULT_KM))
+		if not bool(prog.get("started", false)) and not bool(prog.get("completed", false)):
+			box.add_child(_make_button("Start Challenge", func() -> void:
+				var fix2 := LocationHelper.get_current_fix(true)
+				if not bool(fix2.get("ok", false)):
+					_show_toast(str(fix2.get("error", "Location is needed to start Activity Lock.")))
+					return
+				ActivityLockHelper.start_challenge(sid, target, float(fix2.lat), float(fix2.lng))
+				NotificationHelper.request_permission_contextual()
+				NotificationHelper.notify_activity_progress(0.0, target)
+				_hide_overlay()
+				_show_locked_details(item)
+			))
+		elif not bool(prog.get("completed", false)):
+			box.add_child(_make_button("Update Activity Progress", func() -> void:
+				var fix3 := LocationHelper.get_current_fix(true)
+				if bool(fix3.get("ok", false)):
+					var res := ActivityLockHelper.apply_sample(sid, float(fix3.lat), float(fix3.lng), float(fix3.get("accuracy_m", 25.0)))
+					var st: Dictionary = res.get("state", {})
+					NotificationHelper.notify_activity_progress(float(st.get("distance_km", 0.0)), target)
+					if bool(st.get("completed", false)):
+						NotificationHelper.notify_activity_complete()
+				_hide_overlay()
+				_show_locked_details(item)
+			))
+			box.add_child(_make_button("Reset Activity Challenge", func() -> void:
+				ActivityLockHelper.reset_challenge(sid)
+				_hide_overlay()
+				_show_locked_details(item)
+			))
+	if bool(item.get("focus_lock_enabled", false)):
+		var fp := FocusLockHelper.get_progress(sid)
+		if not FocusLockHelper.usage_access_granted() and OS.get_name() == "Android":
+			var explain := Label.new()
+			explain.text = "Focus Lock needs Usage Access so the app can verify that the focus period was uninterrupted. Chest of Love Notes does not use this to build an app-usage history."
+			explain.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			explain.add_theme_font_size_override("font_size", 15)
+			explain.add_theme_color_override("font_color", Color(0.85, 0.8, 0.9))
+			box.add_child(explain)
+			box.add_child(_make_button("Allow Usage Access", func() -> void:
+				FocusLockHelper.open_usage_access_settings()
+			))
+		elif not bool(fp.get("completed", false)):
+			var btn_label := "Begin Focus Time"
+			if bool(fp.get("interrupted", false)) or (bool(fp.get("started", false)) == false and bool(fp.get("interrupted", false))):
+				btn_label = "Start Focus Again"
+			elif bool(fp.get("started", false)):
+				btn_label = "Check Focus Progress"
+			box.add_child(_make_button(btn_label, func() -> void:
+				if not bool(fp.get("started", false)) or bool(fp.get("interrupted", false)):
+					FocusLockHelper.begin_focus(sid, int(item.get("focus_duration_hours", FocusLockHelper.DEFAULT_HOURS)))
+				var fr := FocusLockHelper.evaluate(sid)
+				if str(fr.get("status", "")) == "complete":
+					var all_ready := bool(ScrollLockEvaluator.evaluate(item).get("ok", false))
+					NotificationHelper.notify_focus_complete(all_ready)
+				elif str(fr.get("message", "")) != "":
+					_show_toast(str(fr.get("message")))
+				_hide_overlay()
+				_show_locked_details(item)
+			))
+	if bool(eval.get("ok", false)):
+		box.add_child(_make_button("Open Scroll", func() -> void:
+			_hide_overlay()
+			item["password_ok"] = not (bool(item.get("has_magic_password", false)) or bool(item.get("has_password", false)))
+			if bool(item.get("has_magic_password", false)) or bool(item.get("has_password", false)):
+				_show_password_dialog(item)
+			else:
+				await _open_authorized_scroll(sid, "", bool(item.get("has_location_lock", false)))
+		))
+	box.add_child(_make_button("Close", func() -> void: _hide_overlay()))
 
 
 func _show_friend_request(item: Dictionary) -> void:
@@ -1710,26 +1838,23 @@ func _on_compose_preview(draft: Dictionary) -> void:
 	if not immediate:
 		var unlock_unix := int(draft.get("unlock_unix", 0))
 		when = "Opens %s" % Time.get_datetime_string_from_unix_time(unlock_unix, false)
-	var meta_bits: PackedStringArray = PackedStringArray(["To %s" % recipient, when])
+	var meta_bits: PackedStringArray = PackedStringArray(["To %s" % recipient])
+	if immediate:
+		meta_bits.append("Available immediately")
+	else:
+		meta_bits.append(when.replace("Opens ", "Available "))
 	if bool(draft.get("has_location_lock", false)):
-		var place := str(draft.get("location_name", "")).strip_edges()
-		var addr := str(draft.get("location_address", "")).strip_edges()
 		var radius := int(draft.get("location_radius_m", LocationHelper.DEFAULT_RADIUS_M))
-		var place_line := place if addr.is_empty() else "%s · %s" % [place, addr]
-		meta_bits.append("Location Lock · within %s of %s" % [LocationHelper.format_radius(radius), place_line])
+		meta_bits.append("Location Lock · %s" % LocationHelper.format_radius(radius))
+	if bool(draft.get("activity_lock_enabled", false)):
+		meta_bits.append("Activity Lock · %s" % ActivityLockHelper.format_km(float(draft.get("activity_target_km", 5.0))))
+	if bool(draft.get("focus_lock_enabled", false)):
+		meta_bits.append("Focus Lock · %s" % FocusLockHelper.format_hours(int(draft.get("focus_duration_hours", 3))))
 	if bool(draft.get("has_password", false)):
-		meta_bits.append("Magic password required")
-	var atts = draft.get("attachments", [])
-	if typeof(atts) == TYPE_ARRAY and not atts.is_empty():
-		meta_bits.append("%d photo%s" % [atts.size(), "" if atts.size() == 1 else "s"])
+		meta_bits.append("Magic Password required")
 	var meta := "\n".join(meta_bits)
 	var body := str(draft.get("message", ""))
-	var preview_atts: Array = []
-	if typeof(atts) == TYPE_ARRAY:
-		for a in atts:
-			if typeof(a) == TYPE_DICTIONARY:
-				preview_atts.append((a as Dictionary).duplicate(true))
-	await _scroll_viewer.open_message(title, meta, body, true, false, preview_atts, "Scroll Preview")
+	await _scroll_viewer.open_message(title, meta, body, true, false, [], "Scroll Preview")
 
 
 func _on_compose_send_requested(draft: Dictionary) -> void:
@@ -1780,57 +1905,13 @@ func _on_compose_send_requested(draft: Dictionary) -> void:
 			payload["location_lat"] = location_lat
 			payload["location_lng"] = location_lng
 			payload["location_radius_m"] = location_radius_m
-		var draft_atts = draft.get("attachments", [])
-		var pending_paths: Array = []
-		if typeof(draft_atts) == TYPE_ARRAY and not draft_atts.is_empty():
-			if _compose_screen:
-				_compose_screen.set_sending(true)
-			var prep_items: Array = []
-			for a in draft_atts:
-				if typeof(a) != TYPE_DICTIONARY:
-					continue
-				prep_items.append({
-					"mime_type": str(a.get("mime", "image/jpeg")),
-					"byte_size": int(a.get("byte_size", 0)),
-				})
-			var prep: Dictionary = await state.scrolls.prepare_attachment_uploads(prep_items)
-			if not bool(prep.get("ok", false)):
-				_compose_screen.restore_after_failed_send()
-				_show_toast(str(prep.get("error", "Could not prepare photo uploads.")))
-				return
-			var prep_data: Dictionary = prep.get("data", {})
-			var uploads = prep_data.get("uploads", [])
-			if typeof(uploads) != TYPE_ARRAY or uploads.size() != prep_items.size():
-				_compose_screen.restore_after_failed_send()
-				_show_toast("Could not prepare photo uploads.")
-				return
-			var registered: Array = []
-			for i in range(uploads.size()):
-				var up: Dictionary = uploads[i]
-				var src: Dictionary = draft_atts[i]
-				var local_path := str(src.get("path", ""))
-				if _compose_screen and _compose_screen._attach_status:
-					_compose_screen._attach_status.text = "Uploading %d of %d photos…" % [i + 1, uploads.size()]
-				var up_res: Dictionary = await state.scrolls.upload_to_signed_url(
-					str(up.get("signed_url", "")),
-					local_path,
-					str(src.get("mime", "image/jpeg")),
-					str(up.get("token", ""))
-				)
-				if not bool(up_res.get("ok", false)):
-					_compose_screen.restore_after_failed_send()
-					_show_toast(str(up_res.get("error", "Photo upload failed.")))
-					return
-				registered.append({
-					"path": str(up.get("path", "")),
-					"mime_type": str(src.get("mime", "image/jpeg")),
-					"width": int(src.get("width", 0)),
-					"height": int(src.get("height", 0)),
-					"byte_size": int(src.get("byte_size", 0)),
-					"sort_order": i,
-				})
-				pending_paths.append(str(up.get("path", "")))
-			payload["attachments"] = registered
+		if bool(draft.get("activity_lock_enabled", false)):
+			payload["activity_lock_enabled"] = true
+			payload["activity_target_km"] = float(draft.get("activity_target_km", ActivityLockHelper.DEFAULT_KM))
+		if bool(draft.get("focus_lock_enabled", false)):
+			payload["focus_lock_enabled"] = true
+			payload["focus_duration_hours"] = int(draft.get("focus_duration_hours", FocusLockHelper.DEFAULT_HOURS))
+		## Attachments intentionally omitted from active send path.
 		result = await state.scrolls.send_scroll(payload)
 		if bool(result.get("ok", false)):
 			result = {"ok": true}

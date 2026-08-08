@@ -21,6 +21,12 @@ interface Body {
   location_lat?: number;
   location_lng?: number;
   location_radius_m?: number;
+  /** Optional Activity Lock — travel cumulative km after Start Challenge. */
+  activity_lock_enabled?: boolean;
+  activity_target_km?: number;
+  /** Optional Focus Lock — uninterrupted focus hours. */
+  focus_lock_enabled?: boolean;
+  focus_duration_hours?: number;
   /** Pending photo uploads from prepare-attachment-uploads (max 5). */
   attachments?: Array<{
     path: string;
@@ -131,6 +137,34 @@ Deno.serve(async (req) => {
       locationAddress = "";
     }
 
+    let activityLockEnabled = Boolean(body.activity_lock_enabled);
+    let activityTargetKm = 0;
+    if (activityLockEnabled) {
+      const km = Number(body.activity_target_km ?? 0);
+      if (!Number.isFinite(km) || km < 1 || km > 100) {
+        throw new AppError(
+          "invalid_activity",
+          "Activity distance must be between 1 and 100 km",
+          400,
+        );
+      }
+      activityTargetKm = Math.round(km * 100) / 100;
+    }
+
+    let focusLockEnabled = Boolean(body.focus_lock_enabled);
+    let focusDurationHours = 0;
+    if (focusLockEnabled) {
+      const hours = Number(body.focus_duration_hours ?? 0);
+      if (!Number.isFinite(hours) || hours < 1 || hours > 24) {
+        throw new AppError(
+          "invalid_focus",
+          "Focus time must be between 1 and 24 hours",
+          400,
+        );
+      }
+      focusDurationHours = Math.round(hours);
+    }
+
     const { data: friends } = await service.rpc("are_friends", {
       a: me,
       b: body.recipient_id,
@@ -163,9 +197,13 @@ Deno.serve(async (req) => {
         location_lat: locationLat,
         location_lng: locationLng,
         location_radius_m: locationRadiusM,
+        activity_lock_enabled: activityLockEnabled,
+        activity_target_km: activityTargetKm,
+        focus_lock_enabled: focusLockEnabled,
+        focus_duration_hours: focusDurationHours,
       })
       .select(
-        "id, sender_id, recipient_id, title, unlock_at, has_password, has_location_lock, location_name, location_address, location_lat, location_lng, location_radius_m, created_at",
+        "id, sender_id, recipient_id, title, unlock_at, has_password, has_location_lock, location_name, location_address, location_lat, location_lng, location_radius_m, activity_lock_enabled, activity_target_km, focus_lock_enabled, focus_duration_hours, created_at",
       )
       .single();
 

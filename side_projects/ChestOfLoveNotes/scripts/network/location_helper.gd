@@ -27,7 +27,7 @@ static func haversine_m(lat1: float, lng1: float, lat2: float, lng2: float) -> f
 	var dp := deg_to_rad(lat2 - lat1)
 	var dl := deg_to_rad(lng2 - lng1)
 	var a := sin(dp * 0.5) * sin(dp * 0.5) + cos(p1) * cos(p2) * sin(dl * 0.5) * sin(dl * 0.5)
-	return r * 2.0 * atan2(sqrt(a), sqrt(maxi(0.0, 1.0 - a)))
+	return r * 2.0 * atan2(sqrt(a), sqrt(maxf(0.0, 1.0 - a)))
 
 
 static func within_radius(lat: float, lng: float, target_lat: float, target_lng: float, radius_m: int) -> bool:

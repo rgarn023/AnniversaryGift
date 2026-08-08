@@ -43,6 +43,10 @@ var _map_host: Control
 var _retry_btn: Button
 var _layout_ready: bool = false
 var _load_failed: bool = false
+var _pinch_touches: Dictionary = {}
+var _pinch_last_dist: float = 0.0
+var _pinch_active: bool = false
+var _pinch_accum: float = 0.0
 
 
 func setup(initial: Dictionary = {}, p_radius_m: int = 500, search_service: LocationSearchService = null) -> void:
@@ -413,32 +417,89 @@ func _shutdown() -> void:
 
 
 func _on_map_input(ev: InputEvent) -> void:
+	## Map owns gestures while the finger is inside the map host.
 	if ev is InputEventMouseButton:
 		var mb := ev as InputEventMouseButton
 		if mb.button_index == MOUSE_BUTTON_LEFT:
-			_drag_active = mb.pressed
+			_drag_active = mb.pressed and not _pinch_active
 			_drag_last = mb.position
-			if not mb.pressed:
-				## Tap without drag drops pin.
-				pass
 		elif mb.button_index == MOUSE_BUTTON_WHEEL_UP and mb.pressed:
-			_zoom = mini(_zoom + 1, MAX_ZOOM)
-			_refresh_tiles()
+			_set_zoom_level(_zoom + 1)
 		elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN and mb.pressed:
-			_zoom = maxi(_zoom - 1, MIN_ZOOM)
-			_refresh_tiles()
-	elif ev is InputEventMouseMotion and _drag_active:
+			_set_zoom_level(_zoom - 1)
+		_overlay.accept_event()
+	elif ev is InputEventMouseMotion and _drag_active and not _pinch_active:
 		var mm := ev as InputEventMouseMotion
 		var delta := mm.position - _drag_last
 		_drag_last = mm.position
 		_pan_by_pixels(delta)
+		_overlay.accept_event()
 	elif ev is InputEventScreenTouch:
 		var st := ev as InputEventScreenTouch
-		_drag_active = st.pressed
+		if st.pressed:
+			_pinch_touches[st.index] = st.position
+		else:
+			_pinch_touches.erase(st.index)
+			if _pinch_touches.size() < 2:
+				_pinch_active = false
+				_pinch_last_dist = 0.0
+				_pinch_accum = 0.0
+		_drag_active = st.pressed and _pinch_touches.size() < 2
 		_drag_last = st.position
+		_overlay.accept_event()
 	elif ev is InputEventScreenDrag:
 		var sd := ev as InputEventScreenDrag
-		_pan_by_pixels(sd.relative)
+		_pinch_touches[sd.index] = sd.position
+		if _pinch_touches.size() >= 2:
+			_handle_map_pinch()
+		elif not _pinch_active:
+			_pan_by_pixels(sd.relative)
+		_overlay.accept_event()
+	elif ev is InputEventMagnifyGesture:
+		var mag := ev as InputEventMagnifyGesture
+		if mag.factor > 1.02:
+			_pinch_accum += 1.0
+		elif mag.factor < 0.98:
+			_pinch_accum -= 1.0
+		if absf(_pinch_accum) >= 1.0:
+			_set_zoom_level(_zoom + int(signf(_pinch_accum)))
+			_pinch_accum = 0.0
+		_overlay.accept_event()
+
+
+func _handle_map_pinch() -> void:
+	var keys: Array = _pinch_touches.keys()
+	keys.sort()
+	if keys.size() < 2:
+		return
+	var a: Vector2 = _pinch_touches[keys[0]]
+	var b: Vector2 = _pinch_touches[keys[1]]
+	var dist := a.distance_to(b)
+	if dist < 16.0:
+		return
+	if not _pinch_active:
+		_pinch_active = true
+		_pinch_last_dist = dist
+		_drag_active = false
+		return
+	var ratio := dist / maxf(_pinch_last_dist, 1.0)
+	## Convert continuous pinch into discrete OSM zoom steps.
+	if ratio > 1.18:
+		_set_zoom_level(_zoom + 1)
+		_pinch_last_dist = dist
+	elif ratio < 0.85:
+		_set_zoom_level(_zoom - 1)
+		_pinch_last_dist = dist
+
+
+func _set_zoom_level(z: int) -> void:
+	var nz := clampi(z, MIN_ZOOM, MAX_ZOOM)
+	if nz == _zoom:
+		return
+	_zoom = nz
+	if _tiles_ready:
+		_set_loading(true)
+	_refresh_tiles()
 
 
 func _pan_by_pixels(delta: Vector2) -> void:

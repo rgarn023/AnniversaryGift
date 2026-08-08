@@ -33,6 +33,7 @@ build/*.idsig
 !build/ChestOfLoveNotes-location-lock-online-debug.apk
 !build/ChestOfLoveNotes-preview-radius-attachments-debug.apk
 !build/ChestOfLoveNotes-send-map-preview-picker-fixes-debug.apk
+!build/ChestOfLoveNotes-preview-activity-focus-notifications-debug.apk
 
 # Android Gradle template
 android/build/

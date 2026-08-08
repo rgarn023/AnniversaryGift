@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Wire ChestSecureStorage into the Godot Android Gradle export template.
+# Wire ChestSecureStorage (+ Location/Media/Focus/Notify) into the Godot Android Gradle export template.
 # Safe to re-run. Does not modify Anniversary Gift.
 set -euo pipefail
 
@@ -19,10 +19,11 @@ mkdir -p "$JAVA_DST" "$RES_XML"
 cp -f "$PLUGIN_DIR/ChestSecureStoragePlugin.kt" "$JAVA_DST/ChestSecureStoragePlugin.kt"
 cp -f "$PLUGIN_DIR/ChestLocationPlugin.kt" "$JAVA_DST/ChestLocationPlugin.kt"
 cp -f "$PLUGIN_DIR/ChestMediaPlugin.kt" "$JAVA_DST/ChestMediaPlugin.kt"
+cp -f "$PLUGIN_DIR/ChestFocusPlugin.kt" "$JAVA_DST/ChestFocusPlugin.kt"
+cp -f "$PLUGIN_DIR/ChestNotifyPlugin.kt" "$JAVA_DST/ChestNotifyPlugin.kt"
 cp -f "$PLUGIN_DIR/backup_rules.xml" "$RES_XML/coln_backup_rules.xml"
 cp -f "$PLUGIN_DIR/data_extraction_rules.xml" "$RES_XML/coln_data_extraction_rules.xml"
 
-# Remove legacy SecureSession plugin class if present.
 rm -f "$BUILD_DIR/src/main/java/com/charoitegames/chestoflovenotes/SecureSessionPlugin.kt"
 
 if [[ ! -f "$MANIFEST" ]]; then
@@ -35,7 +36,6 @@ import pathlib, re, sys
 path = pathlib.Path(sys.argv[1])
 text = path.read_text()
 
-# Ensure xmlns:tools present on manifest root.
 if 'xmlns:tools=' not in text:
     text = text.replace(
         '<manifest xmlns:android="http://schemas.android.com/apk/res/android"',
@@ -43,7 +43,6 @@ if 'xmlns:tools=' not in text:
         1,
     )
 
-# Application attributes for backup exclusion.
 app_open = re.search(r'<application\b[^>]*>', text, re.S)
 if not app_open:
     raise SystemExit('application tag not found')
@@ -61,7 +60,6 @@ for attr, full in replacements.items():
 
 text = text[:app_open.start()] + app_tag + text[app_open.end():]
 
-# Remove legacy SecureSession meta-data.
 text = re.sub(
     r'\s*<!--\s*Chest of Love Notes: Android Keystore-backed secure session plugin\s*-->\s*'
     r'<meta-data\s+android:name="org\.godotengine\.plugin\.v2\.SecureSession"[^/]*/>\s*',
@@ -76,63 +74,42 @@ text = re.sub(
     text,
 )
 
-meta = '''
-        <!-- Chest of Love Notes: Android Keystore-backed ChestSecureStorage plugin -->
+plugins = [
+    ('ChestSecureStorage', 'ChestSecureStoragePlugin', 'Android Keystore-backed ChestSecureStorage plugin'),
+    ('ChestLocation', 'ChestLocationPlugin', 'one-shot Location Lock helper'),
+    ('ChestMedia', 'ChestMediaPlugin', 'Android Photo Picker helper'),
+    ('ChestFocus', 'ChestFocusPlugin', 'Focus Lock Usage Access helper'),
+    ('ChestNotify', 'ChestNotifyPlugin', 'local notification helper'),
+]
+
+# Ensure each plugin meta-data exists once.
+for name, cls, comment in plugins:
+    android_name = f'org.godotengine.plugin.v2.{name}'
+    block = f'''
+        <!-- Chest of Love Notes: {comment} -->
         <meta-data
-            android:name="org.godotengine.plugin.v2.ChestSecureStorage"
-            android:value="com.charoitegames.chestoflovenotes.securestorage.ChestSecureStoragePlugin" />
-        <!-- Chest of Love Notes: one-shot Location Lock helper -->
-        <meta-data
-            android:name="org.godotengine.plugin.v2.ChestLocation"
-            android:value="com.charoitegames.chestoflovenotes.securestorage.ChestLocationPlugin" />
-        <!-- Chest of Love Notes: Android Photo Picker helper -->
-        <meta-data
-            android:name="org.godotengine.plugin.v2.ChestMedia"
-            android:value="com.charoitegames.chestoflovenotes.securestorage.ChestMediaPlugin" />
+            android:name="{android_name}"
+            android:value="com.charoitegames.chestoflovenotes.securestorage.{cls}" />
 '''
-
-if 'org.godotengine.plugin.v2.ChestSecureStorage' not in text:
-    # Insert before first <activity
-    text = re.sub(r'(\n\s*<activity\b)', meta + r'\1', text, count=1)
-else:
-    # Refresh value path if needed.
-    text = re.sub(
-        r'android:name="org\.godotengine\.plugin\.v2\.ChestSecureStorage"\s*\n\s*android:value="[^"]*"',
-        'android:name="org.godotengine.plugin.v2.ChestSecureStorage"\n            android:value="com.charoitegames.chestoflovenotes.securestorage.ChestSecureStoragePlugin"',
-        text,
-    )
-    if 'org.godotengine.plugin.v2.ChestLocation' not in text:
+    if android_name not in text:
+        text = re.sub(r'(\n\s*<activity\b)', block + r'\1', text, count=1)
+    else:
         text = re.sub(
-            r'(android:name="org\.godotengine\.plugin\.v2\.ChestSecureStorage"[^/]*/>)',
-            r'''\1
-        <meta-data
-            android:name="org.godotengine.plugin.v2.ChestLocation"
-            android:value="com.charoitegames.chestoflovenotes.securestorage.ChestLocationPlugin" />''',
+            rf'android:name="{re.escape(android_name)}"\s*\n\s*android:value="[^"]*"',
+            f'android:name="{android_name}"\n            android:value="com.charoitegames.chestoflovenotes.securestorage.{cls}"',
             text,
-            count=1,
-            flags=re.S,
-        )
-    if 'org.godotengine.plugin.v2.ChestMedia' not in text:
-        text = re.sub(
-            r'(android:name="org\.godotengine\.plugin\.v2\.ChestLocation"[^/]*/>)',
-            r'''\1
-        <meta-data
-            android:name="org.godotengine.plugin.v2.ChestMedia"
-            android:value="com.charoitegames.chestoflovenotes.securestorage.ChestMediaPlugin" />''',
-            text,
-            count=1,
-            flags=re.S,
         )
 
-# Location permissions for Location Lock (requested at use-time by the OS dialog).
-for perm in (
-    'android.permission.ACCESS_COARSE_LOCATION',
-    'android.permission.ACCESS_FINE_LOCATION',
+for perm, extra in (
+    ('android.permission.ACCESS_COARSE_LOCATION', ''),
+    ('android.permission.ACCESS_FINE_LOCATION', ''),
+    ('android.permission.POST_NOTIFICATIONS', ''),
+    ('android.permission.PACKAGE_USAGE_STATS', ' tools:ignore="ProtectedPermissions"'),
 ):
     if perm not in text:
         text = text.replace(
             '</manifest>',
-            f'    <uses-permission android:name="{perm}" />\n</manifest>',
+            f'    <uses-permission android:name="{perm}"{extra} />\n</manifest>',
             1,
         )
 
@@ -140,12 +117,8 @@ path.write_text(text)
 print('Updated', path)
 PY
 
-echo "Installed ChestSecureStorage + ChestLocation + ChestMedia into android/build"
-echo "  kotlin: $JAVA_DST/ChestSecureStoragePlugin.kt"
-echo "  location: $JAVA_DST/ChestLocationPlugin.kt"
-echo "  media: $JAVA_DST/ChestMediaPlugin.kt"
-echo "  backup rules: $RES_XML/coln_backup_rules.xml"
-echo "  data extraction: $RES_XML/coln_data_extraction_rules.xml"
+echo "Installed Chest plugins into android/build"
+echo "  kotlin dir: $JAVA_DST"
 
 # Ensure Godot-copied *.import sidecars under res/ cannot break Android resource merge.
 BUILD_GRADLE="$BUILD_DIR/build.gradle"

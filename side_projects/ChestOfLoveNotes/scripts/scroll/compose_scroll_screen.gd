@@ -103,6 +103,28 @@ var _delivery_expanded: bool = true
 var _location_expanded: bool = false
 var _password_expanded: bool = false
 var _attachments_expanded: bool = false
+var _activity_expanded: bool = false
+var _focus_expanded: bool = false
+
+var _activity_card: PanelContainer
+var _activity_body: VBoxContainer
+var _activity_header_summary: Label
+var _activity_toggle: CheckButton
+var _activity_fields: VBoxContainer
+var _activity_slider: HSlider
+var _activity_edit: LineEdit
+var _activity_km: float = ActivityLockHelper.DEFAULT_KM
+var _activity_edit_syncing: bool = false
+
+var _focus_card: PanelContainer
+var _focus_body: VBoxContainer
+var _focus_header_summary: Label
+var _focus_toggle: CheckButton
+var _focus_fields: VBoxContainer
+var _focus_slider: HSlider
+var _focus_edit: LineEdit
+var _focus_hours: int = FocusLockHelper.DEFAULT_HOURS
+var _focus_edit_syncing: bool = false
 
 var _attachments: Array = []
 var _attach_count_label: Label
@@ -169,7 +191,11 @@ func get_draft() -> Dictionary:
 		"location_lng": _location_lng,
 		"location_radius_m": _location_radius_m,
 		"location_fix_ok": _location_fix_ok,
-		"attachments": _attachments.duplicate(true),
+		"activity_lock_enabled": _activity_toggle.button_pressed if _activity_toggle else false,
+		"activity_target_km": _activity_km,
+		"focus_lock_enabled": _focus_toggle.button_pressed if _focus_toggle else false,
+		"focus_duration_hours": _focus_hours,
+		"attachments": [],
 	}
 
 
@@ -229,12 +255,9 @@ func apply_draft(draft: Dictionary) -> void:
 	_location_lng = float(draft.get("location_lng", 0.0))
 	_location_radius_m = AttachmentHelper.clamp_radius(int(draft.get("location_radius_m", LocationHelper.DEFAULT_RADIUS_M)))
 	_location_fix_ok = bool(draft.get("location_fix_ok", false))
-	_attachments = []
-	var raw_atts = draft.get("attachments", [])
-	if typeof(raw_atts) == TYPE_ARRAY:
-		for a in raw_atts:
-			if typeof(a) == TYPE_DICTIONARY:
-				_attachments.append((a as Dictionary).duplicate(true))
+	_attachments = []  ## Attachments disabled in active UI.
+	_activity_km = ActivityLockHelper.clamp_km(float(draft.get("activity_target_km", ActivityLockHelper.DEFAULT_KM)))
+	_focus_hours = FocusLockHelper.clamp_hours(int(draft.get("focus_duration_hours", FocusLockHelper.DEFAULT_HOURS)))
 	if _location_toggle:
 		_location_toggle.set_pressed_no_signal(_has_location_lock)
 	if _location_search and not _location_fix_ok:
@@ -243,6 +266,16 @@ func apply_draft(draft: Dictionary) -> void:
 	_sync_radius_controls()
 	_refresh_location_summary()
 	_refresh_attachments_ui()
+	if _activity_toggle:
+		_activity_toggle.set_pressed_no_signal(bool(draft.get("activity_lock_enabled", false)))
+		if _activity_fields:
+			_activity_fields.visible = _activity_toggle.button_pressed
+	_sync_activity_controls()
+	if _focus_toggle:
+		_focus_toggle.set_pressed_no_signal(bool(draft.get("focus_lock_enabled", false)))
+		if _focus_fields:
+			_focus_fields.visible = _focus_toggle.button_pressed
+	_sync_focus_controls()
 	_refresh_optional_summaries()
 	_refresh_recipient_row()
 	_refresh_schedule_labels()
@@ -356,8 +389,10 @@ func _build_ui() -> void:
 	_form.add_child(_build_message_card())
 	_form.add_child(_build_delivery_card())
 	_form.add_child(_build_location_card())
+	_form.add_child(_build_activity_card())
+	_form.add_child(_build_focus_card())
 	_form.add_child(_build_password_card())
-	_form.add_child(_build_attachments_card())
+	## Attachments removed from active product UI (backend preserved).
 	_form.add_child(_build_summary_card())
 	_refresh_optional_summaries()
 
@@ -1167,7 +1202,247 @@ func _build_password_card() -> PanelContainer:
 
 
 
+func _build_activity_card() -> PanelContainer:
+	_activity_card = _make_card()
+	var shell := _card_body(_activity_card)
+	shell.add_child(_make_optional_header("Activity Lock", "activity"))
+	_activity_header_summary = Label.new()
+	_activity_header_summary.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_activity_header_summary.add_theme_font_size_override("font_size", 15)
+	_activity_header_summary.add_theme_color_override("font_color", COL_SUPPORT)
+	shell.add_child(_activity_header_summary)
+	_activity_body = VBoxContainer.new()
+	_activity_body.visible = false
+	_activity_body.add_theme_constant_override("separation", 10)
+	shell.add_child(_activity_body)
+	var help := Label.new()
+	help.text = "Travel a set distance to unlock this scroll."
+	help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	help.add_theme_font_size_override("font_size", 15)
+	help.add_theme_color_override("font_color", COL_SUPPORT)
+	_activity_body.add_child(help)
+	var toggle_row := HBoxContainer.new()
+	toggle_row.custom_minimum_size = Vector2(0, 56)
+	_activity_body.add_child(toggle_row)
+	var tl := Label.new()
+	tl.text = "Require Activity Lock"
+	tl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	tl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	tl.add_theme_font_size_override("font_size", 19)
+	tl.add_theme_color_override("font_color", COL_TEXT)
+	toggle_row.add_child(tl)
+	_activity_toggle = CheckButton.new()
+	_activity_toggle.custom_minimum_size = Vector2(72, 48)
+	_activity_toggle.focus_mode = Control.FOCUS_NONE
+	_activity_toggle.toggled.connect(func(on: bool) -> void:
+		_activity_fields.visible = on
+		_refresh_optional_summaries()
+		_update_validation()
+	)
+	toggle_row.add_child(_activity_toggle)
+	_activity_fields = VBoxContainer.new()
+	_activity_fields.visible = false
+	_activity_fields.add_theme_constant_override("separation", 10)
+	_activity_body.add_child(_activity_fields)
+	_activity_fields.add_child(_field_caption("Distance to travel"))
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	_activity_fields.add_child(row)
+	_activity_edit = LineEdit.new()
+	_activity_edit.custom_minimum_size = Vector2(96, 48)
+	_activity_edit.alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_activity_edit.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_NUMBER
+	_activity_edit.add_theme_font_size_override("font_size", 18)
+	_style_line_edit(_activity_edit)
+	_activity_edit.text_submitted.connect(func(_t: String) -> void: _commit_activity_edit())
+	_activity_edit.focus_exited.connect(_commit_activity_edit)
+	row.add_child(_activity_edit)
+	var unit := Label.new()
+	unit.text = "km"
+	unit.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	unit.add_theme_font_size_override("font_size", 16)
+	unit.add_theme_color_override("font_color", COL_TEXT)
+	row.add_child(unit)
+	_activity_slider = HSlider.new()
+	_activity_slider.min_value = ActivityLockHelper.MIN_KM
+	_activity_slider.max_value = ActivityLockHelper.MAX_KM
+	_activity_slider.step = 0.5
+	_activity_slider.value = _activity_km
+	_activity_slider.custom_minimum_size = Vector2(0, 36)
+	_activity_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_activity_slider.value_changed.connect(func(v: float) -> void:
+		if _activity_edit_syncing:
+			return
+		_set_activity_km(float(v))
+	)
+	_activity_fields.add_child(_activity_slider)
+	var presets := HBoxContainer.new()
+	presets.add_theme_constant_override("separation", 8)
+	_activity_fields.add_child(presets)
+	for km in ActivityLockHelper.PRESETS_KM:
+		var b := Button.new()
+		b.text = ActivityLockHelper.format_km(km)
+		b.focus_mode = Control.FOCUS_NONE
+		b.custom_minimum_size = Vector2(0, 44)
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_style_secondary_button(b)
+		var captured := float(km)
+		b.pressed.connect(func() -> void: _set_activity_km(captured))
+		presets.add_child(b)
+	_sync_activity_controls()
+	return _activity_card
+
+
+func _set_activity_km(km: float) -> void:
+	_activity_km = ActivityLockHelper.clamp_km(km)
+	_sync_activity_controls()
+	_refresh_optional_summaries()
+	_update_validation()
+
+
+func _commit_activity_edit() -> void:
+	if _activity_edit == null:
+		return
+	var parsed := ActivityLockHelper.parse_km_text(_activity_edit.text)
+	if not bool(parsed.get("ok", false)):
+		_sync_activity_controls()
+		_update_validation()
+		return
+	_set_activity_km(float(parsed.value))
+
+
+func _sync_activity_controls() -> void:
+	_activity_edit_syncing = true
+	if _activity_slider:
+		_activity_slider.set_value_no_signal(_activity_km)
+	if _activity_edit:
+		if is_equal_approx(_activity_km, floor(_activity_km)):
+			_activity_edit.text = str(int(_activity_km))
+		else:
+			_activity_edit.text = "%.1f" % _activity_km
+	_activity_edit_syncing = false
+
+
+func _build_focus_card() -> PanelContainer:
+	_focus_card = _make_card()
+	var shell := _card_body(_focus_card)
+	shell.add_child(_make_optional_header("Focus Lock", "focus"))
+	_focus_header_summary = Label.new()
+	_focus_header_summary.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_focus_header_summary.add_theme_font_size_override("font_size", 15)
+	_focus_header_summary.add_theme_color_override("font_color", COL_SUPPORT)
+	shell.add_child(_focus_header_summary)
+	_focus_body = VBoxContainer.new()
+	_focus_body.visible = false
+	_focus_body.add_theme_constant_override("separation", 10)
+	shell.add_child(_focus_body)
+	var help := Label.new()
+	help.text = "Stay off your phone for a set amount of time to unlock this scroll."
+	help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	help.add_theme_font_size_override("font_size", 15)
+	help.add_theme_color_override("font_color", COL_SUPPORT)
+	_focus_body.add_child(help)
+	var toggle_row := HBoxContainer.new()
+	toggle_row.custom_minimum_size = Vector2(0, 56)
+	_focus_body.add_child(toggle_row)
+	var tl := Label.new()
+	tl.text = "Require Focus Lock"
+	tl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	tl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	tl.add_theme_font_size_override("font_size", 19)
+	tl.add_theme_color_override("font_color", COL_TEXT)
+	toggle_row.add_child(tl)
+	_focus_toggle = CheckButton.new()
+	_focus_toggle.custom_minimum_size = Vector2(72, 48)
+	_focus_toggle.focus_mode = Control.FOCUS_NONE
+	_focus_toggle.toggled.connect(func(on: bool) -> void:
+		_focus_fields.visible = on
+		_refresh_optional_summaries()
+		_update_validation()
+	)
+	toggle_row.add_child(_focus_toggle)
+	_focus_fields = VBoxContainer.new()
+	_focus_fields.visible = false
+	_focus_fields.add_theme_constant_override("separation", 10)
+	_focus_body.add_child(_focus_fields)
+	_focus_fields.add_child(_field_caption("Focus time"))
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	_focus_fields.add_child(row)
+	_focus_edit = LineEdit.new()
+	_focus_edit.custom_minimum_size = Vector2(96, 48)
+	_focus_edit.alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_focus_edit.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_NUMBER
+	_focus_edit.add_theme_font_size_override("font_size", 18)
+	_style_line_edit(_focus_edit)
+	_focus_edit.text_submitted.connect(func(_t: String) -> void: _commit_focus_edit())
+	_focus_edit.focus_exited.connect(_commit_focus_edit)
+	row.add_child(_focus_edit)
+	var unit := Label.new()
+	unit.text = "hours"
+	unit.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	unit.add_theme_font_size_override("font_size", 16)
+	unit.add_theme_color_override("font_color", COL_TEXT)
+	row.add_child(unit)
+	_focus_slider = HSlider.new()
+	_focus_slider.min_value = FocusLockHelper.MIN_HOURS
+	_focus_slider.max_value = FocusLockHelper.MAX_HOURS
+	_focus_slider.step = 1
+	_focus_slider.value = _focus_hours
+	_focus_slider.custom_minimum_size = Vector2(0, 36)
+	_focus_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_focus_slider.value_changed.connect(func(v: float) -> void:
+		if _focus_edit_syncing:
+			return
+		_set_focus_hours(int(round(v)))
+	)
+	_focus_fields.add_child(_focus_slider)
+	var presets := HBoxContainer.new()
+	presets.add_theme_constant_override("separation", 8)
+	_focus_fields.add_child(presets)
+	for h in FocusLockHelper.PRESETS_HOURS:
+		var b := Button.new()
+		b.text = "%dh" % int(h)
+		b.focus_mode = Control.FOCUS_NONE
+		b.custom_minimum_size = Vector2(0, 44)
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_style_secondary_button(b)
+		var captured := int(h)
+		b.pressed.connect(func() -> void: _set_focus_hours(captured))
+		presets.add_child(b)
+	_sync_focus_controls()
+	return _focus_card
+
+
+func _set_focus_hours(hours: int) -> void:
+	_focus_hours = FocusLockHelper.clamp_hours(hours)
+	_sync_focus_controls()
+	_refresh_optional_summaries()
+	_update_validation()
+
+
+func _commit_focus_edit() -> void:
+	if _focus_edit == null:
+		return
+	var parsed := FocusLockHelper.parse_hours_text(_focus_edit.text)
+	if not bool(parsed.get("ok", false)):
+		_sync_focus_controls()
+		_update_validation()
+		return
+	_set_focus_hours(int(parsed.value))
+
+
+func _sync_focus_controls() -> void:
+	_focus_edit_syncing = true
+	if _focus_slider:
+		_focus_slider.set_value_no_signal(float(_focus_hours))
+	if _focus_edit:
+		_focus_edit.text = str(_focus_hours)
+	_focus_edit_syncing = false
+
+
 func _build_attachments_card() -> PanelContainer:
+	## Kept for compatibility but not added to the active Compose form.
 	_attachments_card = _make_card()
 	var shell := _card_body(_attachments_card)
 	shell.add_child(_make_optional_header("Attachments", "attachments"))
@@ -1256,6 +1531,16 @@ func _toggle_optional_section(key: String, header: Button) -> void:
 			expanded = _attachments_expanded
 			if _attachments_body:
 				_attachments_body.visible = expanded
+		"activity":
+			_activity_expanded = not _activity_expanded
+			expanded = _activity_expanded
+			if _activity_body:
+				_activity_body.visible = expanded
+		"focus":
+			_focus_expanded = not _focus_expanded
+			expanded = _focus_expanded
+			if _focus_body:
+				_focus_body.visible = expanded
 	var title := str(header.get_meta("section_title", key))
 	header.text = ("%s  %s" % ["▾" if expanded else "▸", title])
 	_refresh_optional_summaries()
@@ -1278,9 +1563,19 @@ func _refresh_optional_summaries() -> void:
 		_password_header_summary.text = "Enabled" if (_pw_toggle and _pw_toggle.button_pressed) else "Off"
 		_password_header_summary.visible = not _password_expanded
 	if _attachments_header_summary:
-		var n := _attachments.size()
-		_attachments_header_summary.text = ("Off" if n == 0 else "%d photo%s" % [n, "" if n == 1 else "s"])
-		_attachments_header_summary.visible = not _attachments_expanded
+		_attachments_header_summary.visible = false
+	if _activity_header_summary:
+		if _activity_toggle and _activity_toggle.button_pressed:
+			_activity_header_summary.text = ActivityLockHelper.format_km(_activity_km)
+		else:
+			_activity_header_summary.text = "Off"
+		_activity_header_summary.visible = not _activity_expanded
+	if _focus_header_summary:
+		if _focus_toggle and _focus_toggle.button_pressed:
+			_focus_header_summary.text = FocusLockHelper.format_hours(_focus_hours)
+		else:
+			_focus_header_summary.text = "Off"
+		_focus_header_summary.visible = not _focus_expanded
 
 
 func _refresh_attachments_ui() -> void:
@@ -1698,14 +1993,20 @@ func _refresh_summary() -> void:
 		lines.append("")
 		lines.append("Radius:")
 		lines.append(LocationHelper.format_radius(_location_radius_m))
+	var act_on := _activity_toggle != null and _activity_toggle.button_pressed
+	if act_on:
+		lines.append("")
+		lines.append("Activity:")
+		lines.append("Travel %s" % ActivityLockHelper.format_km(_activity_km))
+	var focus_on := _focus_toggle != null and _focus_toggle.button_pressed
+	if focus_on:
+		lines.append("")
+		lines.append("Focus:")
+		lines.append("%s uninterrupted" % FocusLockHelper.format_hours(_focus_hours))
 	var pw_on := _pw_toggle != null and _pw_toggle.button_pressed
 	lines.append("")
 	lines.append("Password:")
 	lines.append("Required" if pw_on else "Not required")
-	if not _attachments.is_empty():
-		lines.append("")
-		lines.append("Attachments:")
-		lines.append("%d of %d photos" % [_attachments.size(), AttachmentHelper.MAX_ATTACHMENTS])
 	## Shared validation model — Ready Check never disagrees with Send.
 	var v: Dictionary = _last_validation if not _last_validation.is_empty() else validate_compose_draft()
 	var blockers: PackedStringArray = v.get("blockers", PackedStringArray())
@@ -1816,7 +2117,15 @@ func validate_compose_draft() -> Dictionary:
 			blockers.append("Radius can be at most 10 km")
 		elif _location_radius_m < LocationHelper.SMALL_RADIUS_WARN_M:
 			warnings.append("Very small radii may be difficult to verify accurately with phone GPS.")
-	## Attachments are optional — never block when empty.
+	if _activity_toggle != null and _activity_toggle.button_pressed:
+		if _activity_km < ActivityLockHelper.MIN_KM:
+			blockers.append("Set Activity distance to at least 1 km.")
+		elif _activity_km > ActivityLockHelper.MAX_KM:
+			blockers.append("Activity distance can be at most 100 km.")
+	if _focus_toggle != null and _focus_toggle.button_pressed:
+		if _focus_hours < FocusLockHelper.MIN_HOURS or _focus_hours > FocusLockHelper.MAX_HOURS:
+			blockers.append("Set Focus time between 1 and 24 hours.")
+	## Attachments removed from active UI — never block.
 	var valid := blockers.is_empty()
 	var result := {
 		"valid": valid,
