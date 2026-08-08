@@ -17,5 +17,5 @@ const PRIVATE_ONBOARDING_BUILD := true
 const SHOW_ONBOARDING_BANNER := false
 ## Debug-only chest preview path (never enable in production content path).
 const DEV_CHEST_SCROLL_PREVIEW := false
-const APP_VERSION_NAME := "0.1.16-preview-radius-attachments"
-const APP_VERSION_CODE := 17
+const APP_VERSION_NAME := "0.1.18-send-map-preview-picker"
+const APP_VERSION_CODE := 18

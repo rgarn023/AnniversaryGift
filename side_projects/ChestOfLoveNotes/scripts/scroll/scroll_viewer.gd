@@ -1,8 +1,8 @@
 extends CanvasLayer
 class_name LoveNotesScrollViewer
-## Mobile full-screen scroll preview/open modal.
-## One shared visual root keeps parchment + rollers attached.
-## Font A−/A+ change message text size only — never Control.scale on the scroll unit.
+## Full-screen scroll preview/open modal.
+## Pinch zoom + pan transform ONE composite PreviewRoot/ScrollVisualRoot.
+## A− / A+ change message font size only — never Control.scale on text nodes.
 
 signal closed
 signal archive_flight_requested(screen_pos: Vector2)
@@ -14,11 +14,15 @@ const MIN_BODY_FONT_SIZE: int = 22
 const MAX_BODY_FONT_SIZE: int = 48
 const BASE_HEADING_FONT_SIZE: int = 34
 const BASE_META_FONT_SIZE: int = 18
-const MIN_MESSAGE_ZOOM: float = 0.85
-const MAX_MESSAGE_ZOOM: float = 1.55
+const MIN_FONT_ZOOM: float = 0.85
+const MAX_FONT_ZOOM: float = 1.55
+const MIN_VIEW_ZOOM: float = 1.0
+const MAX_VIEW_ZOOM: float = 2.75
 
 var message_zoom: float = 1.0
-var _zoom: GestureZoomController
+var _view_zoom: float = 1.0
+var _pan: Vector2 = Vector2.ZERO
+var _pinch: GestureZoomController
 var _root: Control
 var _dim: ColorRect
 var _safe: MarginContainer
@@ -27,6 +31,7 @@ var _top_bar: HBoxContainer
 var _title_label: Label
 var _btn_close: Button
 var _stage: Control
+var _preview_root: Control
 var _scroll_unit: Control
 var _shadow: TextureRect
 var _parchment: TextureRect
@@ -49,14 +54,18 @@ var _clear_on_close: bool = false
 var _reduced_motion: bool = false
 var _attachments: Array = []
 var _unit_size: Vector2 = Vector2(360, 560)
+var _base_center: Vector2 = Vector2.ZERO
+var _dragging_pan: bool = false
+var _drag_last: Vector2 = Vector2.ZERO
+var _body_text: String = ""
 
 
 func _ready() -> void:
 	layer = 40
-	_zoom = GestureZoomController.new()
-	_zoom.min_scale = MIN_MESSAGE_ZOOM
-	_zoom.max_scale = MAX_MESSAGE_ZOOM
-	_zoom.zoom_changed.connect(_on_zoom_changed)
+	_pinch = GestureZoomController.new()
+	_pinch.min_scale = MIN_VIEW_ZOOM
+	_pinch.max_scale = MAX_VIEW_ZOOM
+	_pinch.zoom_changed.connect(_on_view_zoom_changed)
 	_build_ui()
 	visible = false
 	set_process_input(true)
@@ -129,12 +138,19 @@ func _build_ui() -> void:
 	_stage.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_stage.clip_contents = true
 	_stage.mouse_filter = Control.MOUSE_FILTER_STOP
+	_stage.gui_input.connect(_on_stage_gui_input)
 	_shell.add_child(_stage)
 
-	## ONE visual root — rollers + parchment share this transform.
+	## PreviewRoot holds the composite transform (pinch zoom + pan).
+	_preview_root = Control.new()
+	_preview_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_preview_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_stage.add_child(_preview_root)
+
+	## ScrollVisualRoot — parchment, rollers, and all content children.
 	_scroll_unit = Control.new()
-	_scroll_unit.mouse_filter = Control.MOUSE_FILTER_STOP
-	_stage.add_child(_scroll_unit)
+	_scroll_unit.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_preview_root.add_child(_scroll_unit)
 
 	_shadow = _make_tex(ART + "scroll_shadow.png")
 	_shadow.modulate = Color(1, 1, 1, 0.35)
@@ -209,12 +225,18 @@ func _build_ui() -> void:
 	_shell.add_child(_bottom_bar)
 	_btn_minus = _make_tool_button("A−")
 	_btn_plus = _make_tool_button("A+")
-	_btn_reset = _make_tool_button("Reset")
+	_btn_reset = _make_tool_button("Reset View")
 	for b in [_btn_minus, _btn_plus, _btn_reset]:
 		_bottom_bar.add_child(b)
-	_btn_minus.pressed.connect(func() -> void: _zoom.adjust(0.9))
-	_btn_plus.pressed.connect(func() -> void: _zoom.adjust(1.1))
-	_btn_reset.pressed.connect(func() -> void: _zoom.reset(1.0))
+	_btn_minus.pressed.connect(func() -> void:
+		message_zoom = clampf(message_zoom * 0.9, MIN_FONT_ZOOM, MAX_FONT_ZOOM)
+		apply_message_zoom()
+	)
+	_btn_plus.pressed.connect(func() -> void:
+		message_zoom = clampf(message_zoom * 1.1, MIN_FONT_ZOOM, MAX_FONT_ZOOM)
+		apply_message_zoom()
+	)
+	_btn_reset.pressed.connect(_reset_preview_state)
 	_apply_fonts()
 
 
@@ -273,10 +295,9 @@ func _fit_scroll_unit() -> void:
 	var stage_size := _stage.size
 	if stage_size.x < 8.0 or stage_size.y < 8.0:
 		stage_size = get_viewport().get_visible_rect().size - Vector2(24, 140)
-	## Fit entire scroll artwork inside stage with modest padding.
 	var max_w := stage_size.x - 16.0
 	var max_h := stage_size.y - 8.0
-	var aspect := 0.62 ## width / height of unrolled scroll unit
+	var aspect := 0.62
 	var w := max_w
 	var h := w / aspect
 	if h > max_h:
@@ -286,9 +307,15 @@ func _fit_scroll_unit() -> void:
 	h = clampf(h, 360.0, max_h)
 	_unit_size = Vector2(w, h)
 	_scroll_unit.size = _unit_size
-	_scroll_unit.position = Vector2((stage_size.x - w) * 0.5, maxf(0.0, (stage_size.y - h) * 0.5))
-	_scroll_unit.scale = Vector2.ONE
+	_base_center = stage_size * 0.5
+	_layout_scroll_visual()
+	_apply_view_transform()
+	_refresh_message_width()
 
+
+func _layout_scroll_visual() -> void:
+	var w := _unit_size.x
+	var h := _unit_size.y
 	var roller_h := clampf(w * 0.085, 36.0, 56.0)
 	_top_roller.position = Vector2(0, 0)
 	_top_roller.size = Vector2(w, roller_h)
@@ -298,7 +325,6 @@ func _fit_scroll_unit() -> void:
 	_parchment.size = Vector2(w * 0.92, h - roller_h * 1.55)
 	_shadow.position = Vector2(8, 10)
 	_shadow.size = Vector2(w, h)
-
 	var pad_x := int(clampf(w * 0.1, 28.0, 48.0))
 	var pad_y := int(clampf(roller_h * 0.85, 28.0, 44.0))
 	_content_margin.position = _parchment.position + Vector2(8, 8)
@@ -307,7 +333,23 @@ func _fit_scroll_unit() -> void:
 	_content_margin.add_theme_constant_override("margin_right", pad_x - 8)
 	_content_margin.add_theme_constant_override("margin_top", pad_y - 8)
 	_content_margin.add_theme_constant_override("margin_bottom", pad_y - 8)
-	_refresh_message_width()
+
+
+func _apply_view_transform() -> void:
+	_view_zoom = clampf(_view_zoom, MIN_VIEW_ZOOM, MAX_VIEW_ZOOM)
+	_scroll_unit.scale = Vector2(_view_zoom, _view_zoom)
+	var scaled := _unit_size * _view_zoom
+	var pos := _base_center - scaled * 0.5 + _pan
+	## Keep some portion of the scroll recoverable on screen.
+	var stage_size := _stage.size if _stage.size.x > 8.0 else Vector2(360, 600)
+	var min_x := -scaled.x + 80.0
+	var max_x := stage_size.x - 80.0
+	var min_y := -scaled.y + 80.0
+	var max_y := stage_size.y - 80.0
+	pos.x = clampf(pos.x, min_x, max_x)
+	pos.y = clampf(pos.y, min_y, max_y)
+	_pan = pos - (_base_center - scaled * 0.5)
+	_scroll_unit.position = pos
 
 
 func _refresh_message_width() -> void:
@@ -338,11 +380,10 @@ func open_message(
 	_title_label.text = chrome_title
 	_heading.text = title if not title.is_empty() else "A Love Note"
 	_meta_label.text = meta
+	_body_text = body
 	_set_message_text(body)
 	_populate_attachments()
-	message_zoom = 1.0
-	_zoom.reset(1.0)
-	apply_message_zoom()
+	_reset_preview_state()
 	_dim.color.a = 0.0
 	_scroll_unit.modulate.a = 0.0
 	await _fit_scroll_unit()
@@ -350,11 +391,7 @@ func open_message(
 	tw.set_parallel(true)
 	tw.tween_property(_dim, "color:a", 0.86, 0.2)
 	tw.tween_property(_scroll_unit, "modulate:a", 1.0, 0.22)
-	if not short_animation and not _reduced_motion:
-		_scroll_unit.scale = Vector2(0.92, 0.92)
-		tw.tween_property(_scroll_unit, "scale", Vector2.ONE, 0.24).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 	await tw.finished
-	_scroll_unit.scale = Vector2.ONE
 
 
 func set_attachments(attachments: Array) -> void:
@@ -394,10 +431,10 @@ func _populate_attachments() -> void:
 				tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
 				btn.add_child(tr)
 		elif not str(item.get("signed_url", "")).is_empty():
-			btn.text = "📷"
+			btn.text = "Photo"
 			_load_remote_thumb(str(item.get("signed_url", "")), btn)
 		else:
-			btn.text = "📷"
+			btn.text = "Photo"
 		var captured: Dictionary = (item as Dictionary).duplicate(true)
 		btn.pressed.connect(func() -> void:
 			attachment_tapped.emit(captured)
@@ -449,32 +486,69 @@ func _set_message_text(plain: String) -> void:
 
 
 func apply_message_zoom() -> void:
-	message_zoom = clampf(message_zoom, MIN_MESSAGE_ZOOM, MAX_MESSAGE_ZOOM)
+	message_zoom = clampf(message_zoom, MIN_FONT_ZOOM, MAX_FONT_ZOOM)
 	var body_size: int = clampi(roundi(BASE_BODY_FONT_SIZE * message_zoom), MIN_BODY_FONT_SIZE, MAX_BODY_FONT_SIZE)
 	var heading_size: int = clampi(roundi(BASE_HEADING_FONT_SIZE * message_zoom), 26, 44)
 	var meta_size: int = clampi(roundi(BASE_META_FONT_SIZE * message_zoom), 14, 24)
 	_message.add_theme_font_size_override("normal_font_size", body_size)
 	_heading.add_theme_font_size_override("font_size", heading_size)
 	_meta_label.add_theme_font_size_override("font_size", meta_size)
-	## Never scale the scroll unit or text containers for font zoom.
+	## Font zoom must never scale Control nodes.
 	_message.scale = Vector2.ONE
 	_message_scroll.scale = Vector2.ONE
-	_scroll_unit.scale = Vector2.ONE
+	_heading.scale = Vector2.ONE
+	_meta_label.scale = Vector2.ONE
 	call_deferred("_refresh_message_width")
 
 
-func _on_zoom_changed(scale: float) -> void:
+func _on_view_zoom_changed(scale: float) -> void:
 	if not _visible_modal:
 		return
-	message_zoom = clampf(scale, MIN_MESSAGE_ZOOM, MAX_MESSAGE_ZOOM)
+	_view_zoom = clampf(scale, MIN_VIEW_ZOOM, MAX_VIEW_ZOOM)
+	_apply_view_transform()
+
+
+func _reset_preview_state() -> void:
+	message_zoom = 1.0
+	_view_zoom = 1.0
+	_pan = Vector2.ZERO
+	_pinch.reset(1.0)
 	apply_message_zoom()
+	if _message_scroll:
+		_message_scroll.scroll_vertical = 0
+	_apply_view_transform()
+
+
+func _on_stage_gui_input(event: InputEvent) -> void:
+	if not _visible_modal:
+		return
+	if _view_zoom <= 1.001:
+		return
+	if event is InputEventScreenTouch:
+		var st := event as InputEventScreenTouch
+		_dragging_pan = st.pressed
+		_drag_last = st.position
+	elif event is InputEventScreenDrag and _dragging_pan and not _pinch.is_pinching():
+		var sd := event as InputEventScreenDrag
+		_pan += sd.relative
+		_apply_view_transform()
+		_stage.accept_event()
+	elif event is InputEventMouseButton:
+		var mb := event as InputEventMouseButton
+		if mb.button_index == MOUSE_BUTTON_LEFT:
+			_dragging_pan = mb.pressed
+			_drag_last = mb.position
+	elif event is InputEventMouseMotion and _dragging_pan:
+		var mm := event as InputEventMouseMotion
+		_pan += mm.relative
+		_apply_view_transform()
 
 
 func close_viewer() -> void:
 	if not _visible_modal:
 		return
 	_visible_modal = false
-	var start_pos: Vector2 = _scroll_unit.global_position + _unit_size * 0.5
+	var start_pos: Vector2 = _scroll_unit.global_position + _unit_size * 0.5 * _view_zoom
 	var tw := create_tween()
 	tw.set_parallel(true)
 	tw.tween_property(_scroll_unit, "modulate:a", 0.0, 0.18)
@@ -486,7 +560,7 @@ func close_viewer() -> void:
 		_populate_attachments()
 	visible = false
 	_scroll_unit.modulate = Color.WHITE
-	_scroll_unit.scale = Vector2.ONE
+	_reset_preview_state()
 	archive_flight_requested.emit(start_pos)
 	closed.emit()
 
@@ -494,7 +568,7 @@ func close_viewer() -> void:
 func _input(event: InputEvent) -> void:
 	if not visible:
 		return
-	if _zoom.handle_input(event):
+	if _pinch.handle_input(event):
 		get_viewport().set_input_as_handled()
 		return
 	if event.is_action_pressed("ui_cancel"):

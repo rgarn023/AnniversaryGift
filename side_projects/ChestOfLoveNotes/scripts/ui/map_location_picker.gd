@@ -39,6 +39,10 @@ var _confirm_btn: Button
 var _drop_btn: Button
 var _tiles_ready: bool = false
 var _pending_tile_count: int = 0
+var _map_host: Control
+var _retry_btn: Button
+var _layout_ready: bool = false
+var _load_failed: bool = false
 
 
 func setup(initial: Dictionary = {}, p_radius_m: int = 500, search_service: LocationSearchService = null) -> void:
@@ -56,8 +60,8 @@ func setup(initial: Dictionary = {}, p_radius_m: int = 500, search_service: Loca
 	z_index = 80
 	_build_ui()
 	_set_loading(true)
-	_refresh_tiles()
 	_sync_action_enabled()
+	call_deferred("_bootstrap_map_after_layout")
 
 
 func _build_ui() -> void:
@@ -93,41 +97,81 @@ func _build_ui() -> void:
 	_suggestions.add_theme_constant_override("separation", 4)
 	root.add_child(_suggestions)
 
-	var map_host := Control.new()
-	map_host.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	map_host.custom_minimum_size = Vector2(0, 280)
-	map_host.clip_contents = true
-	root.add_child(map_host)
+	_map_host = Control.new()
+	_map_host.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_map_host.custom_minimum_size = Vector2(0, 280)
+	_map_host.clip_contents = true
+	root.add_child(_map_host)
 
 	_tile_layer = Control.new()
 	_tile_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_tile_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	map_host.add_child(_tile_layer)
+	_map_host.add_child(_tile_layer)
 
 	_overlay = Control.new()
 	_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
 	_overlay.gui_input.connect(_on_map_input)
 	_overlay.draw.connect(_draw_overlay)
-	map_host.add_child(_overlay)
+	_map_host.add_child(_overlay)
 
 	_loading_overlay = Control.new()
 	_loading_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_loading_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	map_host.add_child(_loading_overlay)
+	_loading_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	_loading_overlay.z_index = 20
+	_map_host.add_child(_loading_overlay)
 	var load_bg := ColorRect.new()
-	load_bg.color = Color(0.06, 0.05, 0.1, 0.82)
+	load_bg.color = Color(0.08, 0.06, 0.14, 0.94)
 	load_bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	load_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_loading_overlay.add_child(load_bg)
+	var load_col := VBoxContainer.new()
+	load_col.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	load_col.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	load_col.grow_vertical = Control.GROW_DIRECTION_BOTH
+	load_col.add_theme_constant_override("separation", 10)
+	_loading_overlay.add_child(load_col)
 	_loading_label = Label.new()
 	_loading_label.text = "Loading map…"
 	_loading_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_loading_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_loading_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_loading_label.add_theme_font_size_override("font_size", 18)
-	_loading_label.add_theme_color_override("font_color", Color(0.94, 0.9, 0.98))
-	_loading_overlay.add_child(_loading_label)
+	_loading_label.add_theme_font_size_override("font_size", 20)
+	_loading_label.add_theme_color_override("font_color", Color(0.96, 0.92, 0.98))
+	load_col.add_child(_loading_label)
+	var spin := Label.new()
+	spin.text = "◌"
+	spin.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	spin.add_theme_font_size_override("font_size", 28)
+	spin.add_theme_color_override("font_color", Color(0.98, 0.86, 0.45))
+	load_col.add_child(spin)
+	_retry_btn = Button.new()
+	_retry_btn.text = "Retry"
+	_retry_btn.visible = false
+	_retry_btn.custom_minimum_size = Vector2(160, 48)
+	_retry_btn.focus_mode = Control.FOCUS_NONE
+	MobileUi.style_button(_retry_btn, 48)
+	_retry_btn.pressed.connect(func() -> void:
+		_load_failed = false
+		_retry_btn.visible = false
+		_loading_label.text = "Loading map…"
+		_set_loading(true)
+		if _layout_ready:
+			_refresh_tiles()
+		else:
+			call_deferred("_bootstrap_map_after_layout")
+	)
+	load_col.add_child(_retry_btn)
+	var search_instead := Button.new()
+	search_instead.text = "Search for a place instead"
+	search_instead.visible = false
+	search_instead.focus_mode = Control.FOCUS_NONE
+	search_instead.custom_minimum_size = Vector2(220, 44)
+	MobileUi.style_button(search_instead, 44)
+	search_instead.pressed.connect(func() -> void:
+		cancelled.emit()
+		_shutdown()
+	)
+	load_col.add_child(search_instead)
+	_retry_btn.set_meta("_search_instead", search_instead)
 
 	var zoom_row := HBoxContainer.new()
 	zoom_row.add_theme_constant_override("separation", 8)
@@ -197,9 +241,10 @@ func _build_ui() -> void:
 	_debounce.timeout.connect(_run_search)
 	add_child(_debounce)
 
-	map_host.resized.connect(func() -> void:
-		_refresh_tiles()
-		_overlay.queue_redraw()
+	_map_host.resized.connect(func() -> void:
+		if _layout_ready and _map_host.size.x > 8.0:
+			_refresh_tiles()
+			_overlay.queue_redraw()
 	)
 
 
@@ -207,6 +252,46 @@ func set_radius(m: int) -> void:
 	radius_m = clampi(m, LocationHelper.MIN_RADIUS_M, LocationHelper.MAX_RADIUS_M)
 	if _status:
 		_status.text = "Unlock within %s of the pin." % LocationHelper.format_radius(radius_m)
+	if _overlay:
+		_overlay.queue_redraw()
+
+
+func _bootstrap_map_after_layout() -> void:
+	## Wait until the map host has a real non-zero size before first tile request.
+	## Initializing against a zero-size viewport is the black-until-pan bug.
+	if not _alive:
+		return
+	_set_loading(true)
+	if _loading_label:
+		_loading_label.text = "Loading map…"
+	if _retry_btn:
+		_retry_btn.visible = false
+	var attempts := 0
+	while _alive and attempts < 24:
+		await get_tree().process_frame
+		attempts += 1
+		if _map_host != null and _map_host.size.x >= 64.0 and _map_host.size.y >= 64.0:
+			break
+	if not _alive:
+		return
+	if _map_host == null or _map_host.size.x < 64.0 or _map_host.size.y < 64.0:
+		_load_failed = true
+		_tiles_ready = false
+		if _loading_overlay:
+			_loading_overlay.visible = true
+			_loading_overlay.modulate.a = 1.0
+		if _loading_label:
+			_loading_label.text = "Couldn't load the map."
+		if _retry_btn:
+			_retry_btn.visible = true
+		_sync_action_enabled()
+		return
+	_layout_ready = true
+	## One extra frame after size settles, then center/zoom + first tiles.
+	await get_tree().process_frame
+	if not _alive:
+		return
+	_refresh_tiles()
 	if _overlay:
 		_overlay.queue_redraw()
 
@@ -382,12 +467,15 @@ func _lat_to_y(lat: float, zoom: int) -> float:
 
 
 func _refresh_tiles() -> void:
-	if _tile_layer == null:
+	if _tile_layer == null or _map_host == null:
+		return
+	var area := _map_host.size
+	if area.x < 64.0 or area.y < 64.0:
+		## Zero-size viewport — wait for layout bootstrap.
 		return
 	for c in _tile_layer.get_children():
 		c.queue_free()
 	_pending_tile_count = 0
-	var area := _overlay.size if _overlay.size.x > 8 else Vector2(360, 360)
 	var center_x := _lon_to_x(_center_lng, _zoom)
 	var center_y := _lat_to_y(_center_lat, _zoom)
 	var tiles_x := int(ceil(area.x / 256.0)) + 2
@@ -436,15 +524,59 @@ func _finish_loading_if_ready(force: bool = false) -> void:
 		return
 	if not force and _pending_tile_count > 0:
 		return
+	var painted := 0
+	if _tile_layer:
+		for c in _tile_layer.get_children():
+			if c is TextureRect and (c as TextureRect).texture != null:
+				painted += 1
+	if painted <= 0 and not force:
+		## Tiles requested but none painted yet — keep loading.
+		return
+	if painted <= 0 and force:
+		_load_failed = true
+		_tiles_ready = false
+		if _loading_overlay:
+			_loading_overlay.visible = true
+			_loading_overlay.modulate.a = 1.0
+		if _loading_label:
+			_loading_label.text = "Couldn't load the map."
+		if _retry_btn:
+			_retry_btn.visible = true
+			var alt: Variant = _retry_btn.get_meta("_search_instead", null)
+			if alt is Control:
+				(alt as Control).visible = true
+		_sync_action_enabled()
+		return
+	_load_failed = false
 	_tiles_ready = true
+	## Force a real redraw — tiles can arrive before first paint without interaction.
+	if _tile_layer:
+		_tile_layer.visible = false
+		await get_tree().process_frame
+		if not _alive:
+			return
+		_tile_layer.visible = true
+		_tile_layer.queue_redraw()
+		for c in _tile_layer.get_children():
+			if c is CanvasItem:
+				(c as CanvasItem).queue_redraw()
+	if _overlay:
+		_overlay.queue_redraw()
+	if _map_host:
+		_map_host.queue_redraw()
 	if _loading_overlay and _loading_overlay.visible:
 		var tw := create_tween()
-		tw.tween_property(_loading_overlay, "modulate:a", 0.0, 0.25)
+		tw.tween_property(_loading_overlay, "modulate:a", 0.0, 0.28)
 		tw.finished.connect(func() -> void:
 			if is_instance_valid(_loading_overlay):
 				_loading_overlay.visible = false
 				_loading_overlay.modulate.a = 1.0
 		)
+	if _retry_btn:
+		_retry_btn.visible = false
+		var alt2: Variant = _retry_btn.get_meta("_search_instead", null)
+		if alt2 is Control:
+			(alt2 as Control).visible = false
 	_sync_action_enabled()
 
 
@@ -484,6 +616,11 @@ func _request_tile(key: String, z: int, x: int, y: int, tr: TextureRect) -> void
 	_tile_cache[key] = tex
 	if is_instance_valid(tr):
 		tr.texture = tex
+		tr.queue_redraw()
+	if _tile_layer:
+		_tile_layer.queue_redraw()
+	if _overlay:
+		_overlay.queue_redraw()
 	_finish_loading_if_ready()
 
 

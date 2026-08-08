@@ -25,7 +25,11 @@ func adjust(factor: float) -> void:
 
 
 func reset(default_scale: float = 1.0) -> void:
-	set_scale(default_scale)
+	_pinching = false
+	_last_distance = 0.0
+	_touch_positions.clear()
+	current_scale = clampf(default_scale, min_scale, max_scale)
+	zoom_changed.emit(current_scale)
 
 
 func is_pinching() -> bool:

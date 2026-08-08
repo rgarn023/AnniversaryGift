@@ -110,6 +110,10 @@ var _attach_strip: HBoxContainer
 var _attach_status: Label
 var _image_preview: ImagePreviewOverlay
 var _file_dialog: FileDialog
+var _media_picker: MediaPickerHelper
+var _last_validation: Dictionary = {}
+var _pw2_user_edited: bool = false
+var _pw2_syncing: bool = false
 
 var _pw_toggle: CheckButton
 var _pw_fields: VBoxContainer
@@ -249,6 +253,8 @@ func apply_draft(draft: Dictionary) -> void:
 
 func set_sending(active: bool) -> void:
 	_sending = active
+	if _send_btn:
+		_send_btn.text = "Sending…" if active else "Send Scroll"
 	_update_validation()
 	if active:
 		_show_sending_overlay()
@@ -1070,10 +1076,12 @@ func _build_password_card() -> PanelContainer:
 	_pw_toggle.toggled.connect(func(on: bool) -> void:
 		_pw_fields.visible = on
 		if not on:
+			_pw2_syncing = true
 			_pw_edit.text = ""
 			_pw2_edit.text = ""
+			_pw2_syncing = false
+			_pw2_user_edited = false
 		_refresh_optional_summaries()
-		_refresh_summary()
 		_update_validation()
 	)
 	toggle_row.add_child(_pw_toggle)
@@ -1101,7 +1109,16 @@ func _build_password_card() -> PanelContainer:
 	_pw_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_pw_edit.add_theme_font_size_override("font_size", 19)
 	_style_line_edit(_pw_edit)
-	_pw_edit.text_changed.connect(func(_t: String) -> void: _update_validation())
+	_pw_edit.text_changed.connect(func(_t: String) -> void:
+		## Keep confirm in sync until the user edits it themselves.
+		## Must not mark confirm as user-edited during programmatic sync
+		## (that was leaving Send disabled after typing a password).
+		if _pw2_edit and not _pw2_user_edited and _pw2_edit.text != _pw_edit.text:
+			_pw2_syncing = true
+			_pw2_edit.text = _pw_edit.text
+			_pw2_syncing = false
+		_update_validation()
+	)
 	pw_row.add_child(_pw_edit)
 	_pw_show = Button.new()
 	_pw_show.text = "👁"
@@ -1124,7 +1141,11 @@ func _build_password_card() -> PanelContainer:
 	_pw2_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_pw2_edit.add_theme_font_size_override("font_size", 19)
 	_style_line_edit(_pw2_edit)
-	_pw2_edit.text_changed.connect(func(_t: String) -> void: _update_validation())
+	_pw2_edit.text_changed.connect(func(_t: String) -> void:
+		if not _pw2_syncing:
+			_pw2_user_edited = true
+		_update_validation()
+	)
 	pw2_row.add_child(_pw2_edit)
 	_pw2_show = Button.new()
 	_pw2_show.text = "👁"
@@ -1318,39 +1339,52 @@ func _on_add_photo_pressed() -> void:
 
 
 func _pick_photo_from_gallery() -> void:
-	if _file_dialog == null:
-		_file_dialog = FileDialog.new()
-		_file_dialog.access = FileDialog.ACCESS_FILESYSTEM
-		_file_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
-		_file_dialog.use_native_dialog = true
-		_file_dialog.add_filter("*.jpg,*.jpeg,*.png,*.webp", "Photos")
-		_file_dialog.title = "Add Photo"
-		_file_dialog.file_selected.connect(_on_photo_file_selected)
-		add_child(_file_dialog)
-	_file_dialog.popup_centered_ratio(0.85)
+	var remaining := AttachmentHelper.MAX_ATTACHMENTS - _attachments.size()
+	if remaining <= 0:
+		_attach_status.text = "You can attach up to %d photos." % AttachmentHelper.MAX_ATTACHMENTS
+		return
+	_attach_status.text = "Opening photos…"
+	if _media_picker == null:
+		_media_picker = MediaPickerHelper.new()
+		_media_picker.images_picked.connect(_on_photos_picked)
+		_media_picker.cancelled.connect(func() -> void:
+			_attach_status.text = ""
+		)
+	_media_picker.pick_images(remaining, self)
+
+
+func _on_photos_picked(paths: PackedStringArray) -> void:
+	if paths.is_empty():
+		_attach_status.text = ""
+		return
+	_attach_status.text = "Preparing photos…"
+	await get_tree().process_frame
+	var added := 0
+	for path in paths:
+		if _attachments.size() >= AttachmentHelper.MAX_ATTACHMENTS:
+			break
+		var prepared: Dictionary = AttachmentHelper.compress_to_draft(str(path))
+		if not bool(prepared.get("ok", false)):
+			continue
+		_attachments.append({
+			"id": str(prepared.get("id", "")),
+			"path": str(prepared.get("path", "")),
+			"mime": str(prepared.get("mime", "image/jpeg")),
+			"width": int(prepared.get("width", 0)),
+			"height": int(prepared.get("height", 0)),
+			"byte_size": int(prepared.get("byte_size", 0)),
+		})
+		added += 1
+	if added <= 0:
+		_attach_status.text = "Could not add that photo."
+	else:
+		_attach_status.text = "%d of %d photos" % [_attachments.size(), AttachmentHelper.MAX_ATTACHMENTS]
+	_refresh_attachments_ui()
+	_update_validation()
 
 
 func _on_photo_file_selected(path: String) -> void:
-	if _attachments.size() >= AttachmentHelper.MAX_ATTACHMENTS:
-		_attach_status.text = "You can attach up to %d photos." % AttachmentHelper.MAX_ATTACHMENTS
-		return
-	_attach_status.text = "Preparing photo…"
-	await get_tree().process_frame
-	var prepared: Dictionary = AttachmentHelper.compress_to_draft(path)
-	if not bool(prepared.get("ok", false)):
-		_attach_status.text = str(prepared.get("error", "Could not add that photo."))
-		return
-	_attachments.append({
-		"id": str(prepared.get("id", "")),
-		"path": str(prepared.get("path", "")),
-		"mime": str(prepared.get("mime", "image/jpeg")),
-		"width": int(prepared.get("width", 0)),
-		"height": int(prepared.get("height", 0)),
-		"byte_size": int(prepared.get("byte_size", 0)),
-	})
-	_attach_status.text = "Photo added."
-	_refresh_attachments_ui()
-	_refresh_summary()
+	_on_photos_picked(PackedStringArray([path]))
 
 
 func _remove_attachment_at(idx: int) -> void:
@@ -1672,6 +1706,17 @@ func _refresh_summary() -> void:
 		lines.append("")
 		lines.append("Attachments:")
 		lines.append("%d of %d photos" % [_attachments.size(), AttachmentHelper.MAX_ATTACHMENTS])
+	## Shared validation model — Ready Check never disagrees with Send.
+	var v: Dictionary = _last_validation if not _last_validation.is_empty() else validate_compose_draft()
+	var blockers: PackedStringArray = v.get("blockers", PackedStringArray())
+	lines.append("")
+	if blockers.is_empty():
+		lines.append("Status:")
+		lines.append("Ready to send")
+	else:
+		lines.append("Before sending:")
+		for b in blockers:
+			lines.append("• %s" % b)
 	_summary_label.text = "\n".join(lines)
 	_refresh_optional_summaries()
 
@@ -1710,6 +1755,8 @@ func _format_time(hour: int, minute: int) -> String:
 func _compute_unlock_unix() -> int:
 	if _open_immediately and _open_immediately.button_pressed:
 		return int(Time.get_unix_time_from_system())
+	## Interpret unlock fields as LOCAL wall-clock time.
+	## Godot treats datetime dicts as UTC, so compensate with system timezone bias.
 	var dt := {
 		"year": int(_unlock_date.year),
 		"month": int(_unlock_date.month),
@@ -1718,7 +1765,9 @@ func _compute_unlock_unix() -> int:
 		"minute": _unlock_minute,
 		"second": 0,
 	}
-	return int(Time.get_unix_time_from_datetime_dict(dt))
+	var as_utc := int(Time.get_unix_time_from_datetime_dict(dt))
+	var bias_min := int(Time.get_time_zone_from_system().get("bias", 0))
+	return as_utc - bias_min * 60
 
 
 func _password_value() -> String:
@@ -1727,45 +1776,99 @@ func _password_value() -> String:
 	return _pw_edit.text
 
 
-func _validation_error() -> String:
+func validate_compose_draft() -> Dictionary:
+	## Single source of truth for Ready Check + Send button.
+	var blockers: PackedStringArray = PackedStringArray()
+	var warnings: PackedStringArray = PackedStringArray()
 	if friends.is_empty():
-		return "Add a friend before composing a scroll."
-	if _selected_friend.is_empty() or str(_selected_friend.get("id", "")).is_empty():
-		return "Please choose a friend."
+		blockers.append("Add a friend before composing a scroll.")
+	elif _selected_friend.is_empty() or str(_selected_friend.get("id", "")).is_empty():
+		blockers.append("Select a recipient")
 	if _message_edit == null or _message_edit.text.strip_edges().is_empty():
-		return "Your scroll needs a message."
+		blockers.append("Enter a message")
 	if _open_immediately == null or not _open_immediately.button_pressed:
 		var unlock := _compute_unlock_unix()
-		if unlock < int(Time.get_unix_time_from_system()) - 30:
-			return "Choose an unlock time in the future."
-	if _pw_toggle and _pw_toggle.button_pressed:
-		var p1 := _pw_edit.text
-		var p2 := _pw2_edit.text
-		if p1.length() < MIN_PASSWORD or p1.length() > MAX_PASSWORD:
-			return "Magic password must be 4–64 characters."
-		if p1 != p2:
-			return "Passwords do not match."
-	if _location_toggle and _location_toggle.button_pressed:
+		var now_u := int(Time.get_unix_time_from_system())
+		if unlock < now_u - 30:
+			blockers.append("Set an unlock time in the future")
+	if _pw_toggle != null and _pw_toggle.button_pressed:
+		var p1 := _pw_edit.text if _pw_edit else ""
+		var p2 := _pw2_edit.text if _pw2_edit else ""
+		if p1.strip_edges().is_empty():
+			blockers.append("Enter a Magic Password")
+		elif p1.length() < MIN_PASSWORD or p1.length() > MAX_PASSWORD:
+			blockers.append("Magic password must be 4–64 characters")
+		elif _pw2_user_edited and p1 != p2:
+			blockers.append("Confirm Magic Password — values do not match")
+		elif (not _pw2_user_edited) and p2.strip_edges().is_empty() and not p1.strip_edges().is_empty():
+			## Confirm still mirrors password; treat as valid.
+			pass
+		elif p1 != p2:
+			blockers.append("Confirm Magic Password — values do not match")
+	if _location_toggle != null and _location_toggle.button_pressed:
 		if not _location_fix_ok or not is_finite(_location_lat) or not is_finite(_location_lng):
-			return "Select a location from the search results or choose one on the map."
-		if _location_name.strip_edges().is_empty():
-			return "Select a location from the search results or choose one on the map."
-	return ""
+			blockers.append("Select a valid location")
+		elif _location_name.strip_edges().is_empty():
+			blockers.append("Select a valid location")
+		if _location_radius_m < LocationHelper.MIN_RADIUS_M:
+			blockers.append("Enter a radius of at least 1 m")
+		elif _location_radius_m > LocationHelper.MAX_RADIUS_M:
+			blockers.append("Radius can be at most 10 km")
+		elif _location_radius_m < LocationHelper.SMALL_RADIUS_WARN_M:
+			warnings.append("Very small radii may be difficult to verify accurately with phone GPS.")
+	## Attachments are optional — never block when empty.
+	var valid := blockers.is_empty()
+	var result := {
+		"valid": valid,
+		"blockers": blockers,
+		"warnings": warnings,
+		"ready_label": "Ready to send" if valid else (
+			"Fix %d item%s before sending" % [blockers.size(), "" if blockers.size() == 1 else "s"]
+		),
+	}
+	_last_validation = result
+	print("compose_validation valid=%s reasons=%s" % [str(valid), str(blockers)])
+	return result
+
+
+func _validation_error() -> String:
+	var v := validate_compose_draft()
+	var blockers: PackedStringArray = v.get("blockers", PackedStringArray())
+	if blockers.is_empty():
+		return ""
+	return blockers[0]
 
 
 func _update_validation() -> void:
-	var err := _validation_error()
+	var v := validate_compose_draft()
+	var blockers: PackedStringArray = v.get("blockers", PackedStringArray())
+	var warnings: PackedStringArray = v.get("warnings", PackedStringArray())
 	if _validation_label:
-		if err.is_empty():
-			_validation_label.visible = false
-			_validation_label.text = ""
+		if blockers.is_empty():
+			if warnings.is_empty():
+				_validation_label.visible = true
+				_validation_label.add_theme_color_override("font_color", Color(0.55, 0.85, 0.62))
+				_validation_label.text = "Ready to send"
+			else:
+				_validation_label.visible = true
+				_validation_label.add_theme_color_override("font_color", COL_WARN)
+				_validation_label.text = "\n".join(warnings)
 		else:
-			# Keep quiet until user interacts; still disable send.
-			pass
+			_validation_label.visible = true
+			_validation_label.add_theme_color_override("font_color", COL_ERROR)
+			if blockers.size() == 1:
+				_validation_label.text = blockers[0]
+			else:
+				var lines: PackedStringArray = PackedStringArray(["Fix %d items before sending:" % blockers.size()])
+				for b in blockers:
+					lines.append("• %s" % b)
+				_validation_label.text = "\n".join(lines)
 	if _send_btn:
-		_send_btn.disabled = (not err.is_empty()) or _sending
+		_send_btn.disabled = (not bool(v.get("valid", false))) or _sending
+		_send_btn.text = "Sending…" if _sending else "Send Scroll"
 	if _preview_btn:
 		_preview_btn.disabled = _sending or (_message_edit != null and _message_edit.text.strip_edges().is_empty())
+	_refresh_summary()
 
 
 func _set_inline_error(msg: String) -> void:
@@ -2025,9 +2128,9 @@ func _on_preview_pressed() -> void:
 
 
 func _on_send_pressed() -> void:
-	var err := _validation_error()
-	if not err.is_empty():
-		_set_inline_error(err)
+	var v := validate_compose_draft()
+	if not bool(v.get("valid", false)):
+		_update_validation()
 		return
 	_show_confirm_modal()
 
