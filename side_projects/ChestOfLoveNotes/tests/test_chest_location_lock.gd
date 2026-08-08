@@ -77,7 +77,7 @@ func _test_location_compose() -> void:
 	compose._location_search.text = "chesapeake"
 	compose._location_fix_ok = false
 	compose._update_validation()
-	_assert(compose._validation_error().contains("Select a location"), "free text not enough")
+	_assert(compose._validation_error().contains("Select a valid location"), "free text not enough")
 	compose._apply_resolved_place({
 		"name": "Elevation 27",
 		"address": "Virginia Beach, VA",
