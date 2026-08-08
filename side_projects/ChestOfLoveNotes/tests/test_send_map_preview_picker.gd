@@ -58,8 +58,8 @@ func _run() -> void:
 	_assert(install.contains("ChestMediaPlugin.kt"), "install script copies media plugin")
 	_assert(install.contains("org.godotengine.plugin.v2.ChestMedia"), "manifest registers ChestMedia")
 
-	_assert(BuildFlags.APP_VERSION_CODE >= 19, "versionCode 19+")
-	_assert(preset.contains("version/code=19"), "export preset versionCode 18")
+	_assert(BuildFlags.APP_VERSION_CODE >= 20, "versionCode 20+")
+	_assert(preset.contains("version/code=20"), "export preset versionCode 20")
 
 	## Runtime: timezone helper math sanity via Compose unlock conversion contract.
 	var bias := int(Time.get_time_zone_from_system().get("bias", 0))

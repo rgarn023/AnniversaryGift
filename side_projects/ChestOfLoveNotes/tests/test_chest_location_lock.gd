@@ -140,7 +140,7 @@ func _test_search_architecture() -> void:
 
 
 func _test_version() -> void:
-	_assert(BuildFlags.APP_VERSION_CODE >= 19, "versionCode >= 19")
+	_assert(BuildFlags.APP_VERSION_CODE >= 20, "versionCode >= 20")
 	var preset := FileAccess.get_file_as_string("res://export_presets.cfg")
 	_assert(preset.contains("ChestOfLoveNotes-preview-activity-focus-notifications-debug.apk"), "APK name")
-	_assert(preset.contains("version/code=19"), "export 19")
+	_assert(preset.contains("version/code=20"), "export 20")

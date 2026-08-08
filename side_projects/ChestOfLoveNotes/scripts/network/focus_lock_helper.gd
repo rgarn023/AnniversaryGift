@@ -2,6 +2,10 @@ extends RefCounted
 class_name FocusLockHelper
 ## Focus Lock: uninterrupted non-interactive phone period after Begin Focus Time.
 ## Usage verification is local via ChestFocus / Usage Access — no app history uploaded.
+##
+## Resets ONLY for genuine user-initiated interactive phone use.
+## Does NOT reset for notifications, screen wake from notifications, background sync,
+## music, system services, unanswered calls, lock-screen glances, or this app's own events.
 
 const MIN_HOURS := 1
 const MAX_HOURS := 24
@@ -11,6 +15,45 @@ const STORE_PATH := "user://coln_focus_challenges.json"
 const PLUGIN_NAME := "ChestFocus"
 ## Tests may set this > 0 to shorten duration. Production must leave at 0.
 static var debug_short_seconds: int = 0
+
+## UsageEvents.Event type constants (mirrored from Android / ChestFocusPlugin).
+const TYPE_MOVE_TO_FOREGROUND := 1
+const TYPE_MOVE_TO_BACKGROUND := 2
+const TYPE_CONFIGURATION_CHANGE := 5
+const TYPE_USER_INTERACTION := 7
+const TYPE_NOTIFICATION_SEEN := 10
+const TYPE_STANDBY_BUCKET_CHANGED := 11
+const TYPE_NOTIFICATION_INTERRUPTION := 12
+const TYPE_SCREEN_INTERACTIVE := 15
+const TYPE_SCREEN_NON_INTERACTIVE := 16
+const TYPE_KEYGUARD_SHOWN := 17
+const TYPE_KEYGUARD_HIDDEN := 18
+const TYPE_FOREGROUND_SERVICE_START := 19
+const TYPE_FOREGROUND_SERVICE_STOP := 20
+const TYPE_ACTIVITY_RESUMED := 23
+const TYPE_ACTIVITY_PAUSED := 24
+const TYPE_ACTIVITY_STOPPED := 25
+
+const SELF_PACKAGE := "com.charoitegames.chestoflovenotes"
+const NEVER_COUNT_PACKAGES: Array[String] = [
+	"android",
+	"com.android.systemui",
+	"com.android.keyguard",
+]
+const CALL_UI_PACKAGES: Array[String] = [
+	"com.android.phone",
+	"com.android.server.telecom",
+	"com.samsung.android.incallui",
+	"com.google.android.dialer",
+	"com.samsung.android.dialer",
+]
+## Alarm/clock UI — firing alone must not reset; dismiss via USER_INTERACTION still does.
+const ALARM_UI_PACKAGES: Array[String] = [
+	"com.android.deskclock",
+	"com.google.android.deskclock",
+	"com.sec.android.app.clockpackage",
+	"com.samsung.android.app.clockpackage",
+]
 
 
 static func clamp_hours(h: int) -> int:
@@ -142,6 +185,7 @@ static func evaluate(scroll_id: String) -> Dictionary:
 		if p == null or not usage_access_granted():
 			return {"ok": false, "status": "usage_denied", "state": state, "message": "Focus Lock needs Usage Access to verify an uninterrupted period."}
 		if p.has_method("had_interactive_usage_since"):
+			## Plugin applies the same interactive-vs-passive rules as events_indicate_interactive_use().
 			var used := bool(p.had_interactive_usage_since(started * 1000))
 			if used:
 				state["interrupted"] = true
@@ -151,7 +195,7 @@ static func evaluate(scroll_id: String) -> Dictionary:
 				_save_all(all)
 				return {"ok": false, "status": "interrupted", "state": state, "message": "Focus interrupted. Start again when you're ready."}
 	else:
-		## Headless/desktop: complete when wall time elapsed (for automated tests).
+		## Headless/desktop: no UsageStats — complete when wall time elapsed (automated tests).
 		pass
 	if elapsed >= need:
 		state["completed"] = true
@@ -177,3 +221,43 @@ static func is_complete(scroll_id: String) -> bool:
 static func clear_all_for_sign_out() -> void:
 	if FileAccess.file_exists(STORE_PATH):
 		DirAccess.remove_absolute(STORE_PATH)
+
+
+## Classify a synthetic UsageEvents stream.
+## Each event: { "type": int, "package": String, "time_ms": int (optional) }
+## Mirrors ChestFocusPlugin.classifyInteractiveUsage — keep in sync.
+static func events_indicate_interactive_use(events: Array, self_package: String = SELF_PACKAGE) -> bool:
+	var saw_keyguard_shown := false
+	var unlocked := false
+	for item in events:
+		if typeof(item) != TYPE_DICTIONARY:
+			continue
+		var type := int(item.get("type", -1))
+		var pkg := str(item.get("package", ""))
+		if not pkg.is_empty() and pkg == self_package:
+			continue
+		match type:
+			TYPE_KEYGUARD_SHOWN:
+				saw_keyguard_shown = true
+				unlocked = false
+			TYPE_KEYGUARD_HIDDEN:
+				unlocked = true
+			TYPE_USER_INTERACTION:
+				if unlocked or not saw_keyguard_shown:
+					return true
+			TYPE_ACTIVITY_RESUMED, TYPE_MOVE_TO_FOREGROUND:
+				if pkg.is_empty() or pkg in NEVER_COUNT_PACKAGES:
+					continue
+				if pkg in ALARM_UI_PACKAGES:
+					continue
+				if (pkg in CALL_UI_PACKAGES) and not unlocked:
+					continue
+				if unlocked:
+					return true
+				if not saw_keyguard_shown:
+					return true
+			TYPE_NOTIFICATION_INTERRUPTION, TYPE_NOTIFICATION_SEEN, TYPE_SCREEN_INTERACTIVE, TYPE_SCREEN_NON_INTERACTIVE, TYPE_FOREGROUND_SERVICE_START, TYPE_FOREGROUND_SERVICE_STOP, TYPE_STANDBY_BUCKET_CHANGED, TYPE_CONFIGURATION_CHANGE, TYPE_ACTIVITY_PAUSED, TYPE_ACTIVITY_STOPPED, TYPE_MOVE_TO_BACKGROUND:
+				pass
+			_:
+				pass
+	return false

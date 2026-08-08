@@ -116,6 +116,8 @@ func _run() -> void:
 	_assert(str(fr.get("status", "")) == "complete", "focus completes after short debug duration")
 	FocusLockHelper.debug_short_seconds = 0
 
+	_test_focus_interactive_classifier()
+
 	_assert(ActivityLockHelper.parse_km_text("2.5").ok, "parse 2.5 km")
 	_assert(not bool(ActivityLockHelper.parse_km_text("0.5").ok), "reject <1 km")
 	_assert(FocusLockHelper.parse_hours_text("3").ok, "parse 3 hours")
@@ -131,9 +133,108 @@ func _run() -> void:
 	})
 	_assert(bool(ev.get("ok", false)), "evaluator all-inactive locks pass")
 
-	_assert(BuildFlags.APP_VERSION_CODE >= 19, "versionCode 19+")
-	_assert(preset.contains("version/code=19"), "export 19")
+	_assert(BuildFlags.APP_VERSION_CODE >= 20, "versionCode 20+")
+	_assert(preset.contains("version/code=20"), "export 20")
 	_assert(preset.contains("ChestOfLoveNotes-preview-activity-focus-notifications-debug.apk"), "APK name")
+	var focus_kt := FileAccess.get_file_as_string("res://android/plugins/chest_secure_storage/ChestFocusPlugin.kt")
+	_assert(focus_kt.contains("classifyInteractiveUsage"), "Android classifier present")
+	_assert(focus_kt.contains("NOTIFICATION_INTERRUPTION") or focus_kt.contains("TYPE_NOTIFICATION_INTERRUPTION"), "notif events ignored in plugin")
+	_assert(focus_kt.contains("selfPackage"), "own package ignored in classifier")
 
 	print("=== Results: %d passed, %d failed ===" % [_passed, _failed])
 	quit(0 if _failed == 0 else 1)
+
+
+func _ev(type: int, pkg: String) -> Dictionary:
+	return {"type": type, "package": pkg}
+
+
+func _test_focus_interactive_classifier() -> void:
+	## Passive: notifications / wake / sync / music / our app / lock glance / unanswered call / alarms.
+	_assert(not FocusLockHelper.events_indicate_interactive_use([
+		_ev(FocusLockHelper.TYPE_SCREEN_INTERACTIVE, "android"),
+		_ev(FocusLockHelper.TYPE_NOTIFICATION_INTERRUPTION, "com.android.systemui"),
+		_ev(FocusLockHelper.TYPE_NOTIFICATION_SEEN, "com.android.systemui"),
+		_ev(FocusLockHelper.TYPE_SCREEN_NON_INTERACTIVE, "android"),
+	]), "passive notifications do not interrupt")
+
+	_assert(not FocusLockHelper.events_indicate_interactive_use([
+		_ev(FocusLockHelper.TYPE_SCREEN_INTERACTIVE, "android"),
+		_ev(FocusLockHelper.TYPE_KEYGUARD_SHOWN, "com.android.systemui"),
+		_ev(FocusLockHelper.TYPE_USER_INTERACTION, "com.android.systemui"),
+		_ev(FocusLockHelper.TYPE_SCREEN_NON_INTERACTIVE, "android"),
+	]), "lock-screen time check does not interrupt")
+
+	_assert(not FocusLockHelper.events_indicate_interactive_use([
+		_ev(FocusLockHelper.TYPE_FOREGROUND_SERVICE_START, "com.spotify.music"),
+		_ev(FocusLockHelper.TYPE_STANDBY_BUCKET_CHANGED, "com.spotify.music"),
+	]), "background music/sync does not interrupt")
+
+	_assert(not FocusLockHelper.events_indicate_interactive_use([
+		_ev(FocusLockHelper.TYPE_ACTIVITY_RESUMED, FocusLockHelper.SELF_PACKAGE),
+		_ev(FocusLockHelper.TYPE_NOTIFICATION_INTERRUPTION, FocusLockHelper.SELF_PACKAGE),
+		_ev(FocusLockHelper.TYPE_USER_INTERACTION, FocusLockHelper.SELF_PACKAGE),
+	]), "Chest of Love Notes events never sabotage Focus")
+
+	_assert(not FocusLockHelper.events_indicate_interactive_use([
+		_ev(FocusLockHelper.TYPE_KEYGUARD_SHOWN, "com.android.systemui"),
+		_ev(FocusLockHelper.TYPE_ACTIVITY_RESUMED, "com.samsung.android.incallui"),
+		_ev(FocusLockHelper.TYPE_SCREEN_INTERACTIVE, "android"),
+	]), "unanswered incoming call does not interrupt")
+
+	_assert(not FocusLockHelper.events_indicate_interactive_use([
+		_ev(FocusLockHelper.TYPE_KEYGUARD_SHOWN, "com.android.systemui"),
+		_ev(FocusLockHelper.TYPE_ACTIVITY_RESUMED, "com.android.systemui"),
+		_ev(FocusLockHelper.TYPE_SCREEN_INTERACTIVE, "android"),
+	]), "systemui while locked does not interrupt")
+
+	_assert(not FocusLockHelper.events_indicate_interactive_use([
+		_ev(FocusLockHelper.TYPE_SCREEN_INTERACTIVE, "android"),
+		_ev(FocusLockHelper.TYPE_KEYGUARD_SHOWN, "com.android.systemui"),
+		_ev(FocusLockHelper.TYPE_ACTIVITY_RESUMED, "com.sec.android.app.clockpackage"),
+		_ev(FocusLockHelper.TYPE_SCREEN_NON_INTERACTIVE, "android"),
+	]), "alarm merely firing while locked does not interrupt")
+
+	_assert(not FocusLockHelper.events_indicate_interactive_use([
+		_ev(FocusLockHelper.TYPE_SCREEN_INTERACTIVE, "android"),
+		_ev(FocusLockHelper.TYPE_ACTIVITY_RESUMED, "com.google.android.deskclock"),
+		_ev(FocusLockHelper.TYPE_MOVE_TO_FOREGROUND, "com.android.deskclock"),
+		_ev(FocusLockHelper.TYPE_SCREEN_NON_INTERACTIVE, "android"),
+	]), "alarm merely firing while unlocked does not interrupt")
+
+	## Active: unlock+use, app switch, tap notification into app, answer/place call.
+	_assert(FocusLockHelper.events_indicate_interactive_use([
+		_ev(FocusLockHelper.TYPE_SCREEN_INTERACTIVE, "android"),
+		_ev(FocusLockHelper.TYPE_KEYGUARD_HIDDEN, "com.android.systemui"),
+		_ev(FocusLockHelper.TYPE_ACTIVITY_RESUMED, "com.instagram.android"),
+	]), "unlock then open app interrupts")
+
+	_assert(FocusLockHelper.events_indicate_interactive_use([
+		_ev(FocusLockHelper.TYPE_ACTIVITY_RESUMED, "com.android.chrome"),
+	]), "already-unlocked app foreground interrupts")
+
+	_assert(FocusLockHelper.events_indicate_interactive_use([
+		_ev(FocusLockHelper.TYPE_NOTIFICATION_INTERRUPTION, "com.android.systemui"),
+		_ev(FocusLockHelper.TYPE_USER_INTERACTION, "com.android.systemui"),
+		_ev(FocusLockHelper.TYPE_ACTIVITY_RESUMED, "com.whatsapp"),
+	]), "tapping notification into app interrupts")
+
+	_assert(FocusLockHelper.events_indicate_interactive_use([
+		_ev(FocusLockHelper.TYPE_KEYGUARD_SHOWN, "com.android.systemui"),
+		_ev(FocusLockHelper.TYPE_KEYGUARD_HIDDEN, "com.android.systemui"),
+		_ev(FocusLockHelper.TYPE_ACTIVITY_RESUMED, "com.samsung.android.incallui"),
+	]), "answering a call after unlock interrupts")
+
+	_assert(FocusLockHelper.events_indicate_interactive_use([
+		_ev(FocusLockHelper.TYPE_ACTIVITY_RESUMED, "com.google.android.dialer"),
+		_ev(FocusLockHelper.TYPE_USER_INTERACTION, "com.google.android.dialer"),
+	]), "placing a call while unlocked interrupts")
+
+	_assert(FocusLockHelper.events_indicate_interactive_use([
+		_ev(FocusLockHelper.TYPE_USER_INTERACTION, "com.android.chrome"),
+	]), "user interaction in another app interrupts")
+
+	_assert(FocusLockHelper.events_indicate_interactive_use([
+		_ev(FocusLockHelper.TYPE_ACTIVITY_RESUMED, "com.google.android.deskclock"),
+		_ev(FocusLockHelper.TYPE_USER_INTERACTION, "com.google.android.deskclock"),
+	]), "dismissing an alarm (user interaction) interrupts")
