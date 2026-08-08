@@ -399,12 +399,13 @@ func send_scroll(
 			return {"ok": false, "error": "Select a location from the search results or choose one on the map."}
 		if absf(location_lat) > 90.0 or absf(location_lng) > 180.0:
 			return {"ok": false, "error": "Invalid Location Lock coordinates."}
-	var friends := get_friends()
-	var ok_friend := false
-	for f in friends:
-		if str(f.id) == recipient_id:
-			ok_friend = true
-			break
+	var ok_friend := recipient_id == current_user_id
+	if not ok_friend:
+		var friends := get_friends()
+		for f in friends:
+			if str(f.id) == recipient_id:
+				ok_friend = true
+				break
 	if not ok_friend:
 		return {"ok": false, "error": "Recipient is not an accepted friend."}
 	var id := "scroll-%d" % (scrolls.size() + 10)

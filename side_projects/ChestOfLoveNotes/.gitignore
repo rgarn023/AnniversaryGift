@@ -34,6 +34,7 @@ build/*.idsig
 !build/ChestOfLoveNotes-preview-radius-attachments-debug.apk
 !build/ChestOfLoveNotes-send-map-preview-picker-fixes-debug.apk
 !build/ChestOfLoveNotes-preview-activity-focus-notifications-debug.apk
+!build/ChestOfLoveNotes-map-preview-selfsend-background-fixes-debug.apk
 
 # Android Gradle template
 android/build/

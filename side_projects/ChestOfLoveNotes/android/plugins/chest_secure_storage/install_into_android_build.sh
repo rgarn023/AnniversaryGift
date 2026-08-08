@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Wire ChestSecureStorage (+ Location/Media/Focus/Notify) into the Godot Android Gradle export template.
+# Wire ChestSecureStorage (+ Location/Media/Focus/Notify/Activity/Schedule) into the Godot Android Gradle export template.
 # Safe to re-run. Does not modify Anniversary Gift.
 set -euo pipefail
 
@@ -21,6 +21,8 @@ cp -f "$PLUGIN_DIR/ChestLocationPlugin.kt" "$JAVA_DST/ChestLocationPlugin.kt"
 cp -f "$PLUGIN_DIR/ChestMediaPlugin.kt" "$JAVA_DST/ChestMediaPlugin.kt"
 cp -f "$PLUGIN_DIR/ChestFocusPlugin.kt" "$JAVA_DST/ChestFocusPlugin.kt"
 cp -f "$PLUGIN_DIR/ChestNotifyPlugin.kt" "$JAVA_DST/ChestNotifyPlugin.kt"
+cp -f "$PLUGIN_DIR/ActivityLockService.kt" "$JAVA_DST/ActivityLockService.kt"
+cp -f "$PLUGIN_DIR/ScheduledNotifyReceiver.kt" "$JAVA_DST/ScheduledNotifyReceiver.kt"
 cp -f "$PLUGIN_DIR/backup_rules.xml" "$RES_XML/coln_backup_rules.xml"
 cp -f "$PLUGIN_DIR/data_extraction_rules.xml" "$RES_XML/coln_data_extraction_rules.xml"
 
@@ -76,13 +78,12 @@ text = re.sub(
 
 plugins = [
     ('ChestSecureStorage', 'ChestSecureStoragePlugin', 'Android Keystore-backed ChestSecureStorage plugin'),
-    ('ChestLocation', 'ChestLocationPlugin', 'one-shot Location Lock helper'),
+    ('ChestLocation', 'ChestLocationPlugin', 'Location Lock + Activity Lock foreground helper'),
     ('ChestMedia', 'ChestMediaPlugin', 'Android Photo Picker helper'),
     ('ChestFocus', 'ChestFocusPlugin', 'Focus Lock Usage Access helper'),
-    ('ChestNotify', 'ChestNotifyPlugin', 'local notification helper'),
+    ('ChestNotify', 'ChestNotifyPlugin', 'local + scheduled notification helper'),
 ]
 
-# Ensure each plugin meta-data exists once.
 for name, cls, comment in plugins:
     android_name = f'org.godotengine.plugin.v2.{name}'
     block = f'''
@@ -100,11 +101,37 @@ for name, cls, comment in plugins:
             text,
         )
 
+# Service + boot receiver (idempotent insert before </application>)
+service_block = '''
+        <!-- Chest of Love Notes: Activity Lock foreground location service -->
+        <service
+            android:name="com.charoitegames.chestoflovenotes.securestorage.ActivityLockService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
+        <!-- Chest of Love Notes: scheduled notification + reboot re-register -->
+        <receiver
+            android:name="com.charoitegames.chestoflovenotes.securestorage.ScheduledNotifyReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="coln.notify.FIRE" />
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+'''
+if 'ActivityLockService' not in text:
+    text = text.replace('</application>', service_block + '\n    </application>', 1)
+
 for perm, extra in (
     ('android.permission.ACCESS_COARSE_LOCATION', ''),
     ('android.permission.ACCESS_FINE_LOCATION', ''),
     ('android.permission.POST_NOTIFICATIONS', ''),
     ('android.permission.PACKAGE_USAGE_STATS', ' tools:ignore="ProtectedPermissions"'),
+    ('android.permission.FOREGROUND_SERVICE', ''),
+    ('android.permission.FOREGROUND_SERVICE_LOCATION', ''),
+    ('android.permission.RECEIVE_BOOT_COMPLETED', ''),
+    ('android.permission.WAKE_LOCK', ''),
 ):
     if perm not in text:
         text = text.replace(
@@ -120,7 +147,6 @@ PY
 echo "Installed Chest plugins into android/build"
 echo "  kotlin dir: $JAVA_DST"
 
-# Ensure Godot-copied *.import sidecars under res/ cannot break Android resource merge.
 BUILD_GRADLE="$BUILD_DIR/build.gradle"
 if [[ -f "$BUILD_GRADLE" ]] && ! grep -q 'colnStripImportSidecars' "$BUILD_GRADLE"; then
   cat >> "$BUILD_GRADLE" <<'GRADLE'

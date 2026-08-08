@@ -17,5 +17,7 @@ const PRIVATE_ONBOARDING_BUILD := true
 const SHOW_ONBOARDING_BANNER := false
 ## Debug-only chest preview path (never enable in production content path).
 const DEV_CHEST_SCROLL_PREVIEW := false
-const APP_VERSION_NAME := "0.1.20-focus-interactive-only"
-const APP_VERSION_CODE := 20
+## Debug/test builds may offer "Send to Myself (Test)" using the real send path.
+const DEBUG_SELF_SEND := true
+const APP_VERSION_NAME := "0.1.21-map-preview-selfsend-background"
+const APP_VERSION_CODE := 21

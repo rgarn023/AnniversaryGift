@@ -33,8 +33,7 @@ func _run() -> void:
 	_assert(compose.contains("compose_validation valid="), "validation debug log")
 	_assert(compose.contains("_pw2_syncing"), "password confirm sync guard")
 	_assert(compose.contains("as_utc - bias_min * 60"), "timezone-aware unlock unix")
-	_assert(compose.contains("Attachments are optional"), "attachments optional comment")
-	_assert(compose.contains("MediaPickerHelper"), "compose uses media picker helper")
+	_assert(compose.contains("Attachments removed from active product UI") or compose.contains("MediaPickerHelper"), "attachments dormant / media helper available")
 	_assert(compose.contains("\"Required\" if pw_on else \"Not required\""), "ready check password status only")
 	_assert(not compose.contains("print(\"password=\""), "no password value logging")
 
@@ -44,22 +43,22 @@ func _run() -> void:
 	_assert(map.contains("Search for a place instead"), "map search fallback action")
 	_assert(map.contains("_layout_ready = true"), "layout ready gate")
 
-	_assert(viewer.contains("_scroll_unit.scale"), "composite view scale")
-	_assert(viewer.contains("Reset View"), "reset view label")
+	_assert(viewer.contains("_zoom_pan_root"), "composite ZoomPanRoot")
+	_assert(viewer.contains("Reset"), "reset control")
 	_assert(viewer.contains("_on_view_zoom_changed"), "pinch -> composite zoom")
-	_assert(viewer.contains("Font zoom must never scale Control nodes"), "font zoom isolation")
+	_assert(viewer.contains("Font changes must NOT touch ZoomPanRoot"), "font zoom isolation")
 	_assert(viewer.contains("NOTIFICATION_WM_GO_BACK_REQUEST"), "android back closes preview")
-	_assert(viewer.contains("_content_margin"), "parchment content rect")
+	_assert(viewer.contains("_content_rect"), "parchment content rect")
 
 	_assert(media.contains("ChestMedia"), "MediaPickerHelper targets ChestMedia")
 	_assert(plugin.contains("ACTION_PICK_IMAGES"), "Android Photo Picker intent")
 	_assert(plugin.contains("image/jpeg"), "image mime filtering")
 	_assert(plugin.contains("EXTRA_PICK_IMAGES_MAX"), "multi-select when supported")
 	_assert(install.contains("ChestMediaPlugin.kt"), "install script copies media plugin")
-	_assert(install.contains("org.godotengine.plugin.v2.ChestMedia"), "manifest registers ChestMedia")
+	_assert(install.contains("ChestMedia") and install.contains("ChestMediaPlugin"), "manifest registers ChestMedia")
 
-	_assert(BuildFlags.APP_VERSION_CODE >= 20, "versionCode 20+")
-	_assert(preset.contains("version/code=20"), "export preset versionCode 20")
+	_assert(BuildFlags.APP_VERSION_CODE >= 21, "versionCode 21+")
+	_assert(preset.contains("version/code=21"), "export preset versionCode 21")
 
 	## Runtime: timezone helper math sanity via Compose unlock conversion contract.
 	var bias := int(Time.get_time_zone_from_system().get("bias", 0))

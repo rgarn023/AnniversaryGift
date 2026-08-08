@@ -17,6 +17,7 @@ import org.godotengine.godot.plugin.UsedByGodot
 /**
  * Local notifications for new scrolls, lock progress, and lock completion.
  * Never includes message body, password, or coordinates.
+ * Scheduled-ready uses AlarmManager (inexact) so delivery works while the app is closed.
  */
 class ChestNotifyPlugin(godot: Godot) : GodotPlugin(godot) {
 
@@ -131,10 +132,66 @@ class ChestNotifyPlugin(godot: Godot) : GodotPlugin(godot) {
 	@UsedByGodot
 	fun cancel_notification(notifId: Int): Boolean {
 		return try {
+			ScheduledNotifyReceiver.cancelAlarm(appContext(), notifId)
 			val nm = appContext().getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 			nm.cancel(notifId)
 			true
 		} catch (_: Exception) {
+			false
+		}
+	}
+
+	/**
+	 * Schedule a local notification for a future time (epoch ms).
+	 * Uses inexact AlarmManager — works while app is closed; no exact-alarm permission.
+	 */
+	@UsedByGodot
+	fun schedule_notification(
+		channel: String,
+		title: String,
+		body: String,
+		deepLink: String,
+		notifId: Int,
+		triggerAtEpochMs: Long,
+	): Boolean {
+		return try {
+			ensure_channels()
+			if (triggerAtEpochMs <= System.currentTimeMillis() + 2000L) {
+				return show_notification(channel, title, body, deepLink, notifId)
+			}
+			ScheduledNotifyReceiver.scheduleAlarm(
+				appContext(),
+				notifId,
+				channel,
+				title,
+				body,
+				deepLink,
+				triggerAtEpochMs,
+			)
+			true
+		} catch (e: Exception) {
+			Log.w(TAG, "schedule_notification failed: ${e.javaClass.simpleName}")
+			false
+		}
+	}
+
+	@UsedByGodot
+	fun cancel_scheduled_notification(notifId: Int): Boolean {
+		return try {
+			ScheduledNotifyReceiver.cancelAlarm(appContext(), notifId)
+			true
+		} catch (_: Exception) {
+			false
+		}
+	}
+
+	@UsedByGodot
+	fun reschedule_persisted_notifications(): Boolean {
+		return try {
+			ScheduledNotifyReceiver.rescheduleAll(appContext())
+			true
+		} catch (e: Exception) {
+			Log.w(TAG, "reschedule_persisted_notifications failed: ${e.javaClass.simpleName}")
 			false
 		}
 	}

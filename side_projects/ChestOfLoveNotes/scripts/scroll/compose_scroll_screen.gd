@@ -25,6 +25,8 @@ const COL_DISABLED := Color(0.28, 0.22, 0.30, 0.85)
 const COL_ERROR := Color(1.0, 0.55, 0.48)
 
 var friends: Array = []
+## Optional current-user profile for debug self-send (real account id).
+var self_profile: Dictionary = {}
 var private_onboarding_label: bool = false
 ## Host sets this so Compose never extends under bottom navigation.
 var bottom_chrome_inset: int = 0
@@ -151,8 +153,9 @@ var _title_font: Font
 var _body_font: Font
 
 
-func setup(p_friends: Array, show_onboarding_chip: bool = false, draft: Dictionary = {}) -> void:
+func setup(p_friends: Array, show_onboarding_chip: bool = false, draft: Dictionary = {}, p_self_profile: Dictionary = {}) -> void:
 	friends = p_friends
+	self_profile = p_self_profile.duplicate(true) if not p_self_profile.is_empty() else {}
 	private_onboarding_label = show_onboarding_chip
 	_init_default_schedule()
 	_build_ui()
@@ -164,6 +167,24 @@ func setup(p_friends: Array, show_onboarding_chip: bool = false, draft: Dictiona
 		_sync_delivery_visibility()
 		_refresh_summary()
 		_update_validation()
+
+
+func _self_send_enabled() -> bool:
+	## Debug/test builds only — never expose in production release UI.
+	if not BuildFlags.DEBUG_SELF_SEND:
+		return false
+	if not OS.is_debug_build():
+		return false
+	return not str(self_profile.get("id", "")).is_empty()
+
+
+func _self_recipient_dict() -> Dictionary:
+	return {
+		"id": str(self_profile.get("id", "")),
+		"display_name": str(self_profile.get("display_name", "Me")),
+		"username": str(self_profile.get("username", "")),
+		"is_self_test": true,
+	}
 
 
 func _notification(what: int) -> void:
@@ -214,8 +235,11 @@ func apply_draft(draft: Dictionary) -> void:
 			_selected_friend = {
 				"id": rid,
 				"display_name": str(draft.get("recipient_display_name", "Friend")),
-				"username": str(draft.get("recipient_username", "")),
+				"username": str(draft.get("username", draft.get("recipient_username", ""))),
 			}
+			if _self_send_enabled() and rid == str(self_profile.get("id", "")):
+				_selected_friend["is_self_test"] = true
+				_selected_friend["display_name"] = str(self_profile.get("display_name", _selected_friend["display_name"]))
 	if _title_edit:
 		_title_edit.text = str(draft.get("title", ""))
 		if _title_count:
@@ -1951,6 +1975,8 @@ func _refresh_recipient_row() -> void:
 	## Short label text — ellipsis handles overflow inside the bounded row.
 	if _selected_friend.is_empty():
 		_recipient_btn.text = "Choose a friend  ›"
+	elif bool(_selected_friend.get("is_self_test", false)):
+		_recipient_btn.text = "Self (Test)  ›"
 	else:
 		var name := str(_selected_friend.get("display_name", "Friend"))
 		var user := str(_selected_friend.get("username", ""))
@@ -2081,7 +2107,8 @@ func validate_compose_draft() -> Dictionary:
 	## Single source of truth for Ready Check + Send button.
 	var blockers: PackedStringArray = PackedStringArray()
 	var warnings: PackedStringArray = PackedStringArray()
-	if friends.is_empty():
+	var has_self := _self_send_enabled()
+	if friends.is_empty() and not has_self:
 		blockers.append("Add a friend before composing a scroll.")
 	elif _selected_friend.is_empty() or str(_selected_friend.get("id", "")).is_empty():
 		blockers.append("Select a recipient")
@@ -2244,7 +2271,28 @@ func _open_friend_picker() -> void:
 	list_scroll.add_child(list)
 	MobileUi.enable_touch_scroll_on_tree(list)
 
-	if friends.is_empty():
+	if _self_send_enabled():
+		var self_row := Button.new()
+		self_row.custom_minimum_size = Vector2(0, 60)
+		self_row.focus_mode = Control.FOCUS_NONE
+		self_row.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		self_row.text = "Send to Myself (Test)"
+		_style_row_button(self_row)
+		self_row.pressed.connect(func() -> void:
+			_selected_friend = _self_recipient_dict()
+			_refresh_recipient_row()
+			_refresh_summary()
+			_update_validation()
+			_hide_overlay()
+		)
+		list.add_child(self_row)
+		var hint := Label.new()
+		hint.text = "Uses your real account as recipient. All locks still apply."
+		hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		hint.add_theme_font_size_override("font_size", 14)
+		hint.add_theme_color_override("font_color", COL_SUPPORT)
+		list.add_child(hint)
+	if friends.is_empty() and not _self_send_enabled():
 		var empty := Label.new()
 		empty.text = "No accepted friends yet."
 		empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

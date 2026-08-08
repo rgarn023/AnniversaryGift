@@ -48,6 +48,8 @@ func _ready() -> void:
 	state = AppState.new()
 	state.bootstrap()
 	state.reduced_motion = MobileUi.reduced_motion()
+	NotificationHelper.ensure_channels()
+	NotificationHelper.reschedule_persisted()
 	_build_chrome()
 	_scroll_viewer = LoveNotesScrollViewer.new()
 	_scroll_viewer.set_reduced_motion(state.reduced_motion)
@@ -1069,6 +1071,9 @@ func _load_online_chest_items(filter: String) -> Array[Dictionary]:
 	var chest: Dictionary = data.get("chest", {}) if typeof(data.get("chest")) == TYPE_DICTIONARY else {}
 	var scrolls: Array = chest.get("scrolls", []) if typeof(chest.get("scrolls")) == TYPE_ARRAY else []
 	var requests: Array = chest.get("friend_requests", []) if typeof(chest.get("friend_requests")) == TYPE_ARRAY else []
+	## Keep scheduled-ready alarms in sync (works while app later closed).
+	NotificationHelper.ensure_channels()
+	NotificationHelper.sync_scheduled_from_chest(scrolls)
 	for s in scrolls:
 		if typeof(s) != TYPE_DICTIONARY:
 			continue
@@ -1471,6 +1476,7 @@ func _show_lock_actions_panel(item: Dictionary, lines: PackedStringArray, eval: 
 				if not bool(fix2.get("ok", false)):
 					_show_toast(str(fix2.get("error", "Location is needed to start Activity Lock.")))
 					return
+				## Uses while-in-use location + foreground service (not "Allow all the time").
 				ActivityLockHelper.start_challenge(sid, target, float(fix2.lat), float(fix2.lng))
 				NotificationHelper.request_permission_contextual()
 				NotificationHelper.notify_activity_progress(0.0, target)
@@ -1478,7 +1484,10 @@ func _show_lock_actions_panel(item: Dictionary, lines: PackedStringArray, eval: 
 				_show_locked_details(item)
 			))
 		elif not bool(prog.get("completed", false)):
+			## Merge any background foreground-service progress before showing UI.
+			ActivityLockHelper.sync_from_native_service(sid)
 			box.add_child(_make_button("Update Activity Progress", func() -> void:
+				ActivityLockHelper.sync_from_native_service(sid)
 				var fix3 := LocationHelper.get_current_fix(true)
 				if bool(fix3.get("ok", false)):
 					var res := ActivityLockHelper.apply_sample(sid, float(fix3.lat), float(fix3.lng), float(fix3.get("accuracy_m", 25.0)))
@@ -1818,7 +1827,14 @@ func _show_compose() -> void:
 	compose.preview_requested.connect(_on_compose_preview)
 	compose.send_requested.connect(_on_compose_send_requested)
 	## Never show "Private Onboarding Build" chip in test APKs.
-	compose.setup(friends, false, draft_to_restore)
+	var me_profile: Dictionary = {}
+	if state.is_demo():
+		me_profile = state.demo.get_profile()
+	elif state.is_online():
+		me_profile = state.profiles.profile if typeof(state.profiles.profile) == TYPE_DICTIONARY else {}
+		if me_profile.is_empty() and state.tokens != null and not str(state.tokens.user_id).is_empty():
+			me_profile = {"id": state.tokens.user_id, "display_name": "Me", "username": ""}
+	compose.setup(friends, false, draft_to_restore, me_profile)
 	_add_bottom_nav("compose")
 	_finish_nav_transition()
 	if not fetch_error.is_empty():

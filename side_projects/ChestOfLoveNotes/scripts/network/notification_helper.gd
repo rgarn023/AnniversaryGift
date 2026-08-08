@@ -63,8 +63,71 @@ static func notify_new_scroll(from_name: String) -> void:
 	show("new_scroll", title, body, "chest", 1101)
 
 
-static func notify_scheduled_ready() -> void:
-	show("scheduled_ready", "Scroll ready", "A scroll is now available to open.", "chest", 1102)
+static func notify_scheduled_ready(scroll_id: String = "") -> void:
+	var link := "chest" if scroll_id.is_empty() else "chest:%s" % scroll_id
+	show("scheduled_ready", "Scroll ready", "A scroll is now available to open.", link, 1102)
+
+
+static func schedule_ready_at(unlock_unix: int, scroll_id: String) -> void:
+	## Schedule for unlock time while app may be closed (AlarmManager inexact).
+	var p = _plugin()
+	if p == null:
+		return
+	ensure_channels()
+	var notif_id := 200000 + int(absi(hash(str(scroll_id))) % 50000)
+	var trigger_ms := int(unlock_unix) * 1000
+	var link := "chest:%s" % scroll_id
+	if p.has_method("schedule_notification"):
+		p.schedule_notification(
+			"scheduled_ready",
+			"Scroll ready",
+			"A scroll is now available to open.",
+			link,
+			notif_id,
+			trigger_ms
+		)
+	elif trigger_ms <= int(Time.get_unix_time_from_system()) * 1000 + 2000:
+		show("scheduled_ready", "Scroll ready", "A scroll is now available to open.", link, notif_id)
+
+
+static func cancel_scheduled_ready(scroll_id: String) -> void:
+	var p = _plugin()
+	if p == null:
+		return
+	var notif_id := 200000 + int(absi(hash(str(scroll_id))) % 50000)
+	if p.has_method("cancel_scheduled_notification"):
+		p.cancel_scheduled_notification(notif_id)
+	elif p.has_method("cancel_notification"):
+		p.cancel_notification(notif_id)
+
+
+static func reschedule_persisted() -> void:
+	var p = _plugin()
+	if p != null and p.has_method("reschedule_persisted_notifications"):
+		p.reschedule_persisted_notifications()
+
+
+static func sync_scheduled_from_chest(items: Array) -> void:
+	## Register/cancel scheduled-ready alarms from incoming chest scrolls.
+	var now_u := int(Time.get_unix_time_from_system())
+	for it in items:
+		if typeof(it) != TYPE_DICTIONARY:
+			continue
+		var item: Dictionary = it
+		var sid := str(item.get("id", ""))
+		if sid.is_empty():
+			continue
+		if bool(item.get("opened", false)) or bool(item.get("is_opened", false)):
+			cancel_scheduled_ready(sid)
+			continue
+		var unlock := int(item.get("unlock_at_unix", item.get("unlock_unix", 0)))
+		if unlock <= 0:
+			continue
+		if unlock <= now_u:
+			## Already eligible — do not leave a stale future alarm.
+			cancel_scheduled_ready(sid)
+			continue
+		schedule_ready_at(unlock, sid)
 
 
 static func notify_activity_progress(current_km: float, target_km: float) -> void:

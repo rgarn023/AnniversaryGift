@@ -58,9 +58,9 @@ Deno.serve(async (req) => {
     const body = (await req.json()) as Body;
     requireFields(body, ["recipient_id", "message"]);
 
-    if (body.recipient_id === me) {
-      throw new AppError("invalid_request", "Cannot send a scroll to yourself", 400);
-    }
+    // Self-send is allowed for end-to-end lock testing (sender == recipient).
+    // Locks are NOT bypassed when recipient is the sender.
+    const isSelfSend = body.recipient_id === me;
 
     const message = body.message.trim();
     if (!message || message.length > MAX_MESSAGE) {
@@ -165,20 +165,22 @@ Deno.serve(async (req) => {
       focusDurationHours = Math.round(hours);
     }
 
-    const { data: friends } = await service.rpc("are_friends", {
-      a: me,
-      b: body.recipient_id,
-    });
-    if (!friends) {
-      throw new AppError("not_friends", "You can only send scrolls to friends", 403);
-    }
+    if (!isSelfSend) {
+      const { data: friends } = await service.rpc("are_friends", {
+        a: me,
+        b: body.recipient_id,
+      });
+      if (!friends) {
+        throw new AppError("not_friends", "You can only send scrolls to friends", 403);
+      }
 
-    const { data: blocked } = await service.rpc("is_blocked", {
-      a: me,
-      b: body.recipient_id,
-    });
-    if (blocked) {
-      throw new AppError("blocked", "Cannot send scroll — a block exists", 403);
+      const { data: blocked } = await service.rpc("is_blocked", {
+        a: me,
+        b: body.recipient_id,
+      });
+      if (blocked) {
+        throw new AppError("blocked", "Cannot send scroll — a block exists", 403);
+      }
     }
 
     const encrypted = await encryptMessage(message);

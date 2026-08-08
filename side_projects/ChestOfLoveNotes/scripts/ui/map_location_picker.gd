@@ -1,7 +1,8 @@
 extends Control
 class_name MapLocationPicker
-## Lightweight OSM tile map for Location Lock selection.
-## Created only when Choose on Map opens; frees tile HTTP on close.
+## Long-lived OSM tile map for one Choose-on-Map session.
+## Gestures mutate camera state on THIS instance — never recreate the picker/provider.
+## After first successful paint, pan/pinch never blank the map or show a fatal overlay.
 
 signal confirmed(place: Dictionary)
 signal cancelled
@@ -10,8 +11,11 @@ const TILE_URL := "https://tile.openstreetmap.org/%d/%d/%d.png"
 const USER_AGENT := "ChestOfLoveNotes/1.0 (Charoite Games; map-picker)"
 const MIN_ZOOM := 3
 const MAX_ZOOM := 18
+const TILE_PX := 256.0
+const MAX_TILE_RETRIES := 3
 
 var radius_m: int = 500
+## Canonical camera state for the whole picker session.
 var _center_lat: float = 37.5407
 var _center_lng: float = -77.4360
 var _zoom: int = 13
@@ -23,9 +27,11 @@ var _tile_layer: Control
 var _overlay: Control
 var _status: Label
 var _search: LineEdit
-var _http: HTTPRequest
-var _tile_cache: Dictionary = {}
-var _loading_tiles: Dictionary = {}
+var _tile_cache: Dictionary = {} ## key -> ImageTexture
+var _tile_nodes: Dictionary = {} ## key -> TextureRect (current zoom layer)
+var _loading_tiles: Dictionary = {} ## key -> true
+var _tile_waiters: Dictionary = {} ## key -> Array[TextureRect]
+var _tile_retry_counts: Dictionary = {} ## key -> int
 var _drag_active: bool = false
 var _drag_last: Vector2 = Vector2.ZERO
 var _search_service: LocationSearchService
@@ -38,7 +44,7 @@ var _loading_label: Label
 var _confirm_btn: Button
 var _drop_btn: Button
 var _tiles_ready: bool = false
-var _pending_tile_count: int = 0
+var _initial_paint_done: bool = false
 var _map_host: Control
 var _retry_btn: Button
 var _layout_ready: bool = false
@@ -47,6 +53,8 @@ var _pinch_touches: Dictionary = {}
 var _pinch_last_dist: float = 0.0
 var _pinch_active: bool = false
 var _pinch_accum: float = 0.0
+var _refresh_queued: bool = false
+var _last_refresh_msec: int = 0
 
 
 func setup(initial: Dictionary = {}, p_radius_m: int = 500, search_service: LocationSearchService = null) -> void:
@@ -63,7 +71,7 @@ func setup(initial: Dictionary = {}, p_radius_m: int = 500, search_service: Loca
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	z_index = 80
 	_build_ui()
-	_set_loading(true)
+	_show_initial_loading(true)
 	_sync_action_enabled()
 	call_deferred("_bootstrap_map_after_layout")
 
@@ -105,6 +113,7 @@ func _build_ui() -> void:
 	_map_host.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_map_host.custom_minimum_size = Vector2(0, 280)
 	_map_host.clip_contents = true
+	_map_host.mouse_filter = Control.MOUSE_FILTER_STOP
 	root.add_child(_map_host)
 
 	_tile_layer = Control.new()
@@ -157,9 +166,9 @@ func _build_ui() -> void:
 		_load_failed = false
 		_retry_btn.visible = false
 		_loading_label.text = "Loading map…"
-		_set_loading(true)
+		_show_initial_loading(true)
 		if _layout_ready:
-			_refresh_tiles()
+			_refresh_tiles(true)
 		else:
 			call_deferred("_bootstrap_map_after_layout")
 	)
@@ -185,9 +194,7 @@ func _build_ui() -> void:
 	zin.custom_minimum_size = Vector2(52, 52)
 	MobileUi.style_button(zin, 52)
 	zin.pressed.connect(func() -> void:
-		_zoom = mini(_zoom + 1, MAX_ZOOM)
-		_set_loading(true)
-		_refresh_tiles()
+		_set_zoom_level(_zoom + 1)
 	)
 	zoom_row.add_child(zin)
 	var zout := Button.new()
@@ -195,9 +202,7 @@ func _build_ui() -> void:
 	zout.custom_minimum_size = Vector2(52, 52)
 	MobileUi.style_button(zout, 52)
 	zout.pressed.connect(func() -> void:
-		_zoom = maxi(_zoom - 1, MIN_ZOOM)
-		_set_loading(true)
-		_refresh_tiles()
+		_set_zoom_level(_zoom - 1)
 	)
 	zoom_row.add_child(zout)
 	_drop_btn = Button.new()
@@ -235,10 +240,6 @@ func _build_ui() -> void:
 	_confirm_btn.pressed.connect(_confirm)
 	actions.add_child(_confirm_btn)
 
-	_http = HTTPRequest.new()
-	_http.timeout = 12.0
-	add_child(_http)
-
 	_debounce = Timer.new()
 	_debounce.one_shot = true
 	_debounce.wait_time = 0.35
@@ -247,7 +248,7 @@ func _build_ui() -> void:
 
 	_map_host.resized.connect(func() -> void:
 		if _layout_ready and _map_host.size.x > 8.0:
-			_refresh_tiles()
+			_queue_refresh_tiles()
 			_overlay.queue_redraw()
 	)
 
@@ -261,11 +262,9 @@ func set_radius(m: int) -> void:
 
 
 func _bootstrap_map_after_layout() -> void:
-	## Wait until the map host has a real non-zero size before first tile request.
-	## Initializing against a zero-size viewport is the black-until-pan bug.
 	if not _alive:
 		return
-	_set_loading(true)
+	_show_initial_loading(true)
 	if _loading_label:
 		_loading_label.text = "Loading map…"
 	if _retry_btn:
@@ -279,28 +278,26 @@ func _bootstrap_map_after_layout() -> void:
 	if not _alive:
 		return
 	if _map_host == null or _map_host.size.x < 64.0 or _map_host.size.y < 64.0:
-		_load_failed = true
-		_tiles_ready = false
-		if _loading_overlay:
-			_loading_overlay.visible = true
-			_loading_overlay.modulate.a = 1.0
-		if _loading_label:
-			_loading_label.text = "Couldn't load the map."
-		if _retry_btn:
-			_retry_btn.visible = true
-		_sync_action_enabled()
+		_show_fatal_map_error()
 		return
 	_layout_ready = true
-	## One extra frame after size settles, then center/zoom + first tiles.
 	await get_tree().process_frame
 	if not _alive:
 		return
-	_refresh_tiles()
+	_refresh_tiles(true)
 	if _overlay:
 		_overlay.queue_redraw()
+	## Only for INITIAL load — never after first paint.
+	get_tree().create_timer(8.0).timeout.connect(func() -> void:
+		if _alive and not _initial_paint_done:
+			_show_fatal_map_error()
+	, CONNECT_ONE_SHOT)
 
 
-func _set_loading(on: bool) -> void:
+func _show_initial_loading(on: bool) -> void:
+	## Full-screen overlay is ONLY for first open / fatal retry — never for pan/pinch.
+	if _initial_paint_done and on:
+		return
 	_tiles_ready = not on
 	if _loading_overlay:
 		_loading_overlay.visible = on
@@ -308,12 +305,52 @@ func _set_loading(on: bool) -> void:
 	_sync_action_enabled()
 
 
+func _show_fatal_map_error() -> void:
+	## Only when no usable initial map could be shown.
+	if _initial_paint_done:
+		return
+	_load_failed = true
+	_tiles_ready = false
+	if _loading_overlay:
+		_loading_overlay.visible = true
+		_loading_overlay.modulate.a = 1.0
+	if _loading_label:
+		_loading_label.text = "Couldn't load the map."
+	if _retry_btn:
+		_retry_btn.visible = true
+		var alt: Variant = _retry_btn.get_meta("_search_instead", null)
+		if alt is Control:
+			(alt as Control).visible = true
+	_sync_action_enabled()
+
+
+func _hide_loading_overlay() -> void:
+	_tiles_ready = true
+	_load_failed = false
+	_initial_paint_done = true
+	if _loading_overlay and _loading_overlay.visible:
+		var tw := create_tween()
+		tw.tween_property(_loading_overlay, "modulate:a", 0.0, 0.22)
+		tw.finished.connect(func() -> void:
+			if is_instance_valid(_loading_overlay):
+				_loading_overlay.visible = false
+				_loading_overlay.modulate.a = 1.0
+		)
+	if _retry_btn:
+		_retry_btn.visible = false
+		var alt2: Variant = _retry_btn.get_meta("_search_instead", null)
+		if alt2 is Control:
+			(alt2 as Control).visible = false
+	_sync_action_enabled()
+
+
 func _sync_action_enabled() -> void:
 	var has_pin := is_finite(_selected_lat) and is_finite(_selected_lng)
+	var usable := _tiles_ready or _initial_paint_done
 	if _confirm_btn:
-		_confirm_btn.disabled = not (has_pin and _tiles_ready)
+		_confirm_btn.disabled = not (has_pin and usable)
 	if _drop_btn:
-		_drop_btn.disabled = not _tiles_ready
+		_drop_btn.disabled = not usable
 
 
 func _on_search_changed(_t: String) -> void:
@@ -370,7 +407,7 @@ func _apply_place(place: Dictionary) -> void:
 	_selected_name = str(place.get("name", "Selected place"))
 	_selected_address = str(place.get("address", ""))
 	_status.text = "%s · unlock within %s" % [_selected_name, LocationHelper.format_radius(radius_m)]
-	_refresh_tiles()
+	_refresh_tiles(true)
 	_overlay.queue_redraw()
 
 
@@ -413,20 +450,21 @@ func _shutdown() -> void:
 	if _debounce:
 		_debounce.stop()
 	_loading_tiles.clear()
+	_tile_waiters.clear()
 	queue_free()
 
 
 func _on_map_input(ev: InputEvent) -> void:
-	## Map owns gestures while the finger is inside the map host.
+	## Map owns one-finger pan and two-finger pinch; parent scroll must not move.
 	if ev is InputEventMouseButton:
 		var mb := ev as InputEventMouseButton
 		if mb.button_index == MOUSE_BUTTON_LEFT:
 			_drag_active = mb.pressed and not _pinch_active
 			_drag_last = mb.position
 		elif mb.button_index == MOUSE_BUTTON_WHEEL_UP and mb.pressed:
-			_set_zoom_level(_zoom + 1)
+			_set_zoom_level(_zoom + 1, mb.position)
 		elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN and mb.pressed:
-			_set_zoom_level(_zoom - 1)
+			_set_zoom_level(_zoom - 1, mb.position)
 		_overlay.accept_event()
 	elif ev is InputEventMouseMotion and _drag_active and not _pinch_active:
 		var mm := ev as InputEventMouseMotion
@@ -462,7 +500,7 @@ func _on_map_input(ev: InputEvent) -> void:
 		elif mag.factor < 0.98:
 			_pinch_accum -= 1.0
 		if absf(_pinch_accum) >= 1.0:
-			_set_zoom_level(_zoom + int(signf(_pinch_accum)))
+			_set_zoom_level(_zoom + int(signf(_pinch_accum)), mag.position)
 			_pinch_accum = 0.0
 		_overlay.accept_event()
 
@@ -477,29 +515,37 @@ func _handle_map_pinch() -> void:
 	var dist := a.distance_to(b)
 	if dist < 16.0:
 		return
+	var mid := (a + b) * 0.5
 	if not _pinch_active:
 		_pinch_active = true
 		_pinch_last_dist = dist
 		_drag_active = false
 		return
 	var ratio := dist / maxf(_pinch_last_dist, 1.0)
-	## Convert continuous pinch into discrete OSM zoom steps.
-	if ratio > 1.18:
-		_set_zoom_level(_zoom + 1)
+	## Discrete OSM zoom steps around pinch midpoint.
+	if ratio > 1.16:
+		_set_zoom_level(_zoom + 1, mid)
 		_pinch_last_dist = dist
-	elif ratio < 0.85:
-		_set_zoom_level(_zoom - 1)
+	elif ratio < 0.86:
+		_set_zoom_level(_zoom - 1, mid)
 		_pinch_last_dist = dist
 
 
-func _set_zoom_level(z: int) -> void:
+func _set_zoom_level(z: int, focal_screen: Vector2 = Vector2.INF) -> void:
 	var nz := clampi(z, MIN_ZOOM, MAX_ZOOM)
 	if nz == _zoom:
 		return
+	var area := _map_host.size if _map_host else Vector2(400, 400)
+	var focus := focal_screen
+	if not is_finite(focus.x) or not is_finite(focus.y):
+		focus = area * 0.5
+	var keep := _screen_to_latlng(focus, area)
 	_zoom = nz
-	if _tiles_ready:
-		_set_loading(true)
-	_refresh_tiles()
+	## Keep the focal lat/lng under the same screen point after zoom.
+	_recenter_so_latlng_at_screen(keep.x, keep.y, focus, area)
+	## Never blank / never re-show full loading overlay after first paint.
+	_refresh_tiles(true)
+	_overlay.queue_redraw()
 
 
 func _pan_by_pixels(delta: Vector2) -> void:
@@ -507,15 +553,31 @@ func _pan_by_pixels(delta: Vector2) -> void:
 	var world_x := (_center_lng + 180.0) / 360.0 * n
 	var lat_rad := deg_to_rad(_center_lat)
 	var world_y := (1.0 - log(tan(lat_rad) + 1.0 / cos(lat_rad)) / PI) / 2.0 * n
-	world_x -= delta.x / 256.0
-	world_y -= delta.y / 256.0
+	world_x -= delta.x / TILE_PX
+	world_y -= delta.y / TILE_PX
 	_center_lng = world_x / n * 360.0 - 180.0
 	var y := world_y / n
 	var lat_r := atan(sinh(PI * (1.0 - 2.0 * y)))
 	_center_lat = rad_to_deg(lat_r)
 	_center_lat = clampf(_center_lat, -85.0, 85.0)
-	_refresh_tiles()
+	_queue_refresh_tiles()
 	_overlay.queue_redraw()
+
+
+func _queue_refresh_tiles() -> void:
+	## Throttle pan refreshes so we don't thrash HTTP / node churn.
+	var now := Time.get_ticks_msec()
+	if now - _last_refresh_msec < 32:
+		if _refresh_queued:
+			return
+		_refresh_queued = true
+		get_tree().create_timer(0.034).timeout.connect(func() -> void:
+			_refresh_queued = false
+			if _alive:
+				_refresh_tiles(false)
+		, CONNECT_ONE_SHOT)
+		return
+	_refresh_tiles(false)
 
 
 func _lon_to_x(lon: float, zoom: int) -> float:
@@ -527,123 +589,103 @@ func _lat_to_y(lat: float, zoom: int) -> float:
 	return (1.0 - log(tan(lat_rad) + 1.0 / cos(lat_rad)) / PI) / 2.0 * pow(2.0, float(zoom))
 
 
-func _refresh_tiles() -> void:
+func _screen_to_latlng(screen: Vector2, area: Vector2) -> Vector2:
+	var cx := _lon_to_x(_center_lng, _zoom)
+	var cy := _lat_to_y(_center_lat, _zoom)
+	var wx := cx + (screen.x - area.x * 0.5) / TILE_PX
+	var wy := cy + (screen.y - area.y * 0.5) / TILE_PX
+	var n := pow(2.0, float(_zoom))
+	var lng := wx / n * 360.0 - 180.0
+	var y := wy / n
+	var lat_r := atan(sinh(PI * (1.0 - 2.0 * y)))
+	return Vector2(rad_to_deg(lat_r), lng)
+
+
+func _recenter_so_latlng_at_screen(lat: float, lng: float, screen: Vector2, area: Vector2) -> void:
+	var wx := _lon_to_x(lng, _zoom)
+	var wy := _lat_to_y(lat, _zoom)
+	var cx := wx - (screen.x - area.x * 0.5) / TILE_PX
+	var cy := wy - (screen.y - area.y * 0.5) / TILE_PX
+	var n := pow(2.0, float(_zoom))
+	_center_lng = cx / n * 360.0 - 180.0
+	var y := cy / n
+	var lat_r := atan(sinh(PI * (1.0 - 2.0 * y)))
+	_center_lat = clampf(rad_to_deg(lat_r), -85.0, 85.0)
+
+
+func _refresh_tiles(force: bool = false) -> void:
 	if _tile_layer == null or _map_host == null:
 		return
 	var area := _map_host.size
 	if area.x < 64.0 or area.y < 64.0:
-		## Zero-size viewport — wait for layout bootstrap.
 		return
-	for c in _tile_layer.get_children():
-		c.queue_free()
-	_pending_tile_count = 0
+	_last_refresh_msec = Time.get_ticks_msec()
 	var center_x := _lon_to_x(_center_lng, _zoom)
 	var center_y := _lat_to_y(_center_lat, _zoom)
-	var tiles_x := int(ceil(area.x / 256.0)) + 2
-	var tiles_y := int(ceil(area.y / 256.0)) + 2
+	var tiles_x := int(ceil(area.x / TILE_PX)) + 2
+	var tiles_y := int(ceil(area.y / TILE_PX)) + 2
 	var start_tx := int(floor(center_x - tiles_x * 0.5))
 	var start_ty := int(floor(center_y - tiles_y * 0.5))
-	var cached_hits := 0
-	var requested := 0
+	var needed: Dictionary = {}
+	var painted := 0
+	var max_t := int(pow(2.0, float(_zoom)))
 	for ty in range(start_ty, start_ty + tiles_y + 1):
 		for tx in range(start_tx, start_tx + tiles_x + 1):
-			var max_t := int(pow(2.0, float(_zoom)))
 			if ty < 0 or ty >= max_t:
 				continue
 			var wrapped_x := posmod(tx, max_t)
-			var px := (float(tx) - center_x) * 256.0 + area.x * 0.5
-			var py := (float(ty) - center_y) * 256.0 + area.y * 0.5
 			var key := "%d/%d/%d" % [_zoom, wrapped_x, ty]
-			var tr := TextureRect.new()
-			tr.position = Vector2(px, py)
-			tr.size = Vector2(256, 256)
-			tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-			tr.stretch_mode = TextureRect.STRETCH_SCALE
-			tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
-			_tile_layer.add_child(tr)
-			if _tile_cache.has(key):
-				tr.texture = _tile_cache[key]
-				cached_hits += 1
+			needed[key] = true
+			var px := (float(tx) - center_x) * TILE_PX + area.x * 0.5
+			var py := (float(ty) - center_y) * TILE_PX + area.y * 0.5
+			var tr: TextureRect = null
+			if _tile_nodes.has(key) and is_instance_valid(_tile_nodes[key]):
+				tr = _tile_nodes[key]
 			else:
-				requested += 1
-				_pending_tile_count += 1
-				_request_tile(key, _zoom, wrapped_x, ty, tr)
-	if requested == 0 and cached_hits > 0:
-		_finish_loading_if_ready()
-	elif requested > 0:
-		## Failsafe: never leave Loading map forever.
-		get_tree().create_timer(2.5).timeout.connect(func() -> void:
-			if _alive and not _tiles_ready:
-				_finish_loading_if_ready(true)
-		, CONNECT_ONE_SHOT)
-	_overlay.queue_redraw()
-	_sync_action_enabled()
-
-
-func _finish_loading_if_ready(force: bool = false) -> void:
-	if not _alive:
-		return
-	if not force and _pending_tile_count > 0:
-		return
-	var painted := 0
-	if _tile_layer:
-		for c in _tile_layer.get_children():
-			if c is TextureRect and (c as TextureRect).texture != null:
+				tr = TextureRect.new()
+				tr.size = Vector2(TILE_PX, TILE_PX)
+				tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+				tr.stretch_mode = TextureRect.STRETCH_SCALE
+				tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+				tr.set_meta("tile_key", key)
+				_tile_layer.add_child(tr)
+				_tile_nodes[key] = tr
+				if _tile_cache.has(key):
+					tr.texture = _tile_cache[key]
+				else:
+					## Subtle placeholder — keep prior tiles elsewhere visible.
+					tr.modulate = Color(0.12, 0.1, 0.18, 1.0)
+					_request_tile(key, _zoom, wrapped_x, ty, tr)
+			tr.position = Vector2(px, py)
+			tr.visible = true
+			if tr.texture != null:
+				tr.modulate = Color.WHITE
 				painted += 1
-	if painted <= 0 and not force:
-		## Tiles requested but none painted yet — keep loading.
-		return
-	if painted <= 0 and force:
-		_load_failed = true
-		_tiles_ready = false
-		if _loading_overlay:
-			_loading_overlay.visible = true
-			_loading_overlay.modulate.a = 1.0
-		if _loading_label:
-			_loading_label.text = "Couldn't load the map."
-		if _retry_btn:
-			_retry_btn.visible = true
-			var alt: Variant = _retry_btn.get_meta("_search_instead", null)
-			if alt is Control:
-				(alt as Control).visible = true
+	## Remove nodes for tiles no longer in view / different zoom.
+	var stale: Array = []
+	for k in _tile_nodes.keys():
+		if not needed.has(k):
+			stale.append(k)
+	for k2 in stale:
+		var node = _tile_nodes[k2]
+		_tile_nodes.erase(k2)
+		if is_instance_valid(node):
+			node.queue_free()
+	if painted > 0 and not _initial_paint_done:
+		_hide_loading_overlay()
+	elif painted > 0:
+		_tiles_ready = true
 		_sync_action_enabled()
-		return
-	_load_failed = false
-	_tiles_ready = true
-	## Force a real redraw — tiles can arrive before first paint without interaction.
-	if _tile_layer:
-		_tile_layer.visible = false
-		await get_tree().process_frame
-		if not _alive:
-			return
-		_tile_layer.visible = true
-		_tile_layer.queue_redraw()
-		for c in _tile_layer.get_children():
-			if c is CanvasItem:
-				(c as CanvasItem).queue_redraw()
-	if _overlay:
-		_overlay.queue_redraw()
-	if _map_host:
-		_map_host.queue_redraw()
-	if _loading_overlay and _loading_overlay.visible:
-		var tw := create_tween()
-		tw.tween_property(_loading_overlay, "modulate:a", 0.0, 0.28)
-		tw.finished.connect(func() -> void:
-			if is_instance_valid(_loading_overlay):
-				_loading_overlay.visible = false
-				_loading_overlay.modulate.a = 1.0
-		)
-	if _retry_btn:
-		_retry_btn.visible = false
-		var alt2: Variant = _retry_btn.get_meta("_search_instead", null)
-		if alt2 is Control:
-			(alt2 as Control).visible = false
-	_sync_action_enabled()
+	_overlay.queue_redraw()
+	if force:
+		pass
 
 
 func _request_tile(key: String, z: int, x: int, y: int, tr: TextureRect) -> void:
+	if not _tile_waiters.has(key):
+		_tile_waiters[key] = []
+	(_tile_waiters[key] as Array).append(tr)
 	if _loading_tiles.has(key):
-		_pending_tile_count = maxi(0, _pending_tile_count - 1)
 		return
 	_loading_tiles[key] = true
 	var url := TILE_URL % [z, x, y]
@@ -653,43 +695,73 @@ func _request_tile(key: String, z: int, x: int, y: int, tr: TextureRect) -> void
 	var err := http.request(url, PackedStringArray(["User-Agent: %s" % USER_AGENT]))
 	if err != OK:
 		_loading_tiles.erase(key)
-		_pending_tile_count = maxi(0, _pending_tile_count - 1)
 		http.queue_free()
-		_finish_loading_if_ready()
+		_schedule_tile_retry(key, z, x, y)
 		return
 	var completed: Array = await http.request_completed
 	if is_instance_valid(http):
 		http.queue_free()
 	_loading_tiles.erase(key)
-	_pending_tile_count = maxi(0, _pending_tile_count - 1)
-	if not _alive or completed.size() < 4:
-		_finish_loading_if_ready()
+	if not _alive:
+		_tile_waiters.erase(key)
 		return
-	if int(completed[0]) != HTTPRequest.RESULT_SUCCESS or int(completed[1]) != 200:
-		_finish_loading_if_ready()
+	if completed.size() < 4 or int(completed[0]) != HTTPRequest.RESULT_SUCCESS or int(completed[1]) != 200:
+		## Quiet retry — NEVER escalate a single tile failure to full-map error after paint.
+		_schedule_tile_retry(key, z, x, y)
 		return
 	var body: PackedByteArray = completed[3]
 	var img := Image.new()
 	if img.load_png_from_buffer(body) != OK:
-		_finish_loading_if_ready()
+		_schedule_tile_retry(key, z, x, y)
 		return
 	var tex := ImageTexture.create_from_image(img)
 	_tile_cache[key] = tex
-	if is_instance_valid(tr):
-		tr.texture = tex
-		tr.queue_redraw()
+	_tile_retry_counts.erase(key)
+	var waiters: Array = _tile_waiters.get(key, [])
+	_tile_waiters.erase(key)
+	for w in waiters:
+		if w is TextureRect and is_instance_valid(w):
+			(w as TextureRect).texture = tex
+			(w as TextureRect).modulate = Color.WHITE
+			(w as TextureRect).queue_redraw()
+	## Also update live node map if present.
+	if _tile_nodes.has(key) and is_instance_valid(_tile_nodes[key]):
+		(_tile_nodes[key] as TextureRect).texture = tex
+		(_tile_nodes[key] as TextureRect).modulate = Color.WHITE
 	if _tile_layer:
 		_tile_layer.queue_redraw()
 	if _overlay:
 		_overlay.queue_redraw()
-	_finish_loading_if_ready()
+	if not _initial_paint_done:
+		var any := 0
+		for n in _tile_nodes.values():
+			if n is TextureRect and (n as TextureRect).texture != null:
+				any += 1
+		if any > 0:
+			_hide_loading_overlay()
+
+
+func _schedule_tile_retry(key: String, z: int, x: int, y: int) -> void:
+	var n := int(_tile_retry_counts.get(key, 0)) + 1
+	_tile_retry_counts[key] = n
+	if n > MAX_TILE_RETRIES:
+		_tile_waiters.erase(key)
+		return
+	var delay := 0.4 * float(n)
+	get_tree().create_timer(delay).timeout.connect(func() -> void:
+		if not _alive:
+			return
+		if not _tile_nodes.has(key) or not is_instance_valid(_tile_nodes[key]):
+			_tile_waiters.erase(key)
+			return
+		_request_tile(key, z, x, y, _tile_nodes[key])
+	, CONNECT_ONE_SHOT)
 
 
 func _draw_overlay() -> void:
 	if _overlay == null:
 		return
 	var area := _overlay.size
-	## Center crosshair
 	_overlay.draw_circle(area * 0.5, 5.0, Color(0.98, 0.86, 0.45, 0.95))
 	if is_finite(_selected_lat) and is_finite(_selected_lng):
 		var pt := _latlng_to_screen(_selected_lat, _selected_lng, area)
@@ -704,11 +776,11 @@ func _latlng_to_screen(lat: float, lng: float, area: Vector2) -> Vector2:
 	var cy := _lat_to_y(_center_lat, _zoom)
 	var x := _lon_to_x(lng, _zoom)
 	var y := _lat_to_y(lat, _zoom)
-	return Vector2((x - cx) * 256.0 + area.x * 0.5, (y - cy) * 256.0 + area.y * 0.5)
+	return Vector2((x - cx) * TILE_PX + area.x * 0.5, (y - cy) * TILE_PX + area.y * 0.5)
 
 
 func _meters_to_pixels(meters: float, lat: float) -> float:
-	var m_per_px := cos(deg_to_rad(lat)) * 40075016.686 / (256.0 * pow(2.0, float(_zoom)))
+	var m_per_px := cos(deg_to_rad(lat)) * 40075016.686 / (TILE_PX * pow(2.0, float(_zoom)))
 	if m_per_px <= 0.001:
 		return 20.0
 	return clampf(meters / m_per_px, 12.0, 2000.0)

@@ -59,6 +59,7 @@ static func _save_all(data: Dictionary) -> void:
 
 
 static func get_progress(scroll_id: String) -> Dictionary:
+	sync_from_native_service(scroll_id)
 	var all := _load_all()
 	var key := str(scroll_id)
 	if not all.has(key) or typeof(all[key]) != TYPE_DICTIONARY:
@@ -69,6 +70,12 @@ static func get_progress(scroll_id: String) -> Dictionary:
 			"target_km": 0.0,
 		}
 	return (all[key] as Dictionary).duplicate(true)
+
+
+static func _location_plugin():
+	if Engine.has_singleton("ChestLocation"):
+		return Engine.get_singleton("ChestLocation")
+	return null
 
 
 static func start_challenge(scroll_id: String, target_km: float, start_lat: float, start_lng: float) -> Dictionary:
@@ -82,9 +89,17 @@ static func start_challenge(scroll_id: String, target_km: float, start_lat: floa
 		"last_lat": start_lat,
 		"last_lng": start_lng,
 		"last_unix": int(Time.get_unix_time_from_system()),
+		"service_active": false,
 	}
 	all[str(scroll_id)] = state
 	_save_all(all)
+	## Android foreground service keeps accumulating while app is backgrounded/screen off.
+	var p = _location_plugin()
+	if p != null and p.has_method("start_activity_tracking"):
+		var ok := bool(p.start_activity_tracking(str(scroll_id), clamp_km(target_km), start_lat, start_lng))
+		state["service_active"] = ok
+		all[str(scroll_id)] = state
+		_save_all(all)
 	return state
 
 
@@ -92,6 +107,52 @@ static func reset_challenge(scroll_id: String) -> void:
 	var all := _load_all()
 	all.erase(str(scroll_id))
 	_save_all(all)
+	var p = _location_plugin()
+	if p != null and p.has_method("stop_activity_tracking"):
+		p.stop_activity_tracking()
+
+
+static func sync_from_native_service(scroll_id: String = "") -> Dictionary:
+	## Merge foreground-service progress into local JSON (no route trail).
+	var p = _location_plugin()
+	if p == null or not p.has_method("activity_tracking_snapshot"):
+		return {}
+	var raw := str(p.activity_tracking_snapshot())
+	if raw.is_empty() or raw == "{}":
+		return {}
+	var native = JSON.parse_string(raw)
+	if typeof(native) != TYPE_DICTIONARY:
+		return {}
+	var sid := str(native.get("scroll_id", ""))
+	if sid.is_empty():
+		return {}
+	if not scroll_id.is_empty() and sid != str(scroll_id):
+		return native
+	var all := _load_all()
+	var local: Dictionary = all.get(sid, {}) if typeof(all.get(sid, {})) == TYPE_DICTIONARY else {}
+	if local.is_empty():
+		local = {
+			"started": bool(native.get("started", false)),
+			"target_km": float(native.get("target_km", DEFAULT_KM)),
+			"distance_km": 0.0,
+			"completed": false,
+		}
+	local["started"] = bool(native.get("started", local.get("started", false)))
+	local["target_km"] = float(native.get("target_km", local.get("target_km", DEFAULT_KM)))
+	local["distance_km"] = maxf(float(local.get("distance_km", 0.0)), float(native.get("distance_km", 0.0)))
+	local["completed"] = bool(native.get("completed", false)) or bool(local.get("completed", false))
+	if native.has("last_lat") and native.get("last_lat") != null:
+		local["last_lat"] = float(native.get("last_lat"))
+	if native.has("last_lng") and native.get("last_lng") != null:
+		local["last_lng"] = float(native.get("last_lng"))
+	if native.has("last_unix"):
+		local["last_unix"] = int(native.get("last_unix"))
+	local["service_active"] = bool(native.get("service_active", false))
+	all[sid] = local
+	_save_all(all)
+	if bool(local.get("completed", false)) and p.has_method("stop_activity_tracking"):
+		p.stop_activity_tracking()
+	return local
 
 
 static func apply_sample(scroll_id: String, lat: float, lng: float, accuracy_m: float = 25.0, sample_unix: int = -1) -> Dictionary:
@@ -138,5 +199,10 @@ static func is_complete(scroll_id: String, target_km: float) -> bool:
 
 
 static func clear_all_for_sign_out() -> void:
+	var p = _location_plugin()
+	if p != null and p.has_method("clear_activity_tracking_state"):
+		p.clear_activity_tracking_state()
+	elif p != null and p.has_method("stop_activity_tracking"):
+		p.stop_activity_tracking()
 	if FileAccess.file_exists(STORE_PATH):
 		DirAccess.remove_absolute(STORE_PATH)

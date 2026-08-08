@@ -1,7 +1,7 @@
 extends CanvasLayer
 class_name LoveNotesScrollViewer
-## Fixed parchment Scroll Preview — no pinch zoom, no pan.
-## A− / A+ change font size only inside a stable ContentRect.
+## Scroll Preview with whole-composite pinch/pan on ZoomPanRoot.
+## A− / A+ change font size only inside ContentRect — never scale/pan.
 ## Attachments are not shown in the active product UI.
 
 signal closed
@@ -18,6 +18,8 @@ const MAX_HEADING_FONT: int = 34
 const DEFAULT_META_FONT: int = 15
 const MIN_META_FONT: int = 13
 const MAX_META_FONT: int = 20
+const MIN_COMPOSITE_SCALE: float = 1.0
+const MAX_COMPOSITE_SCALE: float = 3.0
 
 var _font_step: int = 0
 var _root: Control
@@ -28,6 +30,9 @@ var _top_bar: HBoxContainer
 var _title_label: Label
 var _btn_close: Button
 var _stage: Control
+## ZoomPanRoot — only node that pinch/pan transforms.
+var _zoom_pan_root: Control
+## ParchmentComposite under ZoomPanRoot.
 var _parchment_root: Control
 var _shadow: TextureRect
 var _parchment: TextureRect
@@ -52,6 +57,13 @@ var _unit_size: Vector2 = Vector2(360, 560)
 var _body_text: String = ""
 var _to_text: String = ""
 var _meta_text: String = ""
+var _composite_scale: float = 1.0
+var _composite_offset: Vector2 = Vector2.ZERO
+var _pinch_touches: Dictionary = {}
+var _pinch_last_dist: float = 0.0
+var _pinch_active: bool = false
+var _pan_active: bool = false
+var _pan_last: Vector2 = Vector2.ZERO
 
 
 func _ready() -> void:
@@ -127,13 +139,19 @@ func _build_ui() -> void:
 	_stage.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_stage.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_stage.clip_contents = true
-	_stage.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_stage.mouse_filter = Control.MOUSE_FILTER_STOP
+	_stage.gui_input.connect(_on_stage_input)
 	_shell.add_child(_stage)
 
-	## Fixed parchment — never scaled/panned by gestures.
+	## ZoomPanRoot — pinch/pan applies ONLY here.
+	_zoom_pan_root = Control.new()
+	_zoom_pan_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_stage.add_child(_zoom_pan_root)
+
+	## ParchmentComposite
 	_parchment_root = Control.new()
 	_parchment_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_stage.add_child(_parchment_root)
+	_zoom_pan_root.add_child(_parchment_root)
 
 	_shadow = _make_tex(ART + "scroll_shadow.png")
 	_shadow.modulate = Color(1, 1, 1, 0.35)
@@ -150,7 +168,6 @@ func _build_ui() -> void:
 	_bottom_roller.z_index = 2
 	_parchment_root.add_child(_bottom_roller)
 
-	## ContentRect — all text lives here; font changes never move this box.
 	_content_rect = MarginContainer.new()
 	_content_rect.mouse_filter = Control.MOUSE_FILTER_STOP
 	_content_rect.clip_contents = true
@@ -202,7 +219,6 @@ func _build_ui() -> void:
 	_message.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_message.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_message.add_theme_color_override("default_color", Color(0.18, 0.1, 0.08))
-	## Never let font/layout drift change node transform.
 	_message.scale = Vector2.ONE
 	_message_scroll.add_child(_message)
 
@@ -296,10 +312,11 @@ func _fit_parchment() -> void:
 	h = clampf(h, 360.0, max_h)
 	_unit_size = Vector2(w, h)
 	_parchment_root.size = _unit_size
+	_parchment_root.position = Vector2.ZERO
 	_parchment_root.scale = Vector2.ONE
-	_parchment_root.position = (stage_size - _unit_size) * 0.5
 	_layout_content_rect()
 	_sync_text_widths()
+	_apply_composite_transform()
 
 
 func _layout_content_rect() -> void:
@@ -314,7 +331,6 @@ func _layout_content_rect() -> void:
 	_parchment.size = Vector2(w * 0.92, h - roller_h * 1.55)
 	_shadow.position = Vector2(8, 10)
 	_shadow.size = Vector2(w, h)
-	## Inner content margins relative to parchment artwork — not the phone screen.
 	var pad_x := int(clampf(w * 0.12, 32.0, 52.0))
 	var pad_top := int(clampf(roller_h * 0.95, 30.0, 48.0))
 	var pad_bottom := int(clampf(roller_h * 0.9, 28.0, 46.0))
@@ -324,15 +340,13 @@ func _layout_content_rect() -> void:
 	_content_rect.add_theme_constant_override("margin_right", pad_x)
 	_content_rect.add_theme_constant_override("margin_top", pad_top)
 	_content_rect.add_theme_constant_override("margin_bottom", pad_bottom)
-	## Reset any accidental transform on text containers.
-	for n in [_content_rect, _content, _to_label, _meta_label, _heading, _message, _message_scroll]:
+	for n in [_content_rect, _content, _to_label, _meta_label, _heading, _message, _message_scroll, _parchment_root]:
 		if n:
 			n.scale = Vector2.ONE
 			n.pivot_offset = Vector2.ZERO
 
 
 func _sync_text_widths() -> void:
-	## Width comes from ContentRect size flags — do not set absolute positions.
 	var inner_w := maxf(_content_rect.size.x - float(
 		_content_rect.get_theme_constant("margin_left") + _content_rect.get_theme_constant("margin_right")
 	), 120.0)
@@ -344,6 +358,122 @@ func _sync_text_widths() -> void:
 	_heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_meta_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_to_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+
+func _apply_composite_transform() -> void:
+	if _zoom_pan_root == null or _stage == null:
+		return
+	_composite_scale = clampf(_composite_scale, MIN_COMPOSITE_SCALE, MAX_COMPOSITE_SCALE)
+	var stage_size := _stage.size
+	if stage_size.x < 8.0:
+		stage_size = Vector2(360, 560)
+	var scaled := _unit_size * _composite_scale
+	## Center + offset; clamp so a meaningful portion stays on screen.
+	var base := (stage_size - scaled) * 0.5
+	var min_x := stage_size.x * 0.15 - scaled.x
+	var max_x := stage_size.x * 0.85
+	var min_y := stage_size.y * 0.12 - scaled.y
+	var max_y := stage_size.y * 0.88
+	_composite_offset.x = clampf(_composite_offset.x, min_x - base.x, max_x - base.x)
+	_composite_offset.y = clampf(_composite_offset.y, min_y - base.y, max_y - base.y)
+	if is_equal_approx(_composite_scale, MIN_COMPOSITE_SCALE):
+		_composite_offset = Vector2.ZERO
+	_zoom_pan_root.pivot_offset = Vector2.ZERO
+	_zoom_pan_root.scale = Vector2(_composite_scale, _composite_scale)
+	_zoom_pan_root.size = _unit_size
+	_zoom_pan_root.position = base + _composite_offset
+	## At fit zoom, allow MessageScroll to own vertical drag.
+	if _message_scroll:
+		_message_scroll.mouse_filter = Control.MOUSE_FILTER_STOP if is_equal_approx(_composite_scale, MIN_COMPOSITE_SCALE) else Control.MOUSE_FILTER_IGNORE
+
+
+func _on_stage_input(ev: InputEvent) -> void:
+	if not visible:
+		return
+	if ev is InputEventScreenTouch:
+		var st := ev as InputEventScreenTouch
+		if st.pressed:
+			_pinch_touches[st.index] = st.position
+		else:
+			_pinch_touches.erase(st.index)
+			if _pinch_touches.size() < 2:
+				_pinch_active = false
+				_pinch_last_dist = 0.0
+			if _pinch_touches.is_empty():
+				_pan_active = false
+		if _pinch_touches.size() == 1 and _composite_scale > MIN_COMPOSITE_SCALE + 0.01:
+			_pan_active = st.pressed
+			_pan_last = st.position
+		_stage.accept_event()
+	elif ev is InputEventScreenDrag:
+		var sd := ev as InputEventScreenDrag
+		_pinch_touches[sd.index] = sd.position
+		if _pinch_touches.size() >= 2:
+			_handle_preview_pinch()
+			_stage.accept_event()
+		elif _composite_scale > MIN_COMPOSITE_SCALE + 0.01:
+			_composite_offset += sd.relative
+			_apply_composite_transform()
+			_stage.accept_event()
+	elif ev is InputEventMagnifyGesture:
+		var mag := ev as InputEventMagnifyGesture
+		_set_composite_scale(_composite_scale * clampf(mag.factor, 0.85, 1.15), mag.position)
+		_stage.accept_event()
+	elif ev is InputEventMouseButton:
+		var mb := ev as InputEventMouseButton
+		if mb.button_index == MOUSE_BUTTON_WHEEL_UP and mb.pressed and (mb.ctrl_pressed or mb.meta_pressed):
+			_set_composite_scale(_composite_scale * 1.08, mb.position)
+			_stage.accept_event()
+		elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN and mb.pressed and (mb.ctrl_pressed or mb.meta_pressed):
+			_set_composite_scale(_composite_scale * 0.92, mb.position)
+			_stage.accept_event()
+		elif mb.button_index == MOUSE_BUTTON_LEFT:
+			_pan_active = mb.pressed and _composite_scale > MIN_COMPOSITE_SCALE + 0.01
+			_pan_last = mb.position
+	elif ev is InputEventMouseMotion and _pan_active:
+		var mm := ev as InputEventMouseMotion
+		_composite_offset += mm.position - _pan_last
+		_pan_last = mm.position
+		_apply_composite_transform()
+		_stage.accept_event()
+
+
+func _handle_preview_pinch() -> void:
+	var keys: Array = _pinch_touches.keys()
+	keys.sort()
+	if keys.size() < 2:
+		return
+	var a: Vector2 = _pinch_touches[keys[0]]
+	var b: Vector2 = _pinch_touches[keys[1]]
+	var dist := a.distance_to(b)
+	if dist < 12.0:
+		return
+	var mid := (a + b) * 0.5
+	if not _pinch_active:
+		_pinch_active = true
+		_pinch_last_dist = dist
+		_pan_active = false
+		return
+	var ratio := dist / maxf(_pinch_last_dist, 1.0)
+	ratio = clampf(ratio, 0.90, 1.10)
+	_set_composite_scale(_composite_scale * ratio, mid)
+	_pinch_last_dist = dist
+
+
+func _set_composite_scale(s: float, focal: Vector2 = Vector2.INF) -> void:
+	var prev := _composite_scale
+	var next := clampf(s, MIN_COMPOSITE_SCALE, MAX_COMPOSITE_SCALE)
+	if is_equal_approx(prev, next):
+		return
+	## Keep focal point stable-ish while scaling.
+	if is_finite(focal.x) and _stage:
+		var stage_size := _stage.size
+		var base_prev := (stage_size - _unit_size * prev) * 0.5 + _composite_offset
+		var local := (focal - base_prev) / maxf(prev, 0.001)
+		var base_next_centered := (stage_size - _unit_size * next) * 0.5
+		_composite_offset = focal - local * next - base_next_centered
+	_composite_scale = next
+	_apply_composite_transform()
 
 
 func _on_viewport_resized() -> void:
@@ -365,23 +495,21 @@ func open_message(
 	visible = true
 	_title_label.text = chrome_title
 	_heading.text = title if not title.is_empty() else "A Love Note"
-	## meta may be "To Name\nlock lines" or lock lines only.
 	_parse_meta(meta)
 	_body_text = body
 	_set_message_text(body)
-	## Attachments intentionally ignored in active product UI.
 	_reset_preview_state()
 	_dim.color.a = 0.0
-	_parchment_root.modulate.a = 0.0
+	_zoom_pan_root.modulate.a = 0.0
 	await _fit_parchment()
 	if _reduced_motion:
 		_dim.color.a = 0.86
-		_parchment_root.modulate.a = 1.0
+		_zoom_pan_root.modulate.a = 1.0
 		return
 	var tw := create_tween()
 	tw.set_parallel(true)
 	tw.tween_property(_dim, "color:a", 0.86, 0.2)
-	tw.tween_property(_parchment_root, "modulate:a", 1.0, 0.22)
+	tw.tween_property(_zoom_pan_root, "modulate:a", 1.0, 0.22)
 	await tw.finished
 
 
@@ -407,7 +535,6 @@ func _parse_meta(meta: String) -> void:
 
 
 func set_attachments(_attachments: Array) -> void:
-	## No-op — attachments removed from active product UI.
 	pass
 
 
@@ -430,45 +557,54 @@ func _apply_font_sizes() -> void:
 	_heading.add_theme_font_size_override("font_size", heading)
 	_meta_label.add_theme_font_size_override("font_size", meta)
 	_to_label.add_theme_font_size_override("font_size", meta + 2)
-	## Hard guarantee: font changes never move containers.
+	## Font changes must NOT touch ZoomPanRoot scale/position.
 	for n in [_content_rect, _content, _to_label, _meta_label, _heading, _message, _message_scroll, _parchment_root]:
 		if n:
 			n.scale = Vector2.ONE
 	call_deferred("_sync_text_widths")
 
 
-## Backward-compatible name used by older call sites / tests.
 func apply_message_zoom() -> void:
 	_apply_font_sizes()
 
 
+func _on_view_zoom_changed(scale: float) -> void:
+	## Compatibility hook for tests / older call sites.
+	_set_composite_scale(scale)
+
+
 func _reset_preview_state() -> void:
 	_font_step = 0
+	_composite_scale = MIN_COMPOSITE_SCALE
+	_composite_offset = Vector2.ZERO
+	_pinch_touches.clear()
+	_pinch_active = false
+	_pan_active = false
+	_pinch_last_dist = 0.0
 	_apply_font_sizes()
 	if _message_scroll:
 		_message_scroll.scroll_vertical = 0
-	if _parchment_root:
-		_parchment_root.scale = Vector2.ONE
+	_apply_composite_transform()
 
 
 func close_viewer() -> void:
 	if not _visible_modal:
 		return
 	_visible_modal = false
-	var start_pos: Vector2 = _parchment_root.global_position + _unit_size * 0.5
+	var start_pos: Vector2 = _zoom_pan_root.global_position + _unit_size * _composite_scale * 0.5
 	if _reduced_motion:
 		_dim.color.a = 0.0
-		_parchment_root.modulate.a = 1.0
+		_zoom_pan_root.modulate.a = 1.0
 	else:
 		var tw := create_tween()
 		tw.set_parallel(true)
-		tw.tween_property(_parchment_root, "modulate:a", 0.0, 0.18)
+		tw.tween_property(_zoom_pan_root, "modulate:a", 0.0, 0.18)
 		tw.tween_property(_dim, "color:a", 0.0, 0.18)
 		await tw.finished
 	if _clear_on_close:
 		_set_message_text("")
 	visible = false
-	_parchment_root.modulate = Color.WHITE
+	_zoom_pan_root.modulate = Color.WHITE
 	_reset_preview_state()
 	archive_flight_requested.emit(start_pos)
 	closed.emit()
