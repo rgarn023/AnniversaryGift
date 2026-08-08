@@ -998,12 +998,12 @@ func _ui_state_for_online_scroll(item: Dictionary) -> String:
 		return "friend_request"
 	if bool(item.get("is_read", false)) or bool(item.get("is_opened", false)):
 		return "opened"
+	## Time gate first. Location/password are checked at open time (AND with schedule).
 	if not bool(item.get("is_unlockable", true)):
-		return "locked"
-	if bool(item.get("has_location_lock", false)):
 		return "locked"
 	if bool(item.get("has_password", false)) or bool(item.get("has_magic_password", false)):
 		return "password_unlocked_unread"
+	## Location-locked but time-ready: allow open attempt (foreground GPS only then).
 	return "unlocked_unread"
 
 
@@ -1377,13 +1377,23 @@ func _show_locked_details(item: Dictionary) -> void:
 	var unlock_note := "Unlock is authorized by server time."
 	if state.is_demo():
 		unlock_note = "Unlock is authorized by server time (demo clock here)."
-	_show_modal_panel("Sealed Scroll", [
+	var lines: PackedStringArray = PackedStringArray([
 		"From: %s" % str(item.get("sender_display_name", "")),
 		"Title: %s" % str(item.get("title", "")),
 		"This message body is not available yet.",
 		unlock_note,
-		"Magic password: %s" % ("Yes" if bool(item.get("has_magic_password", false)) else "No"),
-	], "Close", func() -> void: _hide_overlay())
+		"Magic password: %s" % ("Yes" if bool(item.get("has_magic_password", false)) or bool(item.get("has_password", false)) else "No"),
+	])
+	if bool(item.get("has_location_lock", false)):
+		var place := str(item.get("location_name", "")).strip_edges()
+		var addr := str(item.get("location_address", "")).strip_edges()
+		var radius := int(item.get("location_radius_m", LocationHelper.DEFAULT_RADIUS_M))
+		if place.is_empty():
+			place = "a set place"
+		lines.append("Location Lock: near %s (within %s)" % [place, LocationHelper.format_radius(radius)])
+		if not addr.is_empty():
+			lines.append("Address: %s" % addr)
+	_show_modal_panel("Sealed Scroll", lines, "Close", func() -> void: _hide_overlay())
 
 
 func _show_friend_request(item: Dictionary) -> void:

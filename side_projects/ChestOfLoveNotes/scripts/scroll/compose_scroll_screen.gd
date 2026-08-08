@@ -1252,7 +1252,7 @@ func _refresh_summary() -> void:
 			lines.append("Unlock radius: %s" % LocationHelper.format_radius(_location_radius_m))
 		else:
 			lines.append("Available after: %s" % schedule_label)
-			lines.append("And only within %s of %s" % [LocationHelper.format_radius(_location_radius_m), _location_name if not _location_name.is_empty() else "selected place"])
+			lines.append("And only within %s of %s" % [LocationHelper.format_radius(_location_radius_m), place])
 	var pw := "Required" if (_pw_toggle and _pw_toggle.button_pressed) else "Not required"
 	lines.append("Magic Password: %s" % pw)
 	_summary_label.text = "\n".join(lines)

@@ -42,7 +42,7 @@ Deno.serve(async (req) => {
     const { data: scrolls, error: scrollErr } = await service
       .from("scrolls")
       .select(
-        "id, sender_id, recipient_id, title, unlock_at, has_password, created_at",
+        "id, sender_id, recipient_id, title, unlock_at, has_password, has_location_lock, location_name, location_address, location_lat, location_lng, location_radius_m, created_at",
       )
       .in("id", scrollIds);
 

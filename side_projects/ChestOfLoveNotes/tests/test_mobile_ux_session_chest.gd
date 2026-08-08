@@ -191,10 +191,10 @@ func _test_plugin_commit() -> void:
 
 
 func _test_build_version() -> void:
-	_assert(BuildFlags.APP_VERSION_CODE >= 15, "versionCode >= 14")
+	_assert(BuildFlags.APP_VERSION_CODE >= 16, "versionCode >= 16")
 	var preset := FileAccess.get_file_as_string("res://export_presets.cfg")
-	_assert(preset.contains("ChestOfLoveNotes-chest-location-lock-debug.apk"), "export APK name")
-	_assert(preset.contains("version/code=15"), "export versionCode 14")
+	_assert(preset.contains("ChestOfLoveNotes-location-lock-online-debug.apk"), "export APK name")
+	_assert(preset.contains("version/code=16"), "export versionCode 16")
 	_assert(BuildFlags.PRIVATE_ONBOARDING_BUILD == true, "private onboarding still enabled")
 	_assert(BuildFlags.SHOW_ONBOARDING_BANNER == false, "onboarding banner hidden in APKs")
 	_assert(FileAccess.file_exists("res://assets/icons/app_icon_1024.png"), "app icon present")
