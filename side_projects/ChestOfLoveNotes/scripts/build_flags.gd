@@ -19,5 +19,5 @@ const SHOW_ONBOARDING_BANNER := false
 const DEV_CHEST_SCROLL_PREVIEW := false
 ## Debug/test builds may offer "Send to Myself (Test)" using the real send path.
 const DEBUG_SELF_SEND := true
-const APP_VERSION_NAME := "0.1.21-map-preview-selfsend-background"
-const APP_VERSION_CODE := 21
+const APP_VERSION_NAME := "0.1.22-time-location-map-preview-selfsend"
+const APP_VERSION_CODE := 22

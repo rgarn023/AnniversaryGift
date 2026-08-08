@@ -93,7 +93,7 @@ Deno.serve(async (req) => {
     const { data: recipientState, error: stateErr } = await service
       .from("scroll_recipient_states")
       .select(
-        "scroll_id, recipient_id, is_read, is_saved, is_favorite, first_opened_at, last_opened_at, opened_count, deleted_at",
+        "scroll_id, recipient_id, is_read, is_saved, is_favorite, first_opened_at, last_opened_at, opened_count, deleted_at, activity_started_at, activity_distance_km, activity_completed_at, focus_started_at, focus_completed_at, focus_interrupted_at",
       )
       .eq("scroll_id", scroll.id)
       .eq("recipient_id", me)
@@ -124,7 +124,32 @@ Deno.serve(async (req) => {
       throw new AppError("locked", "This scroll is not unlocked yet", 403);
     }
 
-    // 6b. Location Lock — missing/unavailable location must NEVER unlock.
+    // 6b. Activity Lock — server requires completion marker (no route trail).
+    if (Boolean(scroll.activity_lock_enabled)) {
+      const done = Boolean(recipientState.activity_completed_at);
+      const dist = Number(recipientState.activity_distance_km ?? 0);
+      const target = Number(scroll.activity_target_km ?? 0);
+      if (!done && !(Number.isFinite(dist) && Number.isFinite(target) && dist + 0.001 >= target)) {
+        throw new AppError(
+          "activity_locked",
+          "Complete the Activity Lock challenge before opening this scroll.",
+          403,
+        );
+      }
+    }
+
+    // 6c. Focus Lock — server requires completion marker (no UsageStats upload).
+    if (Boolean(scroll.focus_lock_enabled)) {
+      if (!recipientState.focus_completed_at) {
+        throw new AppError(
+          "focus_locked",
+          "Complete Focus Lock before opening this scroll.",
+          403,
+        );
+      }
+    }
+
+    // 6d. Location Lock — missing/unavailable location must NEVER unlock.
     if (Boolean(scroll.has_location_lock)) {
       const targetLat = Number(scroll.location_lat);
       const targetLng = Number(scroll.location_lng);

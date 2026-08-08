@@ -1478,6 +1478,8 @@ func _show_lock_actions_panel(item: Dictionary, lines: PackedStringArray, eval: 
 					return
 				## Uses while-in-use location + foreground service (not "Allow all the time").
 				ActivityLockHelper.start_challenge(sid, target, float(fix2.lat), float(fix2.lng))
+				if state.is_online():
+					await state.scrolls.mark_activity_lock_progress(sid, 0.0, false)
 				NotificationHelper.request_permission_contextual()
 				NotificationHelper.notify_activity_progress(0.0, target)
 				_hide_overlay()
@@ -1492,8 +1494,12 @@ func _show_lock_actions_panel(item: Dictionary, lines: PackedStringArray, eval: 
 				if bool(fix3.get("ok", false)):
 					var res := ActivityLockHelper.apply_sample(sid, float(fix3.lat), float(fix3.lng), float(fix3.get("accuracy_m", 25.0)))
 					var st: Dictionary = res.get("state", {})
-					NotificationHelper.notify_activity_progress(float(st.get("distance_km", 0.0)), target)
-					if bool(st.get("completed", false)):
+					var dist := float(st.get("distance_km", 0.0))
+					var done := bool(st.get("completed", false))
+					if state.is_online():
+						await state.scrolls.mark_activity_lock_progress(sid, dist, done)
+					NotificationHelper.notify_activity_progress(dist, target)
+					if done:
 						NotificationHelper.notify_activity_complete()
 				_hide_overlay()
 				_show_locked_details(item)
@@ -1524,10 +1530,20 @@ func _show_lock_actions_panel(item: Dictionary, lines: PackedStringArray, eval: 
 			box.add_child(_make_button(btn_label, func() -> void:
 				if not bool(fp.get("started", false)) or bool(fp.get("interrupted", false)):
 					FocusLockHelper.begin_focus(sid, int(item.get("focus_duration_hours", FocusLockHelper.DEFAULT_HOURS)))
+					if state.is_online():
+						await state.scrolls.mark_focus_lock_started(sid)
 				var fr := FocusLockHelper.evaluate(sid)
-				if str(fr.get("status", "")) == "complete":
+				var status := str(fr.get("status", ""))
+				if status == "complete":
+					if state.is_online():
+						await state.scrolls.mark_focus_lock_complete(sid)
 					var all_ready := bool(ScrollLockEvaluator.evaluate(item).get("ok", false))
 					NotificationHelper.notify_focus_complete(all_ready)
+				elif status == "interrupted" or status == "reboot_reset":
+					if state.is_online():
+						await state.scrolls.mark_focus_lock_interrupted(sid)
+					if str(fr.get("message", "")) != "":
+						_show_toast(str(fr.get("message")))
 				elif str(fr.get("message", "")) != "":
 					_show_toast(str(fr.get("message")))
 				_hide_overlay()
@@ -1865,7 +1881,8 @@ func _on_compose_preview(draft: Dictionary) -> void:
 	if bool(draft.get("activity_lock_enabled", false)):
 		meta_bits.append("Activity Lock · %s" % ActivityLockHelper.format_km(float(draft.get("activity_target_km", 5.0))))
 	if bool(draft.get("focus_lock_enabled", false)):
-		meta_bits.append("Focus Lock · %s" % FocusLockHelper.format_hours(int(draft.get("focus_duration_hours", 3))))
+		var fh := int(draft.get("focus_duration_hours", 3))
+		meta_bits.append("Focus Lock · 1 hr" if fh == 1 else "Focus Lock · %d hr" % fh)
 	if bool(draft.get("has_password", false)):
 		meta_bits.append("Magic Password required")
 	var meta := "\n".join(meta_bits)

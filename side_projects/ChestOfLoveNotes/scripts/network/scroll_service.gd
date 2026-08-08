@@ -29,6 +29,27 @@ func send_scroll(payload: Dictionary) -> Dictionary:
 	return await api.call_edge_function("send-scroll", body, "POST")
 
 
+func mark_activity_lock_progress(scroll_id: String, distance_km: float, completed: bool = false) -> Dictionary:
+	## Minimal progress only — never a GPS trail.
+	return await api.rest_rpc("mark_activity_lock_progress", {
+		"p_scroll_id": scroll_id,
+		"p_distance_km": distance_km,
+		"p_completed": completed,
+	})
+
+
+func mark_focus_lock_started(scroll_id: String) -> Dictionary:
+	return await api.rest_rpc("mark_focus_lock_started", {"p_scroll_id": scroll_id})
+
+
+func mark_focus_lock_complete(scroll_id: String) -> Dictionary:
+	return await api.rest_rpc("mark_focus_lock_complete", {"p_scroll_id": scroll_id})
+
+
+func mark_focus_lock_interrupted(scroll_id: String) -> Dictionary:
+	return await api.rest_rpc("mark_focus_lock_interrupted", {"p_scroll_id": scroll_id})
+
+
 func open_scroll(
 	scroll_id: String,
 	password: String = "",

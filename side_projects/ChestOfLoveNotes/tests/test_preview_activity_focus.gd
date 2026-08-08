@@ -135,9 +135,9 @@ func _run() -> void:
 	})
 	_assert(bool(ev.get("ok", false)), "evaluator all-inactive locks pass")
 
-	_assert(BuildFlags.APP_VERSION_CODE >= 21, "versionCode 21+")
-	_assert(preset.contains("version/code=21"), "export 21")
-	_assert(preset.contains("ChestOfLoveNotes-map-preview-selfsend-background-fixes-debug.apk"), "APK name")
+	_assert(BuildFlags.APP_VERSION_CODE >= 22, "versionCode 22+")
+	_assert(preset.contains("version/code=22"), "export 22")
+	_assert(preset.contains("ChestOfLoveNotes-time-location-map-preview-selfsend-fixes-debug.apk"), "APK name")
 	var focus_kt := FileAccess.get_file_as_string("res://android/plugins/chest_secure_storage/ChestFocusPlugin.kt")
 	_assert(focus_kt.contains("classifyInteractiveUsage"), "Android classifier present")
 	_assert(focus_kt.contains("NOTIFICATION_INTERRUPTION") or focus_kt.contains("TYPE_NOTIFICATION_INTERRUPTION"), "notif events ignored in plugin")

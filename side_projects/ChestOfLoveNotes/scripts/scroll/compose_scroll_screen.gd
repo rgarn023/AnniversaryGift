@@ -1051,6 +1051,18 @@ func _on_choose_on_map() -> void:
 			"address": _location_address,
 			"ok": true,
 		}
+	elif LocationHelper.permission_status() == "granted" or OS.get_name() != "Android":
+		## Prefer sender current location over unrelated hardcoded city when available.
+		var fix0 := LocationHelper.get_current_fix(false)
+		if bool(fix0.get("ok", false)):
+			initial = {
+				"lat": float(fix0.get("lat")),
+				"lng": float(fix0.get("lng")),
+				"name": "",
+				"address": "",
+				"ok": false,
+				"center_only": true,
+			}
 	_map_picker = MapLocationPicker.new()
 	get_tree().root.add_child(_map_picker)
 	_map_picker.confirmed.connect(func(place: Dictionary) -> void:
@@ -1065,21 +1077,34 @@ func _on_choose_on_map() -> void:
 
 func _on_use_current_location() -> void:
 	## GPS permission only for this sender action — never for typing search.
-	_location_status.text = "Allow location access to use your current position for this lock."
+	if _location_use_btn == null:
+		return
+	if _location_use_btn.disabled:
+		return
 	_location_use_btn.disabled = true
+	_location_use_btn.text = "Getting your location…"
+	_location_status.text = "Getting your location…"
 	if OS.get_name() == "Android":
 		var status := LocationHelper.request_permission_if_needed()
-		if status != "granted":
-			await get_tree().create_timer(0.35).timeout
+		## Permission dialog is async — poll briefly for grant.
+		var waits := 0
+		while status != "granted" and waits < 20:
+			await get_tree().create_timer(0.25).timeout
 			status = LocationHelper.permission_status()
+			waits += 1
+			if waits == 1 and status != "granted":
+				_location_status.text = "Allow location access to use your current position."
 		if status != "granted":
-			_location_status.text = "Location access is needed only when using your current position."
+			_location_status.text = "Location permission is required. Enable it in Android Settings if you previously denied it."
+			_location_use_btn.text = "Use Current Location"
 			_location_use_btn.disabled = false
 			_update_validation()
 			return
-	var fix: Dictionary = LocationHelper.get_current_fix(true)
+	## Prefer a fresh fix; fall back to last-known.
+	var fix: Dictionary = await LocationHelper.get_fresh_fix(true)
 	if not bool(fix.get("ok", false)):
-		_location_status.text = str(fix.get("error", "We couldn't verify your location. Try again."))
+		_location_status.text = str(fix.get("error", "We couldn't determine your location. Try again."))
+		_location_use_btn.text = "Use Current Location"
 		_location_use_btn.disabled = false
 		_update_validation()
 		return
@@ -1088,19 +1113,22 @@ func _on_use_current_location() -> void:
 	_location_status.text = "Resolving place…"
 	var token := _location_search_service.next_token()
 	var rev: Dictionary = await _location_search_service.reverse_geocode(lat, lng, token)
+	_location_use_btn.text = "Use Current Location"
 	_location_use_btn.disabled = false
 	if bool(rev.get("ok", false)) and typeof(rev.get("place")) == TYPE_DICTIONARY:
 		var place: Dictionary = (rev.get("place") as Dictionary).duplicate(true)
 		place["lat"] = lat
 		place["lng"] = lng
 		_apply_resolved_place(place)
+		_location_status.text = "Using your current location."
 	else:
 		_apply_resolved_place({
-			"name": "Current place",
+			"name": "Current location",
 			"address": "",
 			"lat": lat,
 			"lng": lng,
 		})
+		_location_status.text = "Using your current location."
 
 
 func _build_password_card() -> PanelContainer:
@@ -2350,10 +2378,11 @@ func _open_date_picker() -> void:
 	col.add_child(day.root)
 
 	col.add_child(_modal_action("Save Date", func() -> void:
+		## Commit visible SpinBox text before reading — do not require focus loss.
 		_unlock_date = {
-			"year": int(year.spin.value),
-			"month": int(month.spin.value),
-			"day": int(day.spin.value),
+			"year": _commit_spin_value(year.spin),
+			"month": _commit_spin_value(month.spin),
+			"day": _commit_spin_value(day.spin),
 		}
 		_refresh_schedule_labels()
 		_refresh_summary()
@@ -2376,34 +2405,92 @@ func _open_time_picker() -> void:
 	_overlay.add_child(box.get_meta("_modal_host"))
 	var col: VBoxContainer = box.get_child(0)
 	col.add_child(_modal_title("Unlock Time"))
+	var help := Label.new()
+	help.text = "Use + / − to set the time, then tap Save Time."
+	help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	help.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	help.add_theme_font_size_override("font_size", 15)
+	help.add_theme_color_override("font_color", COL_SUPPORT)
+	col.add_child(help)
 
+	## Mobile steppers — values live in these refs; Save never depends on focus-loss.
 	var hour12 := _unlock_hour % 12
 	if hour12 == 0:
 		hour12 = 12
 	var is_pm := _unlock_hour >= 12
-	var hour := _make_spin("Hour", 1, 12, hour12)
-	var minute := _make_spin("Minute", 0, 59, _unlock_minute)
-	col.add_child(hour.root)
-	col.add_child(minute.root)
+	var state := {
+		"hour12": hour12,
+		"minute": _unlock_minute,
+		"is_pm": is_pm,
+	}
+	var hour_ctrl := _make_time_stepper("Hour", 1, 12, hour12, func(v: int) -> void:
+		state["hour12"] = v
+	)
+	var minute_ctrl := _make_time_stepper("Minute", 0, 59, _unlock_minute, func(v: int) -> void:
+		state["minute"] = v
+	, true)
+	col.add_child(hour_ctrl)
+	col.add_child(minute_ctrl)
 
-	var ampm := OptionButton.new()
-	ampm.custom_minimum_size = Vector2(0, 56)
-	ampm.add_item("AM")
-	ampm.add_item("PM")
-	ampm.select(1 if is_pm else 0)
-	ampm.add_theme_font_size_override("font_size", 18)
-	col.add_child(ampm)
+	var ampm_row := HBoxContainer.new()
+	ampm_row.add_theme_constant_override("separation", 10)
+	col.add_child(ampm_row)
+	var am_btn := Button.new()
+	am_btn.text = "AM"
+	am_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	am_btn.custom_minimum_size = Vector2(0, 56)
+	am_btn.focus_mode = Control.FOCUS_NONE
+	var pm_btn := Button.new()
+	pm_btn.text = "PM"
+	pm_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	pm_btn.custom_minimum_size = Vector2(0, 56)
+	pm_btn.focus_mode = Control.FOCUS_NONE
+	var sync_ampm := func() -> void:
+		if bool(state["is_pm"]):
+			_style_primary_button(pm_btn)
+			_style_secondary_button(am_btn)
+		else:
+			_style_primary_button(am_btn)
+			_style_secondary_button(pm_btn)
+	am_btn.pressed.connect(func() -> void:
+		state["is_pm"] = false
+		sync_ampm.call()
+	)
+	pm_btn.pressed.connect(func() -> void:
+		state["is_pm"] = true
+		sync_ampm.call()
+	)
+	ampm_row.add_child(am_btn)
+	ampm_row.add_child(pm_btn)
+	sync_ampm.call()
+
+	var err := Label.new()
+	err.text = ""
+	err.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	err.add_theme_font_size_override("font_size", 15)
+	err.add_theme_color_override("font_color", Color(0.95, 0.45, 0.5))
+	col.add_child(err)
 
 	col.add_child(_modal_action("Save Time", func() -> void:
-		var h := int(hour.spin.value) % 12
-		if ampm.selected == 1:
-			h += 12
-		if ampm.selected == 0 and int(hour.spin.value) == 12:
-			h = 0
-		if ampm.selected == 1 and int(hour.spin.value) == 12:
-			h = 12
-		_unlock_hour = h
-		_unlock_minute = int(minute.spin.value)
+		## Explicitly commit CURRENT stepper values — no focus_exited / IME required.
+		var h12 := int(state.get("hour12", 12))
+		var mins := int(state.get("minute", 0))
+		var pm := bool(state.get("is_pm", false))
+		if h12 < 1 or h12 > 12:
+			err.text = "Hour must be between 1 and 12."
+			return
+		if mins < 0 or mins > 59:
+			err.text = "Minute must be between 0 and 59."
+			return
+		var h24 := h12 % 12
+		if pm:
+			h24 += 12
+		if not pm and h12 == 12:
+			h24 = 0
+		if pm and h12 == 12:
+			h24 = 12
+		_unlock_hour = h24
+		_unlock_minute = mins
 		_refresh_schedule_labels()
 		_refresh_summary()
 		_update_validation()
@@ -2412,7 +2499,21 @@ func _open_time_picker() -> void:
 	col.add_child(_modal_action("Cancel", _hide_overlay, false))
 
 
+func _commit_spin_value(spin: SpinBox) -> int:
+	## Read CURRENT visible editor text even if the field still has focus.
+	if spin == null:
+		return 0
+	var le := spin.get_line_edit()
+	if le != null:
+		var t := le.text.strip_edges()
+		if t.is_valid_int():
+			spin.value = clampf(float(t), spin.min_value, spin.max_value)
+		le.release_focus()
+	return int(spin.value)
+
+
 func _make_spin(label: String, min_v: int, max_v: int, value: int) -> Dictionary:
+	## Used by date picker. Time picker uses steppers instead.
 	var root := VBoxContainer.new()
 	root.add_theme_constant_override("separation", 6)
 	root.add_child(_field_caption(label))
@@ -2422,8 +2523,66 @@ func _make_spin(label: String, min_v: int, max_v: int, value: int) -> Dictionary
 	spin.value = value
 	spin.custom_minimum_size = Vector2(0, 56)
 	spin.add_theme_font_size_override("font_size", 18)
+	if spin.has_method("set_update_on_text_changed"):
+		spin.set("update_on_text_changed", true)
+	elif "update_on_text_changed" in spin:
+		spin.update_on_text_changed = true
 	root.add_child(spin)
 	return {"root": root, "spin": spin}
+
+
+func _make_time_stepper(label: String, min_v: int, max_v: int, value: int, on_change: Callable, pad2: bool = false) -> Control:
+	## Tappable +/- steppers — no keyboard/SpinBox text commit needed.
+	var root := VBoxContainer.new()
+	root.add_theme_constant_override("separation", 6)
+	root.add_child(_field_caption(label))
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	root.add_child(row)
+	var cur := {"v": clampi(value, min_v, max_v)}
+	var val_lab := Label.new()
+	val_lab.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	val_lab.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	val_lab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	val_lab.custom_minimum_size = Vector2(0, 56)
+	val_lab.add_theme_font_size_override("font_size", 28)
+	val_lab.add_theme_color_override("font_color", COL_GOLD)
+	var refresh := func() -> void:
+		if pad2:
+			val_lab.text = "%02d" % int(cur["v"])
+		else:
+			val_lab.text = str(int(cur["v"]))
+	refresh.call()
+	var minus := Button.new()
+	minus.text = "−"
+	minus.custom_minimum_size = Vector2(64, 56)
+	minus.focus_mode = Control.FOCUS_NONE
+	_style_secondary_button(minus)
+	minus.pressed.connect(func() -> void:
+		var n := int(cur["v"]) - 1
+		if n < min_v:
+			n = max_v
+		cur["v"] = n
+		refresh.call()
+		on_change.call(n)
+	)
+	var plus := Button.new()
+	plus.text = "+"
+	plus.custom_minimum_size = Vector2(64, 56)
+	plus.focus_mode = Control.FOCUS_NONE
+	_style_secondary_button(plus)
+	plus.pressed.connect(func() -> void:
+		var n := int(cur["v"]) + 1
+		if n > max_v:
+			n = min_v
+		cur["v"] = n
+		refresh.call()
+		on_change.call(n)
+	)
+	row.add_child(minus)
+	row.add_child(val_lab)
+	row.add_child(plus)
+	return root
 
 
 func _modal_box(_pos: Vector2 = Vector2.ZERO, _size: Vector2 = Vector2.ZERO) -> PanelContainer:

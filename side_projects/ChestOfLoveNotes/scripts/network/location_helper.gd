@@ -79,32 +79,10 @@ static func request_permission_if_needed() -> String:
 	return permission_status()
 
 
-static func get_current_fix(require_accuracy: bool = true) -> Dictionary:
-	if OS.get_name() != "Android":
-		return {
-			"ok": true,
-			"lat": MOCK_LAT,
-			"lng": MOCK_LNG,
-			"accuracy_m": 25.0,
-			"mock": true,
-		}
-	if permission_status() != "granted":
-		return {
-			"ok": false,
-			"error": "Location access is needed only to verify whether you're near the unlock location.",
-			"denied": true,
-		}
-	var p = _plugin()
-	if p == null or not p.has_method("get_last_known_location"):
-		return {
-			"ok": false,
-			"error": "Turn on Location Services to verify this scroll.",
-			"unavailable": true,
-		}
-	var raw := str(p.get_last_known_location())
+static func _parse_fix_raw(raw: String, require_accuracy: bool) -> Dictionary:
 	var parts := raw.split("|")
 	if parts.is_empty():
-		return {"ok": false, "error": "We couldn't verify your location. Try again.", "unavailable": true}
+		return {"ok": false, "error": "We couldn't determine your location. Try again.", "unavailable": true}
 	if parts[0] == "ok" and parts.size() >= 4:
 		var accuracy := float(parts[3])
 		if require_accuracy and accuracy > 0.0 and accuracy > MAX_ACCEPTABLE_ACCURACY_M:
@@ -122,18 +100,90 @@ static func get_current_fix(require_accuracy: bool = true) -> Dictionary:
 			"mock": false,
 		}
 	var code := str(parts[2]) if parts.size() >= 3 else "unavailable"
-	var msg := str(parts[1]) if parts.size() >= 2 else "We couldn't verify your location. Try again."
+	var msg := str(parts[1]) if parts.size() >= 2 else "We couldn't determine your location. Try again."
 	if code == "disabled":
-		msg = "Turn on Location Services to verify this scroll."
+		msg = "Turn on Location Services to use your current location."
 	elif code == "denied":
-		msg = "Location access is needed only to verify whether you're near the unlock location."
+		msg = "Location permission is required."
+	elif code == "timeout":
+		msg = "We couldn't determine your location. Try again."
 	return {
 		"ok": false,
 		"error": msg,
 		"denied": code == "denied",
 		"disabled": code == "disabled",
-		"unavailable": code == "unavailable",
+		"unavailable": code == "unavailable" or code == "timeout",
 	}
+
+
+static func get_current_fix(require_accuracy: bool = true) -> Dictionary:
+	if OS.get_name() != "Android":
+		return {
+			"ok": true,
+			"lat": MOCK_LAT,
+			"lng": MOCK_LNG,
+			"accuracy_m": 25.0,
+			"mock": true,
+		}
+	if permission_status() != "granted":
+		return {
+			"ok": false,
+			"error": "Location permission is required.",
+			"denied": true,
+		}
+	var p = _plugin()
+	if p == null or not p.has_method("get_last_known_location"):
+		return {
+			"ok": false,
+			"error": "Turn on Location Services to use your current location.",
+			"unavailable": true,
+		}
+	return _parse_fix_raw(str(p.get_last_known_location()), require_accuracy)
+
+
+static func get_fresh_fix(require_accuracy: bool = true) -> Dictionary:
+	## Poll a short fresh GPS sample (non-blocking for Godot frames).
+	if OS.get_name() != "Android":
+		return get_current_fix(require_accuracy)
+	if permission_status() != "granted":
+		return {
+			"ok": false,
+			"error": "Location permission is required.",
+			"denied": true,
+		}
+	var p = _plugin()
+	if p == null:
+		return {
+			"ok": false,
+			"error": "Turn on Location Services to use your current location.",
+			"unavailable": true,
+		}
+	if p.has_method("begin_fresh_location") and p.has_method("poll_fresh_location"):
+		p.begin_fresh_location()
+		var tree := Engine.get_main_loop() as SceneTree
+		for _i in range(24):
+			if tree != null:
+				await tree.create_timer(0.35).timeout
+			var raw := str(p.poll_fresh_location())
+			if raw.begins_with("ok|"):
+				return _parse_fix_raw(raw, require_accuracy)
+			if raw.contains("|pending"):
+				continue
+			## Non-pending error from poll — try last-known before failing.
+			break
+		if p.has_method("cancel_fresh_location"):
+			p.cancel_fresh_location()
+		var last := get_current_fix(require_accuracy)
+		if bool(last.get("ok", false)):
+			return last
+		return {
+			"ok": false,
+			"error": "We couldn't determine your location. Try again.",
+			"unavailable": true,
+		}
+	if p.has_method("request_fresh_location"):
+		return _parse_fix_raw(str(p.request_fresh_location()), require_accuracy)
+	return get_current_fix(require_accuracy)
 
 
 static func format_lock_summary(location_name: String, has_schedule: bool, schedule_label: String, radius_m: int = DEFAULT_RADIUS_M) -> String:

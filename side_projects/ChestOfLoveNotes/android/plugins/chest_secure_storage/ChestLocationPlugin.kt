@@ -5,16 +5,21 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
+import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Build
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import org.godotengine.godot.Godot
 import org.godotengine.godot.plugin.GodotPlugin
 import org.godotengine.godot.plugin.UsedByGodot
 import org.json.JSONObject
+import java.util.concurrent.atomic.AtomicReference
 
 /**
- * Location Lock one-shot helper + Activity Lock foreground challenge control.
+ * Location Lock one-shot / fresh-fix helper + Activity Lock foreground challenge control.
  */
 class ChestLocationPlugin(godot: Godot) : GodotPlugin(godot) {
 
@@ -22,6 +27,11 @@ class ChestLocationPlugin(godot: Godot) : GodotPlugin(godot) {
 		private const val TAG = "ChestLocation"
 		private const val PLUGIN_NAME = "ChestLocation"
 	}
+
+	private val freshFix = AtomicReference<Location?>(null)
+	private var freshListening = false
+	private var freshListener: LocationListener? = null
+	private val mainHandler = Handler(Looper.getMainLooper())
 
 	override fun getPluginName(): String = PLUGIN_NAME
 
@@ -43,6 +53,11 @@ class ChestLocationPlugin(godot: Godot) : GodotPlugin(godot) {
 		return fine || coarse
 	}
 
+	private fun encodeLocation(loc: Location): String {
+		val accuracy = if (loc.hasAccuracy()) loc.accuracy else -1f
+		return "ok|${loc.latitude}|${loc.longitude}|$accuracy"
+	}
+
 	@UsedByGodot
 	fun get_last_known_location(): String {
 		return try {
@@ -51,7 +66,7 @@ class ChestLocationPlugin(godot: Godot) : GodotPlugin(godot) {
 			}
 			val lm = appContext().getSystemService(Context.LOCATION_SERVICE) as LocationManager
 			if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && !lm.isLocationEnabled) {
-				return "error|Turn on location services and try again.|disabled"
+				return "error|Turn on Location Services to use your current location.|disabled"
 			}
 			var best: Location? = null
 			for (provider in lm.getProviders(true)) {
@@ -65,13 +80,114 @@ class ChestLocationPlugin(godot: Godot) : GodotPlugin(godot) {
 				}
 			}
 			if (best == null) {
-				return "error|Location is temporarily unavailable.|unavailable"
+				return "error|We couldn't determine your location. Try again.|unavailable"
 			}
-			val accuracy = if (best.hasAccuracy()) best.accuracy else -1f
-			"ok|${best.latitude}|${best.longitude}|$accuracy"
+			encodeLocation(best)
 		} catch (e: Exception) {
 			Log.w(TAG, "get_last_known_location failed: ${e.javaClass.simpleName}")
-			"error|Location is temporarily unavailable.|unavailable"
+			"error|We couldn't determine your location. Try again.|unavailable"
+		}
+	}
+
+	/** Begin a short while-in-use location listen for Compose "Use Current Location". */
+	@UsedByGodot
+	fun begin_fresh_location(): Boolean {
+		return try {
+			if (!has_location_permission()) return false
+			val lm = appContext().getSystemService(Context.LOCATION_SERVICE) as LocationManager
+			if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && !lm.isLocationEnabled) {
+				return false
+			}
+			stopFreshListen()
+			freshFix.set(null)
+			freshListening = true
+			val listener = object : LocationListener {
+				override fun onLocationChanged(location: Location) {
+					val prev = freshFix.get()
+					if (prev == null || location.accuracy <= prev.accuracy || location.time >= prev.time) {
+						freshFix.set(location)
+					}
+				}
+				@Deprecated("Deprecated in Java")
+				override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
+				override fun onProviderEnabled(provider: String) {}
+				override fun onProviderDisabled(provider: String) {}
+			}
+			freshListener = listener
+			for (provider in lm.getProviders(true)) {
+				try {
+					lm.requestLocationUpdates(provider, 500L, 0f, listener, Looper.getMainLooper())
+				} catch (_: SecurityException) {
+				}
+			}
+			mainHandler.postDelayed({ stopFreshListen() }, 12_000L)
+			true
+		} catch (e: Exception) {
+			Log.w(TAG, "begin_fresh_location failed: ${e.javaClass.simpleName}")
+			false
+		}
+	}
+
+	/** Poll during begin_fresh_location window. */
+	@UsedByGodot
+	fun poll_fresh_location(): String {
+		val loc = freshFix.get()
+		if (loc != null) {
+			stopFreshListen()
+			return encodeLocation(loc)
+		}
+		if (!freshListening) {
+			return get_last_known_location()
+		}
+		return "error|Still getting location…|pending"
+	}
+
+	@UsedByGodot
+	fun cancel_fresh_location(): Boolean {
+		stopFreshListen()
+		return true
+	}
+
+	/** Blocking convenience used by older callers — prefer begin/poll from Godot. */
+	@UsedByGodot
+	fun request_fresh_location(): String {
+		return try {
+			if (!begin_fresh_location()) {
+				return get_last_known_location().let {
+					if (it.startsWith("ok|")) it
+					else "error|Turn on Location Services to use your current location.|disabled"
+				}
+			}
+			val deadline = System.currentTimeMillis() + 8_000L
+			while (System.currentTimeMillis() < deadline) {
+				val loc = freshFix.get()
+				if (loc != null) {
+					stopFreshListen()
+					return encodeLocation(loc)
+				}
+				try {
+					Thread.sleep(200L)
+				} catch (_: InterruptedException) {
+					break
+				}
+			}
+			stopFreshListen()
+			val last = get_last_known_location()
+			if (last.startsWith("ok|")) last else "error|We couldn't determine your location. Try again.|timeout"
+		} catch (e: Exception) {
+			Log.w(TAG, "request_fresh_location failed: ${e.javaClass.simpleName}")
+			"error|We couldn't determine your location. Try again.|unavailable"
+		}
+	}
+
+	private fun stopFreshListen() {
+		freshListening = false
+		val listener = freshListener ?: return
+		freshListener = null
+		try {
+			val lm = appContext().getSystemService(Context.LOCATION_SERVICE) as LocationManager
+			lm.removeUpdates(listener)
+		} catch (_: Exception) {
 		}
 	}
 

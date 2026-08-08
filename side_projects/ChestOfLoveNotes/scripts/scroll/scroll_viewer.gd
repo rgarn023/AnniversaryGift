@@ -67,7 +67,8 @@ var _pan_last: Vector2 = Vector2.ZERO
 
 
 func _ready() -> void:
-	layer = 40
+	## Above Compose chrome / overlays so nothing shows through.
+	layer = 100
 	_build_ui()
 	visible = false
 	set_process_input(true)
@@ -100,8 +101,9 @@ func _build_ui() -> void:
 	_root.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(_root)
 
+	## Fully opaque backdrop — Compose must never show through Preview.
 	_dim = ColorRect.new()
-	_dim.color = Color(0.03, 0.02, 0.06, 0.0)
+	_dim.color = Color(0.05, 0.03, 0.09, 1.0)
 	_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_dim.mouse_filter = Control.MOUSE_FILTER_STOP
 	_root.add_child(_dim)
@@ -142,6 +144,8 @@ func _build_ui() -> void:
 	_stage.mouse_filter = Control.MOUSE_FILTER_STOP
 	_stage.gui_input.connect(_on_stage_input)
 	_shell.add_child(_stage)
+	## Android multitouch often skips Control.gui_input — also handle via _input.
+	set_process_input(true)
 
 	## ZoomPanRoot — pinch/pan applies ONLY here.
 	_zoom_pan_root = Control.new()
@@ -188,7 +192,8 @@ func _build_ui() -> void:
 	_meta_label = Label.new()
 	_meta_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_meta_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_meta_label.add_theme_color_override("font_color", Color(0.42, 0.22, 0.16))
+	_meta_label.add_theme_color_override("font_color", Color(0.36, 0.18, 0.12))
+	_meta_label.add_theme_constant_override("line_spacing", 6)
 	_content.add_child(_meta_label)
 
 	_divider = ColorRect.new()
@@ -499,16 +504,13 @@ func open_message(
 	_body_text = body
 	_set_message_text(body)
 	_reset_preview_state()
-	_dim.color.a = 0.0
+	_dim.color = Color(0.05, 0.03, 0.09, 1.0)
 	_zoom_pan_root.modulate.a = 0.0
 	await _fit_parchment()
 	if _reduced_motion:
-		_dim.color.a = 0.86
 		_zoom_pan_root.modulate.a = 1.0
 		return
 	var tw := create_tween()
-	tw.set_parallel(true)
-	tw.tween_property(_dim, "color:a", 0.86, 0.2)
 	tw.tween_property(_zoom_pan_root, "modulate:a", 1.0, 0.22)
 	await tw.finished
 
@@ -593,13 +595,10 @@ func close_viewer() -> void:
 	_visible_modal = false
 	var start_pos: Vector2 = _zoom_pan_root.global_position + _unit_size * _composite_scale * 0.5
 	if _reduced_motion:
-		_dim.color.a = 0.0
 		_zoom_pan_root.modulate.a = 1.0
 	else:
 		var tw := create_tween()
-		tw.set_parallel(true)
 		tw.tween_property(_zoom_pan_root, "modulate:a", 0.0, 0.18)
-		tw.tween_property(_dim, "color:a", 0.0, 0.18)
 		await tw.finished
 	if _clear_on_close:
 		_set_message_text("")
@@ -616,6 +615,44 @@ func _input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel"):
 		close_viewer()
 		get_viewport().set_input_as_handled()
+		return
+	## Multitouch pinch/pan for Preview on Android (gui_input alone is unreliable).
+	if _stage == null:
+		return
+	var area := _stage.get_global_rect()
+	if event is InputEventScreenTouch:
+		var st := event as InputEventScreenTouch
+		if st.pressed:
+			if area.has_point(st.position) or _pinch_touches.has(st.index):
+				_pinch_touches[st.index] = st.position
+				get_viewport().set_input_as_handled()
+		else:
+			if _pinch_touches.has(st.index):
+				_pinch_touches.erase(st.index)
+				if _pinch_touches.size() < 2:
+					_pinch_active = false
+					_pinch_last_dist = 0.0
+				get_viewport().set_input_as_handled()
+		if _pinch_touches.size() == 1 and _composite_scale > MIN_COMPOSITE_SCALE + 0.01:
+			_pan_active = st.pressed
+			_pan_last = st.position
+	elif event is InputEventScreenDrag:
+		var sd := event as InputEventScreenDrag
+		if _pinch_touches.is_empty() and not area.has_point(sd.position):
+			return
+		_pinch_touches[sd.index] = sd.position
+		if _pinch_touches.size() >= 2:
+			_handle_preview_pinch()
+			get_viewport().set_input_as_handled()
+		elif _composite_scale > MIN_COMPOSITE_SCALE + 0.01:
+			_composite_offset += sd.relative
+			_apply_composite_transform()
+			get_viewport().set_input_as_handled()
+	elif event is InputEventMagnifyGesture:
+		var mag := event as InputEventMagnifyGesture
+		if area.has_point(mag.position) or not _pinch_touches.is_empty():
+			_set_composite_scale(_composite_scale * clampf(mag.factor, 0.85, 1.15), mag.position)
+			get_viewport().set_input_as_handled()
 
 
 func _notification(what: int) -> void:

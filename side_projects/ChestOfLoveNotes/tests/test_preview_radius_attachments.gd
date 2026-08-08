@@ -50,7 +50,7 @@ func _run() -> void:
 	_assert(compose.contains("Recipient:"), "ready check rows")
 	_assert(FileAccess.file_exists("res://supabase/functions/prepare-attachment-uploads/index.ts"), "prepare uploads fn")
 	_assert(FileAccess.file_exists("res://supabase/functions/get-scroll-attachments/index.ts"), "get attachments fn")
-	_assert(BuildFlags.APP_VERSION_CODE >= 21, "versionCode 21+")
+	_assert(BuildFlags.APP_VERSION_CODE >= 22, "versionCode 22+")
 	_assert(AttachmentHelper.clamp_radius(1) == 1, "clamp allows 1m")
 	_assert(AttachmentHelper.clamp_radius(10000) == 10000, "clamp allows 10km")
 	_assert(AttachmentHelper.clamp_radius(0) == 1, "clamp raises 0")

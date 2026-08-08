@@ -16,9 +16,11 @@ const MAX_TILE_RETRIES := 3
 
 var radius_m: int = 500
 ## Canonical camera state for the whole picker session.
-var _center_lat: float = 37.5407
-var _center_lng: float = -77.4360
-var _zoom: int = 13
+## Default is a broad continental overview — not an unrelated specific city.
+## Prefer selected target / current location when available (see setup()).
+var _center_lat: float = 39.8283
+var _center_lng: float = -98.5795
+var _zoom: int = 4
 var _selected_lat: float = NAN
 var _selected_lng: float = NAN
 var _selected_name: String = ""
@@ -61,15 +63,30 @@ func setup(initial: Dictionary = {}, p_radius_m: int = 500, search_service: Loca
 	radius_m = clampi(p_radius_m, LocationHelper.MIN_RADIUS_M, LocationHelper.MAX_RADIUS_M)
 	_search_service = search_service if search_service != null else LocationSearchService.new()
 	if bool(initial.get("ok", false)) or (initial.has("lat") and initial.has("lng")):
-		_selected_lat = float(initial.get("lat", _center_lat))
-		_selected_lng = float(initial.get("lng", _center_lng))
-		_center_lat = _selected_lat
-		_center_lng = _selected_lng
-		_selected_name = str(initial.get("name", "Selected place"))
-		_selected_address = str(initial.get("address", ""))
+		var lat0 := float(initial.get("lat", _center_lat))
+		var lng0 := float(initial.get("lng", _center_lng))
+		_center_lat = lat0
+		_center_lng = lng0
+		## center_only: use GPS/search as camera start without dropping a pin.
+		if not bool(initial.get("center_only", false)) and bool(initial.get("ok", false)):
+			_selected_lat = lat0
+			_selected_lng = lng0
+			_selected_name = str(initial.get("name", "Selected place"))
+			_selected_address = str(initial.get("address", ""))
+			_zoom = 13
+		elif not bool(initial.get("center_only", false)) and initial.has("lat"):
+			_selected_lat = lat0
+			_selected_lng = lng0
+			_selected_name = str(initial.get("name", "Selected place"))
+			_selected_address = str(initial.get("address", ""))
+			_zoom = 13
+		elif bool(initial.get("center_only", false)):
+			_zoom = 14
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	z_index = 80
+	## Android multitouch often bypasses Control.gui_input — capture via _input.
+	set_process_input(true)
 	_build_ui()
 	_show_initial_loading(true)
 	_sync_action_enabled()
@@ -454,8 +471,72 @@ func _shutdown() -> void:
 	queue_free()
 
 
+func _map_host_global_rect() -> Rect2:
+	if _map_host == null:
+		return Rect2()
+	return _map_host.get_global_rect()
+
+
+func _to_map_local(global_pos: Vector2) -> Vector2:
+	if _overlay == null:
+		return global_pos
+	return _overlay.get_global_transform_with_canvas().affine_inverse() * global_pos
+
+
+func _input(event: InputEvent) -> void:
+	## Critical for Android: multitouch ScreenTouch/Drag often never reach gui_input.
+	if not _alive or not visible or _map_host == null or _overlay == null:
+		return
+	if not _initial_paint_done and not _tiles_ready and _loading_overlay != null and _loading_overlay.visible:
+		## Still allow gestures once layout exists — but prefer after first paint.
+		pass
+	var area := _map_host_global_rect()
+	if area.size.x < 8.0:
+		return
+	if event is InputEventScreenTouch:
+		var st := event as InputEventScreenTouch
+		var inside := area.has_point(st.position)
+		if st.pressed:
+			if not inside and not _pinch_touches.has(st.index):
+				return
+			_pinch_touches[st.index] = _to_map_local(st.position)
+		else:
+			if not _pinch_touches.has(st.index) and not inside:
+				return
+			_pinch_touches.erase(st.index)
+			if _pinch_touches.size() < 2:
+				_pinch_active = false
+				_pinch_last_dist = 0.0
+				_pinch_accum = 0.0
+		_drag_active = st.pressed and _pinch_touches.size() == 1
+		_drag_last = _to_map_local(st.position)
+		get_viewport().set_input_as_handled()
+	elif event is InputEventScreenDrag:
+		var sd := event as InputEventScreenDrag
+		if _pinch_touches.is_empty() and not area.has_point(sd.position):
+			return
+		_pinch_touches[sd.index] = _to_map_local(sd.position)
+		if _pinch_touches.size() >= 2:
+			_handle_map_pinch()
+		elif not _pinch_active:
+			_pan_by_pixels(sd.relative)
+		get_viewport().set_input_as_handled()
+	elif event is InputEventMagnifyGesture:
+		var mag := event as InputEventMagnifyGesture
+		if not area.has_point(mag.position) and _pinch_touches.is_empty():
+			return
+		if mag.factor > 1.01:
+			_pinch_accum += 1.0
+		elif mag.factor < 0.99:
+			_pinch_accum -= 1.0
+		if absf(_pinch_accum) >= 1.0:
+			_set_zoom_level(_zoom + int(signf(_pinch_accum)), _to_map_local(mag.position))
+			_pinch_accum = 0.0
+		get_viewport().set_input_as_handled()
+
+
 func _on_map_input(ev: InputEvent) -> void:
-	## Map owns one-finger pan and two-finger pinch; parent scroll must not move.
+	## Mouse / emulator path via gui_input (desktop + single-finger).
 	if ev is InputEventMouseButton:
 		var mb := ev as InputEventMouseButton
 		if mb.button_index == MOUSE_BUTTON_LEFT:
@@ -472,36 +553,8 @@ func _on_map_input(ev: InputEvent) -> void:
 		_drag_last = mm.position
 		_pan_by_pixels(delta)
 		_overlay.accept_event()
-	elif ev is InputEventScreenTouch:
-		var st := ev as InputEventScreenTouch
-		if st.pressed:
-			_pinch_touches[st.index] = st.position
-		else:
-			_pinch_touches.erase(st.index)
-			if _pinch_touches.size() < 2:
-				_pinch_active = false
-				_pinch_last_dist = 0.0
-				_pinch_accum = 0.0
-		_drag_active = st.pressed and _pinch_touches.size() < 2
-		_drag_last = st.position
-		_overlay.accept_event()
-	elif ev is InputEventScreenDrag:
-		var sd := ev as InputEventScreenDrag
-		_pinch_touches[sd.index] = sd.position
-		if _pinch_touches.size() >= 2:
-			_handle_map_pinch()
-		elif not _pinch_active:
-			_pan_by_pixels(sd.relative)
-		_overlay.accept_event()
-	elif ev is InputEventMagnifyGesture:
-		var mag := ev as InputEventMagnifyGesture
-		if mag.factor > 1.02:
-			_pinch_accum += 1.0
-		elif mag.factor < 0.98:
-			_pinch_accum -= 1.0
-		if absf(_pinch_accum) >= 1.0:
-			_set_zoom_level(_zoom + int(signf(_pinch_accum)), mag.position)
-			_pinch_accum = 0.0
+	elif ev is InputEventScreenTouch or ev is InputEventScreenDrag or ev is InputEventMagnifyGesture:
+		## Prefer _input path for multitouch; still consume so parent scroll stops.
 		_overlay.accept_event()
 
 
@@ -513,7 +566,7 @@ func _handle_map_pinch() -> void:
 	var a: Vector2 = _pinch_touches[keys[0]]
 	var b: Vector2 = _pinch_touches[keys[1]]
 	var dist := a.distance_to(b)
-	if dist < 16.0:
+	if dist < 12.0:
 		return
 	var mid := (a + b) * 0.5
 	if not _pinch_active:
@@ -522,11 +575,11 @@ func _handle_map_pinch() -> void:
 		_drag_active = false
 		return
 	var ratio := dist / maxf(_pinch_last_dist, 1.0)
-	## Discrete OSM zoom steps around pinch midpoint.
-	if ratio > 1.16:
+	## Sensitive enough for physical phone pinches; still discrete OSM levels.
+	if ratio > 1.08:
 		_set_zoom_level(_zoom + 1, mid)
 		_pinch_last_dist = dist
-	elif ratio < 0.86:
+	elif ratio < 0.93:
 		_set_zoom_level(_zoom - 1, mid)
 		_pinch_last_dist = dist
 
