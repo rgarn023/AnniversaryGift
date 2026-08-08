@@ -33,10 +33,16 @@ var _search_token: int = 0
 var _suggestions: VBoxContainer
 var _debounce: Timer
 var _alive: bool = true
+var _loading_overlay: Control
+var _loading_label: Label
+var _confirm_btn: Button
+var _drop_btn: Button
+var _tiles_ready: bool = false
+var _pending_tile_count: int = 0
 
 
 func setup(initial: Dictionary = {}, p_radius_m: int = 500, search_service: LocationSearchService = null) -> void:
-	radius_m = p_radius_m
+	radius_m = clampi(p_radius_m, LocationHelper.MIN_RADIUS_M, LocationHelper.MAX_RADIUS_M)
 	_search_service = search_service if search_service != null else LocationSearchService.new()
 	if bool(initial.get("ok", false)) or (initial.has("lat") and initial.has("lng")):
 		_selected_lat = float(initial.get("lat", _center_lat))
@@ -49,13 +55,16 @@ func setup(initial: Dictionary = {}, p_radius_m: int = 500, search_service: Loca
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	z_index = 80
 	_build_ui()
+	_set_loading(true)
 	_refresh_tiles()
+	_sync_action_enabled()
 
 
 func _build_ui() -> void:
 	var bg := ColorRect.new()
 	bg.color = Color(0.04, 0.03, 0.08, 1.0)
 	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	bg.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(bg)
 
 	var margin := MarginContainer.new()
@@ -102,34 +111,54 @@ func _build_ui() -> void:
 	_overlay.draw.connect(_draw_overlay)
 	map_host.add_child(_overlay)
 
+	_loading_overlay = Control.new()
+	_loading_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_loading_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	map_host.add_child(_loading_overlay)
+	var load_bg := ColorRect.new()
+	load_bg.color = Color(0.06, 0.05, 0.1, 0.82)
+	load_bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	load_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_loading_overlay.add_child(load_bg)
+	_loading_label = Label.new()
+	_loading_label.text = "Loading map…"
+	_loading_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_loading_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_loading_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_loading_label.add_theme_font_size_override("font_size", 18)
+	_loading_label.add_theme_color_override("font_color", Color(0.94, 0.9, 0.98))
+	_loading_overlay.add_child(_loading_label)
+
 	var zoom_row := HBoxContainer.new()
 	zoom_row.add_theme_constant_override("separation", 8)
 	root.add_child(zoom_row)
 	var zin := Button.new()
 	zin.text = "+"
-	zin.custom_minimum_size = Vector2(56, 48)
-	MobileUi.style_button(zin, 48)
+	zin.custom_minimum_size = Vector2(52, 52)
+	MobileUi.style_button(zin, 52)
 	zin.pressed.connect(func() -> void:
 		_zoom = mini(_zoom + 1, MAX_ZOOM)
+		_set_loading(true)
 		_refresh_tiles()
 	)
 	zoom_row.add_child(zin)
 	var zout := Button.new()
 	zout.text = "−"
-	zout.custom_minimum_size = Vector2(56, 48)
-	MobileUi.style_button(zout, 48)
+	zout.custom_minimum_size = Vector2(52, 52)
+	MobileUi.style_button(zout, 52)
 	zout.pressed.connect(func() -> void:
 		_zoom = maxi(_zoom - 1, MIN_ZOOM)
+		_set_loading(true)
 		_refresh_tiles()
 	)
 	zoom_row.add_child(zout)
-	var drop := Button.new()
-	drop.text = "Drop Pin Here"
-	drop.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	drop.custom_minimum_size = Vector2(0, 48)
-	MobileUi.style_button(drop, 48)
-	drop.pressed.connect(_drop_pin_center)
-	zoom_row.add_child(drop)
+	_drop_btn = Button.new()
+	_drop_btn.text = "Drop Pin Here"
+	_drop_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_drop_btn.custom_minimum_size = Vector2(0, 52)
+	MobileUi.style_button(_drop_btn, 52)
+	_drop_btn.pressed.connect(_drop_pin_center)
+	zoom_row.add_child(_drop_btn)
 
 	_status = Label.new()
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -150,13 +179,13 @@ func _build_ui() -> void:
 		_shutdown()
 	)
 	actions.add_child(cancel)
-	var ok := Button.new()
-	ok.text = "Confirm Location"
-	ok.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	ok.custom_minimum_size = Vector2(0, MobileUi.TOUCH_CTA_H)
-	MobileUi.style_button(ok, MobileUi.TOUCH_CTA_H)
-	ok.pressed.connect(_confirm)
-	actions.add_child(ok)
+	_confirm_btn = Button.new()
+	_confirm_btn.text = "Confirm Location"
+	_confirm_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_confirm_btn.custom_minimum_size = Vector2(0, MobileUi.TOUCH_CTA_H)
+	MobileUi.style_button(_confirm_btn, MobileUi.TOUCH_CTA_H)
+	_confirm_btn.pressed.connect(_confirm)
+	actions.add_child(_confirm_btn)
 
 	_http = HTTPRequest.new()
 	_http.timeout = 12.0
@@ -175,9 +204,27 @@ func _build_ui() -> void:
 
 
 func set_radius(m: int) -> void:
-	radius_m = m
-	_status.text = "Unlock within %s of the pin." % LocationHelper.format_radius(radius_m)
-	_overlay.queue_redraw()
+	radius_m = clampi(m, LocationHelper.MIN_RADIUS_M, LocationHelper.MAX_RADIUS_M)
+	if _status:
+		_status.text = "Unlock within %s of the pin." % LocationHelper.format_radius(radius_m)
+	if _overlay:
+		_overlay.queue_redraw()
+
+
+func _set_loading(on: bool) -> void:
+	_tiles_ready = not on
+	if _loading_overlay:
+		_loading_overlay.visible = on
+		_loading_overlay.modulate.a = 1.0 if on else 0.0
+	_sync_action_enabled()
+
+
+func _sync_action_enabled() -> void:
+	var has_pin := is_finite(_selected_lat) and is_finite(_selected_lng)
+	if _confirm_btn:
+		_confirm_btn.disabled = not (has_pin and _tiles_ready)
+	if _drop_btn:
+		_drop_btn.disabled = not _tiles_ready
 
 
 func _on_search_changed(_t: String) -> void:
@@ -339,6 +386,7 @@ func _refresh_tiles() -> void:
 		return
 	for c in _tile_layer.get_children():
 		c.queue_free()
+	_pending_tile_count = 0
 	var area := _overlay.size if _overlay.size.x > 8 else Vector2(360, 360)
 	var center_x := _lon_to_x(_center_lng, _zoom)
 	var center_y := _lat_to_y(_center_lat, _zoom)
@@ -346,6 +394,8 @@ func _refresh_tiles() -> void:
 	var tiles_y := int(ceil(area.y / 256.0)) + 2
 	var start_tx := int(floor(center_x - tiles_x * 0.5))
 	var start_ty := int(floor(center_y - tiles_y * 0.5))
+	var cached_hits := 0
+	var requested := 0
 	for ty in range(start_ty, start_ty + tiles_y + 1):
 		for tx in range(start_tx, start_tx + tiles_x + 1):
 			var max_t := int(pow(2.0, float(_zoom)))
@@ -364,13 +414,43 @@ func _refresh_tiles() -> void:
 			_tile_layer.add_child(tr)
 			if _tile_cache.has(key):
 				tr.texture = _tile_cache[key]
+				cached_hits += 1
 			else:
+				requested += 1
+				_pending_tile_count += 1
 				_request_tile(key, _zoom, wrapped_x, ty, tr)
+	if requested == 0 and cached_hits > 0:
+		_finish_loading_if_ready()
+	elif requested > 0:
+		## Failsafe: never leave Loading map forever.
+		get_tree().create_timer(2.5).timeout.connect(func() -> void:
+			if _alive and not _tiles_ready:
+				_finish_loading_if_ready(true)
+		, CONNECT_ONE_SHOT)
 	_overlay.queue_redraw()
+	_sync_action_enabled()
+
+
+func _finish_loading_if_ready(force: bool = false) -> void:
+	if not _alive:
+		return
+	if not force and _pending_tile_count > 0:
+		return
+	_tiles_ready = true
+	if _loading_overlay and _loading_overlay.visible:
+		var tw := create_tween()
+		tw.tween_property(_loading_overlay, "modulate:a", 0.0, 0.25)
+		tw.finished.connect(func() -> void:
+			if is_instance_valid(_loading_overlay):
+				_loading_overlay.visible = false
+				_loading_overlay.modulate.a = 1.0
+		)
+	_sync_action_enabled()
 
 
 func _request_tile(key: String, z: int, x: int, y: int, tr: TextureRect) -> void:
 	if _loading_tiles.has(key):
+		_pending_tile_count = maxi(0, _pending_tile_count - 1)
 		return
 	_loading_tiles[key] = true
 	var url := TILE_URL % [z, x, y]
@@ -380,24 +460,31 @@ func _request_tile(key: String, z: int, x: int, y: int, tr: TextureRect) -> void
 	var err := http.request(url, PackedStringArray(["User-Agent: %s" % USER_AGENT]))
 	if err != OK:
 		_loading_tiles.erase(key)
+		_pending_tile_count = maxi(0, _pending_tile_count - 1)
 		http.queue_free()
+		_finish_loading_if_ready()
 		return
 	var completed: Array = await http.request_completed
 	if is_instance_valid(http):
 		http.queue_free()
 	_loading_tiles.erase(key)
+	_pending_tile_count = maxi(0, _pending_tile_count - 1)
 	if not _alive or completed.size() < 4:
+		_finish_loading_if_ready()
 		return
 	if int(completed[0]) != HTTPRequest.RESULT_SUCCESS or int(completed[1]) != 200:
+		_finish_loading_if_ready()
 		return
 	var body: PackedByteArray = completed[3]
 	var img := Image.new()
 	if img.load_png_from_buffer(body) != OK:
+		_finish_loading_if_ready()
 		return
 	var tex := ImageTexture.create_from_image(img)
 	_tile_cache[key] = tex
 	if is_instance_valid(tr):
 		tr.texture = tex
+	_finish_loading_if_ready()
 
 
 func _draw_overlay() -> void:

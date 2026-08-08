@@ -13,7 +13,7 @@ const MIN_PASSWORD := 4
 const MAX_PASSWORD := 64
 
 const COL_BG := Color(0.05, 0.03, 0.12, 1.0)
-const COL_CARD := Color(0.14, 0.09, 0.20, 0.92)
+const COL_CARD := Color(0.14, 0.09, 0.20, 0.55)
 const COL_GOLD := Color(0.98, 0.86, 0.45)
 const COL_GOLD_MUTED := Color(0.72, 0.58, 0.32, 0.85)
 const COL_TEXT := Color(0.94, 0.90, 0.96)
@@ -81,6 +81,35 @@ var _location_search_service: LocationSearchService = LocationSearchService.new(
 var _location_search_token: int = 0
 var _location_debounce: Timer
 var _map_picker: MapLocationPicker
+var _location_radius_slider: HSlider
+var _location_radius_edit: LineEdit
+var _location_radius_warn: Label
+var _location_preset_row: HBoxContainer
+var _radius_edit_syncing: bool = false
+
+var _delivery_card: PanelContainer
+var _location_card: PanelContainer
+var _password_card: PanelContainer
+var _attachments_card: PanelContainer
+var _delivery_body: VBoxContainer
+var _location_body: VBoxContainer
+var _password_body: VBoxContainer
+var _attachments_body: VBoxContainer
+var _delivery_summary: Label
+var _location_header_summary: Label
+var _password_header_summary: Label
+var _attachments_header_summary: Label
+var _delivery_expanded: bool = true
+var _location_expanded: bool = false
+var _password_expanded: bool = false
+var _attachments_expanded: bool = false
+
+var _attachments: Array = []
+var _attach_count_label: Label
+var _attach_strip: HBoxContainer
+var _attach_status: Label
+var _image_preview: ImagePreviewOverlay
+var _file_dialog: FileDialog
 
 var _pw_toggle: CheckButton
 var _pw_fields: VBoxContainer
@@ -136,6 +165,7 @@ func get_draft() -> Dictionary:
 		"location_lng": _location_lng,
 		"location_radius_m": _location_radius_m,
 		"location_fix_ok": _location_fix_ok,
+		"attachments": _attachments.duplicate(true),
 	}
 
 
@@ -193,14 +223,23 @@ func apply_draft(draft: Dictionary) -> void:
 	_location_address = str(draft.get("location_address", ""))
 	_location_lat = float(draft.get("location_lat", 0.0))
 	_location_lng = float(draft.get("location_lng", 0.0))
-	_location_radius_m = int(draft.get("location_radius_m", LocationHelper.DEFAULT_RADIUS_M))
+	_location_radius_m = AttachmentHelper.clamp_radius(int(draft.get("location_radius_m", LocationHelper.DEFAULT_RADIUS_M)))
 	_location_fix_ok = bool(draft.get("location_fix_ok", false))
+	_attachments = []
+	var raw_atts = draft.get("attachments", [])
+	if typeof(raw_atts) == TYPE_ARRAY:
+		for a in raw_atts:
+			if typeof(a) == TYPE_DICTIONARY:
+				_attachments.append((a as Dictionary).duplicate(true))
 	if _location_toggle:
 		_location_toggle.set_pressed_no_signal(_has_location_lock)
 	if _location_search and not _location_fix_ok:
 		_location_search.text = ""
 	_sync_location_visibility()
+	_sync_radius_controls()
 	_refresh_location_summary()
+	_refresh_attachments_ui()
+	_refresh_optional_summaries()
 	_refresh_recipient_row()
 	_refresh_schedule_labels()
 	_sync_delivery_visibility()
@@ -224,6 +263,9 @@ func restore_after_failed_send() -> void:
 
 func handle_back() -> bool:
 	## Returns true when back was consumed by an open overlay.
+	if _image_preview != null and is_instance_valid(_image_preview) and _image_preview.visible:
+		_image_preview.close_preview()
+		return true
 	if _map_picker != null and is_instance_valid(_map_picker):
 		_map_picker.cancelled.emit()
 		if is_instance_valid(_map_picker):
@@ -264,12 +306,8 @@ func _build_ui() -> void:
 	_title_font = _load_font("res://assets/fonts/Cinzel-Bold.ttf")
 	_body_font = _load_font("res://assets/fonts/CormorantGaramond-Regular.ttf")
 
-	## Transparent form over the shared chrome starfield — avoid a second full-screen blit.
-	var bg := ColorRect.new()
-	bg.color = Color(COL_BG.r, COL_BG.g, COL_BG.b, 0.72)
-	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(bg)
+	## Fully transparent over shared chrome starfield — no tinted full-screen ColorRect.
+	mouse_filter = Control.MOUSE_FILTER_STOP
 
 	_safe_margin = MarginContainer.new()
 	_safe_margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -313,7 +351,9 @@ func _build_ui() -> void:
 	_form.add_child(_build_delivery_card())
 	_form.add_child(_build_location_card())
 	_form.add_child(_build_password_card())
+	_form.add_child(_build_attachments_card())
 	_form.add_child(_build_summary_card())
+	_refresh_optional_summaries()
 
 	_validation_label = Label.new()
 	_validation_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -450,9 +490,19 @@ func _build_message_card() -> PanelContainer:
 
 
 func _build_delivery_card() -> PanelContainer:
-	var card := _make_card()
-	var col := _card_body(card)
-	col.add_child(_section_heading("When Should It Open?"))
+	_delivery_card = _make_card()
+	var col := _card_body(_delivery_card)
+	col.add_child(_make_optional_header("When Should It Open?", "delivery"))
+	_delivery_summary = Label.new()
+	_delivery_summary.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_delivery_summary.add_theme_font_size_override("font_size", 15)
+	_delivery_summary.add_theme_color_override("font_color", COL_SUPPORT)
+	col.add_child(_delivery_summary)
+	_delivery_body = VBoxContainer.new()
+	_delivery_body.add_theme_constant_override("separation", 10)
+	col.add_child(_delivery_body)
+	var card := _delivery_card
+	col = _delivery_body
 
 	_open_immediately = CheckBox.new()
 	_open_immediately.text = "Open Immediately"
@@ -463,6 +513,7 @@ func _build_delivery_card() -> PanelContainer:
 	_open_immediately.add_theme_color_override("font_color", COL_TEXT)
 	_open_immediately.toggled.connect(func(_on: bool) -> void:
 		_sync_delivery_visibility()
+		_refresh_optional_summaries()
 		_refresh_summary()
 		_update_validation()
 	)
@@ -523,21 +574,40 @@ func _build_delivery_card() -> PanelContainer:
 	_tz_label.add_theme_font_size_override("font_size", 16)
 	_tz_label.add_theme_color_override("font_color", COL_SUPPORT)
 	col.add_child(_tz_label)
+	_delivery_body.visible = true
+	_delivery_expanded = true
 	return card
 
 
 func _build_location_card() -> PanelContainer:
-	var card := _make_card()
-	var col := _card_body(card)
-	col.add_child(_section_heading("Location Lock"))
+	_location_card = _make_card()
+	var shell := _card_body(_location_card)
+	shell.add_child(_make_optional_header("Location Lock", "location"))
+	_location_header_summary = Label.new()
+	_location_header_summary.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_location_header_summary.add_theme_font_size_override("font_size", 15)
+	_location_header_summary.add_theme_color_override("font_color", COL_SUPPORT)
+	shell.add_child(_location_header_summary)
+
+	_location_body = VBoxContainer.new()
+	_location_body.visible = false
+	_location_body.add_theme_constant_override("separation", 10)
+	shell.add_child(_location_body)
+	var col := _location_body
+
 	var blurb := Label.new()
-	blurb.text = "Require your friend to be near a specific place to open this scroll. Location is checked only when needed to create or open a location-locked scroll."
+	blurb.text = "Require your friend to be near a specific place to open this scroll."
 	blurb.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	blurb.add_theme_font_size_override("font_size", 16)
+	blurb.add_theme_font_size_override("font_size", 15)
 	blurb.add_theme_color_override("font_color", COL_SUPPORT)
 	col.add_child(blurb)
+	var info := Label.new()
+	info.text = "ⓘ Location is checked only when needed."
+	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	info.add_theme_font_size_override("font_size", 13)
+	info.add_theme_color_override("font_color", Color(0.7, 0.64, 0.78, 0.9))
+	col.add_child(info)
 
-	## Whole row is tappable — not only the tiny switch.
 	var toggle_row := Button.new()
 	toggle_row.flat = true
 	toggle_row.focus_mode = Control.FOCUS_NONE
@@ -562,6 +632,7 @@ func _build_location_card() -> PanelContainer:
 	_location_toggle.toggled.connect(func(on: bool) -> void:
 		_has_location_lock = on
 		_sync_location_visibility()
+		_refresh_optional_summaries()
 		_refresh_summary()
 		_update_validation()
 	)
@@ -617,9 +688,19 @@ func _build_location_card() -> PanelContainer:
 	_location_use_btn.pressed.connect(_on_use_current_location)
 	action_row.add_child(_location_use_btn)
 
-	_location_summary = _make_card()
+	_location_summary = PanelContainer.new()
 	_location_summary.visible = false
-	var sum_col := _card_body(_location_summary)
+	var sum_style := StyleBoxFlat.new()
+	sum_style.bg_color = Color(0.12, 0.08, 0.18, 0.5)
+	sum_style.set_corner_radius_all(12)
+	sum_style.content_margin_left = 12
+	sum_style.content_margin_right = 12
+	sum_style.content_margin_top = 10
+	sum_style.content_margin_bottom = 10
+	_location_summary.add_theme_stylebox_override("panel", sum_style)
+	var sum_col := VBoxContainer.new()
+	sum_col.add_theme_constant_override("separation", 4)
+	_location_summary.add_child(sum_col)
 	var sel_cap := _field_caption("Selected Location")
 	sum_col.add_child(sel_cap)
 	_location_summary_title = Label.new()
@@ -646,27 +727,64 @@ func _build_location_card() -> PanelContainer:
 	_location_fields.add_child(_location_summary)
 
 	_location_fields.add_child(_field_caption("Unlock radius"))
-	_location_radius_row = HBoxContainer.new()
-	_location_radius_row.add_theme_constant_override("separation", 6)
-	_location_fields.add_child(_location_radius_row)
+	var radius_row := HBoxContainer.new()
+	radius_row.add_theme_constant_override("separation", 8)
+	_location_fields.add_child(radius_row)
+	var radius_prefix := Label.new()
+	radius_prefix.text = "Radius:"
+	radius_prefix.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	radius_prefix.add_theme_font_size_override("font_size", 16)
+	radius_prefix.add_theme_color_override("font_color", COL_TEXT)
+	radius_row.add_child(radius_prefix)
+	_location_radius_edit = LineEdit.new()
+	_location_radius_edit.custom_minimum_size = Vector2(96, 48)
+	_location_radius_edit.alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_location_radius_edit.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_NUMBER
+	_location_radius_edit.add_theme_font_size_override("font_size", 18)
+	_style_line_edit(_location_radius_edit)
+	_location_radius_edit.text_submitted.connect(func(_t: String) -> void: _commit_radius_edit())
+	_location_radius_edit.focus_exited.connect(_commit_radius_edit)
+	radius_row.add_child(_location_radius_edit)
+	var unit := Label.new()
+	unit.text = "m"
+	unit.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	unit.add_theme_font_size_override("font_size", 16)
+	unit.add_theme_color_override("font_color", COL_SUPPORT)
+	radius_row.add_child(unit)
+
+	_location_radius_slider = HSlider.new()
+	_location_radius_slider.min_value = LocationHelper.MIN_RADIUS_M
+	_location_radius_slider.max_value = LocationHelper.MAX_RADIUS_M
+	_location_radius_slider.step = 1
+	_location_radius_slider.value = _location_radius_m
+	_location_radius_slider.custom_minimum_size = Vector2(0, 36)
+	_location_radius_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_location_radius_slider.value_changed.connect(_on_radius_slider_changed)
+	_location_fields.add_child(_location_radius_slider)
+
+	_location_preset_row = HBoxContainer.new()
+	_location_preset_row.add_theme_constant_override("separation", 6)
+	_location_fields.add_child(_location_preset_row)
 	for meters in LocationHelper.RADIUS_OPTIONS:
 		var rb := Button.new()
 		rb.text = LocationHelper.format_radius(meters)
-		rb.toggle_mode = true
-		rb.button_pressed = meters == _location_radius_m
-		rb.custom_minimum_size = Vector2(0, 48)
+		rb.custom_minimum_size = Vector2(0, 44)
 		rb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		rb.focus_mode = Control.FOCUS_NONE
 		_style_secondary_button(rb)
 		var mcopy: int = meters
 		rb.pressed.connect(func() -> void:
-			_location_radius_m = mcopy
-			_sync_radius_buttons()
-			_refresh_location_summary()
-			_refresh_summary()
-			_update_validation()
+			_set_radius_m(mcopy)
 		)
-		_location_radius_row.add_child(rb)
+		_location_preset_row.add_child(rb)
+
+	_location_radius_warn = Label.new()
+	_location_radius_warn.visible = false
+	_location_radius_warn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_location_radius_warn.text = "Very small radii may be difficult to verify accurately with phone GPS."
+	_location_radius_warn.add_theme_font_size_override("font_size", 14)
+	_location_radius_warn.add_theme_color_override("font_color", COL_WARN)
+	_location_fields.add_child(_location_radius_warn)
 
 	_location_status = Label.new()
 	_location_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -681,17 +799,51 @@ func _build_location_card() -> PanelContainer:
 		_location_debounce.wait_time = 0.35
 		_location_debounce.timeout.connect(_run_location_search)
 		add_child(_location_debounce)
-	return card
+	_sync_radius_controls()
+	return _location_card
 
 
 func _sync_radius_buttons() -> void:
-	if _location_radius_row == null:
+	_sync_radius_controls()
+
+
+func _set_radius_m(meters: int) -> void:
+	_location_radius_m = AttachmentHelper.clamp_radius(meters)
+	_sync_radius_controls()
+	_refresh_location_summary()
+	_refresh_optional_summaries()
+	_refresh_summary()
+	_update_validation()
+	if _map_picker != null and is_instance_valid(_map_picker):
+		_map_picker.set_radius(_location_radius_m)
+
+
+func _on_radius_slider_changed(v: float) -> void:
+	if _radius_edit_syncing:
 		return
-	var i := 0
-	for child in _location_radius_row.get_children():
-		if child is Button and i < LocationHelper.RADIUS_OPTIONS.size():
-			(child as Button).set_pressed_no_signal(LocationHelper.RADIUS_OPTIONS[i] == _location_radius_m)
-		i += 1
+	_set_radius_m(int(round(v)))
+
+
+func _commit_radius_edit() -> void:
+	if _location_radius_edit == null:
+		return
+	var parsed := AttachmentHelper.parse_radius_text(_location_radius_edit.text)
+	if not bool(parsed.get("ok", false)):
+		_location_status.text = str(parsed.get("error", "Enter a valid radius."))
+		_sync_radius_controls()
+		return
+	_set_radius_m(int(parsed.value))
+
+
+func _sync_radius_controls() -> void:
+	_radius_edit_syncing = true
+	if _location_radius_slider:
+		_location_radius_slider.set_value_no_signal(float(_location_radius_m))
+	if _location_radius_edit:
+		_location_radius_edit.text = str(_location_radius_m)
+	if _location_radius_warn:
+		_location_radius_warn.visible = _location_radius_m < LocationHelper.SMALL_RADIUS_WARN_M
+	_radius_edit_syncing = false
 
 
 func _sync_location_visibility() -> void:
@@ -711,17 +863,12 @@ func _refresh_location_summary() -> void:
 	if _location_summary_title:
 		_location_summary_title.text = _location_name if not _location_name.is_empty() else "Selected place"
 	if _location_summary_addr:
-		var line := _location_address
-		if line.is_empty():
-			line = "Unlock within %s" % LocationHelper.format_radius(_location_radius_m)
-		else:
-			line = "%s\nUnlock within %s" % [line, LocationHelper.format_radius(_location_radius_m)]
-		_location_summary_addr.text = line
+		_location_summary_addr.text = _location_address if not _location_address.is_empty() else "Resolved place"
 	if _location_status:
 		if not _has_location_lock:
 			_location_status.text = ""
 		elif _location_fix_ok:
-			_location_status.text = "Place locked · unlock within %s" % LocationHelper.format_radius(_location_radius_m)
+			_location_status.text = "Place selected."
 		else:
 			_location_status.text = "Select a location from the search results or choose one on the map."
 
@@ -748,6 +895,7 @@ func _apply_resolved_place(place: Dictionary) -> void:
 		_location_search.text = ""
 		_location_search.release_focus()
 	_refresh_location_summary()
+	_refresh_optional_summaries()
 	_refresh_summary()
 	_update_validation()
 
@@ -795,14 +943,19 @@ func _show_location_suggestions(results: Array) -> void:
 		if typeof(place) != TYPE_DICTIONARY:
 			continue
 		var btn := Button.new()
-		var name := str(place.get("name", ""))
+		var pname := str(place.get("name", ""))
 		var addr := str(place.get("address", ""))
-		btn.text = name if addr.is_empty() else "%s\n%s" % [name, addr]
+		var selected := _location_fix_ok and pname == _location_name
+		btn.text = ("✓ 📍 %s\n     %s" % [pname, addr]) if not addr.is_empty() else ("✓ 📍 %s" % pname if selected else "📍 %s%s" % [pname, ("" if addr.is_empty() else "\n     " + addr)])
+		if not selected:
+			btn.text = "📍 %s" % pname if addr.is_empty() else "📍 %s\n     %s" % [pname, addr]
 		btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		btn.custom_minimum_size = Vector2(0, 56)
+		btn.custom_minimum_size = Vector2(0, 64)
 		btn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		btn.focus_mode = Control.FOCUS_NONE
 		_style_secondary_button(btn)
+		if selected:
+			btn.add_theme_color_override("font_color", COL_GOLD)
 		var captured: Dictionary = (place as Dictionary).duplicate(true)
 		btn.pressed.connect(func() -> void:
 			_apply_resolved_place(captured)
@@ -886,9 +1039,20 @@ func _on_use_current_location() -> void:
 
 
 func _build_password_card() -> PanelContainer:
-	var card := _make_card()
-	var col := _card_body(card)
-	col.add_child(_section_heading("Magic Password"))
+	_password_card = _make_card()
+	var shell := _card_body(_password_card)
+	shell.add_child(_make_optional_header("Magic Password", "password"))
+	_password_header_summary = Label.new()
+	_password_header_summary.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_password_header_summary.add_theme_font_size_override("font_size", 15)
+	_password_header_summary.add_theme_color_override("font_color", COL_SUPPORT)
+	shell.add_child(_password_header_summary)
+	_password_body = VBoxContainer.new()
+	_password_body.visible = false
+	_password_body.add_theme_constant_override("separation", 10)
+	shell.add_child(_password_body)
+	var col := _password_body
+	var card := _password_card
 
 	var toggle_row := HBoxContainer.new()
 	toggle_row.custom_minimum_size = Vector2(0, 56)
@@ -908,6 +1072,7 @@ func _build_password_card() -> PanelContainer:
 		if not on:
 			_pw_edit.text = ""
 			_pw2_edit.text = ""
+		_refresh_optional_summaries()
 		_refresh_summary()
 		_update_validation()
 	)
@@ -980,6 +1145,250 @@ func _build_password_card() -> PanelContainer:
 	return card
 
 
+
+func _build_attachments_card() -> PanelContainer:
+	_attachments_card = _make_card()
+	var shell := _card_body(_attachments_card)
+	shell.add_child(_make_optional_header("Attachments", "attachments"))
+	_attachments_header_summary = Label.new()
+	_attachments_header_summary.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_attachments_header_summary.add_theme_font_size_override("font_size", 15)
+	_attachments_header_summary.add_theme_color_override("font_color", COL_SUPPORT)
+	shell.add_child(_attachments_header_summary)
+	_attachments_body = VBoxContainer.new()
+	_attachments_body.visible = false
+	_attachments_body.add_theme_constant_override("separation", 10)
+	shell.add_child(_attachments_body)
+
+	var help := Label.new()
+	help.text = "Add up to %d photos to this scroll." % AttachmentHelper.MAX_ATTACHMENTS
+	help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	help.add_theme_font_size_override("font_size", 15)
+	help.add_theme_color_override("font_color", COL_SUPPORT)
+	_attachments_body.add_child(help)
+
+	_attach_count_label = Label.new()
+	_attach_count_label.add_theme_font_size_override("font_size", 15)
+	_attach_count_label.add_theme_color_override("font_color", COL_TEXT)
+	_attachments_body.add_child(_attach_count_label)
+
+	_attach_strip = HBoxContainer.new()
+	_attach_strip.add_theme_constant_override("separation", 8)
+	_attachments_body.add_child(_attach_strip)
+
+	var add_btn := Button.new()
+	add_btn.text = "Add Photo"
+	add_btn.custom_minimum_size = Vector2(0, 52)
+	add_btn.focus_mode = Control.FOCUS_NONE
+	_style_secondary_button(add_btn)
+	add_btn.pressed.connect(_on_add_photo_pressed)
+	_attachments_body.add_child(add_btn)
+
+	_attach_status = Label.new()
+	_attach_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_attach_status.add_theme_font_size_override("font_size", 14)
+	_attach_status.add_theme_color_override("font_color", COL_SUPPORT)
+	_attachments_body.add_child(_attach_status)
+	_refresh_attachments_ui()
+	return _attachments_card
+
+
+func _make_optional_header(title: String, key: String) -> Button:
+	var b := Button.new()
+	b.focus_mode = Control.FOCUS_NONE
+	b.custom_minimum_size = Vector2(0, 44)
+	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	b.flat = true
+	b.add_theme_font_size_override("font_size", 19)
+	b.add_theme_color_override("font_color", COL_GOLD)
+	if _title_font:
+		b.add_theme_font_override("font", _title_font)
+	b.text = "▸  %s" % title
+	b.set_meta("section_key", key)
+	b.set_meta("section_title", title)
+	b.pressed.connect(func() -> void:
+		_toggle_optional_section(key, b)
+	)
+	return b
+
+
+func _toggle_optional_section(key: String, header: Button) -> void:
+	var expanded := false
+	match key:
+		"delivery":
+			_delivery_expanded = not _delivery_expanded
+			expanded = _delivery_expanded
+			if _delivery_body:
+				_delivery_body.visible = expanded
+		"location":
+			_location_expanded = not _location_expanded
+			expanded = _location_expanded
+			if _location_body:
+				_location_body.visible = expanded
+		"password":
+			_password_expanded = not _password_expanded
+			expanded = _password_expanded
+			if _password_body:
+				_password_body.visible = expanded
+		"attachments":
+			_attachments_expanded = not _attachments_expanded
+			expanded = _attachments_expanded
+			if _attachments_body:
+				_attachments_body.visible = expanded
+	var title := str(header.get_meta("section_title", key))
+	header.text = ("%s  %s" % ["▾" if expanded else "▸", title])
+	_refresh_optional_summaries()
+
+
+func _refresh_optional_summaries() -> void:
+	if _delivery_summary:
+		var immediate := _open_immediately != null and _open_immediately.button_pressed
+		_delivery_summary.text = "Immediately" if immediate else "%s at %s" % [_format_date(_unlock_date), _format_time(_unlock_hour, _unlock_minute)]
+		_delivery_summary.visible = not _delivery_expanded
+	if _location_header_summary:
+		if _has_location_lock and _location_fix_ok:
+			_location_header_summary.text = "%s · %s" % [_location_name, LocationHelper.format_radius(_location_radius_m)]
+		elif _has_location_lock:
+			_location_header_summary.text = "Enabled — choose a place"
+		else:
+			_location_header_summary.text = "Off"
+		_location_header_summary.visible = not _location_expanded
+	if _password_header_summary:
+		_password_header_summary.text = "Enabled" if (_pw_toggle and _pw_toggle.button_pressed) else "Off"
+		_password_header_summary.visible = not _password_expanded
+	if _attachments_header_summary:
+		var n := _attachments.size()
+		_attachments_header_summary.text = ("Off" if n == 0 else "%d photo%s" % [n, "" if n == 1 else "s"])
+		_attachments_header_summary.visible = not _attachments_expanded
+
+
+func _refresh_attachments_ui() -> void:
+	if _attach_count_label:
+		_attach_count_label.text = "%d of %d photos" % [_attachments.size(), AttachmentHelper.MAX_ATTACHMENTS]
+	if _attach_strip == null:
+		return
+	for c in _attach_strip.get_children():
+		c.queue_free()
+	for i in range(_attachments.size()):
+		var item: Dictionary = _attachments[i]
+		var path := str(item.get("path", ""))
+		var wrap := VBoxContainer.new()
+		wrap.custom_minimum_size = Vector2(84, 0)
+		var btn := Button.new()
+		btn.custom_minimum_size = Vector2(84, 84)
+		btn.clip_contents = true
+		btn.focus_mode = Control.FOCUS_NONE
+		var st := StyleBoxFlat.new()
+		st.bg_color = Color(0.12, 0.08, 0.16, 0.55)
+		st.set_corner_radius_all(10)
+		btn.add_theme_stylebox_override("normal", st)
+		if not path.is_empty() and FileAccess.file_exists(path):
+			var tex := AttachmentHelper.make_thumbnail_texture(path, 180)
+			if tex:
+				var tr := TextureRect.new()
+				tr.texture = tex
+				tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+				tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+				tr.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+				tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+				btn.add_child(tr)
+		var idx := i
+		btn.pressed.connect(func() -> void:
+			_preview_attachment_at(idx)
+		)
+		wrap.add_child(btn)
+		var rm := Button.new()
+		rm.text = "Remove"
+		rm.focus_mode = Control.FOCUS_NONE
+		rm.custom_minimum_size = Vector2(0, 36)
+		_style_secondary_button(rm)
+		rm.pressed.connect(func() -> void:
+			_remove_attachment_at(idx)
+		)
+		wrap.add_child(rm)
+		_attach_strip.add_child(wrap)
+	_refresh_optional_summaries()
+
+
+func _on_add_photo_pressed() -> void:
+	if _attachments.size() >= AttachmentHelper.MAX_ATTACHMENTS:
+		_attach_status.text = "You can attach up to %d photos." % AttachmentHelper.MAX_ATTACHMENTS
+		return
+	_pick_photo_from_gallery()
+
+
+func _pick_photo_from_gallery() -> void:
+	if _file_dialog == null:
+		_file_dialog = FileDialog.new()
+		_file_dialog.access = FileDialog.ACCESS_FILESYSTEM
+		_file_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+		_file_dialog.use_native_dialog = true
+		_file_dialog.add_filter("*.jpg,*.jpeg,*.png,*.webp", "Photos")
+		_file_dialog.title = "Add Photo"
+		_file_dialog.file_selected.connect(_on_photo_file_selected)
+		add_child(_file_dialog)
+	_file_dialog.popup_centered_ratio(0.85)
+
+
+func _on_photo_file_selected(path: String) -> void:
+	if _attachments.size() >= AttachmentHelper.MAX_ATTACHMENTS:
+		_attach_status.text = "You can attach up to %d photos." % AttachmentHelper.MAX_ATTACHMENTS
+		return
+	_attach_status.text = "Preparing photo…"
+	await get_tree().process_frame
+	var prepared: Dictionary = AttachmentHelper.compress_to_draft(path)
+	if not bool(prepared.get("ok", false)):
+		_attach_status.text = str(prepared.get("error", "Could not add that photo."))
+		return
+	_attachments.append({
+		"id": str(prepared.get("id", "")),
+		"path": str(prepared.get("path", "")),
+		"mime": str(prepared.get("mime", "image/jpeg")),
+		"width": int(prepared.get("width", 0)),
+		"height": int(prepared.get("height", 0)),
+		"byte_size": int(prepared.get("byte_size", 0)),
+	})
+	_attach_status.text = "Photo added."
+	_refresh_attachments_ui()
+	_refresh_summary()
+
+
+func _remove_attachment_at(idx: int) -> void:
+	if idx < 0 or idx >= _attachments.size():
+		return
+	var item: Dictionary = _attachments[idx]
+	var path := str(item.get("path", ""))
+	_attachments.remove_at(idx)
+	if not path.is_empty() and path.begins_with(AttachmentHelper.DRAFT_DIR) and FileAccess.file_exists(path):
+		DirAccess.remove_absolute(path)
+	_refresh_attachments_ui()
+	_refresh_summary()
+
+
+func _preview_attachment_at(idx: int) -> void:
+	if idx < 0 or idx >= _attachments.size():
+		return
+	var item: Dictionary = _attachments[idx]
+	var path := str(item.get("path", ""))
+	if path.is_empty():
+		return
+	if _image_preview == null:
+		_image_preview = ImagePreviewOverlay.new()
+		get_tree().root.add_child(_image_preview)
+	_image_preview.open_path(path, "Attachment %d" % (idx + 1))
+
+
+func _clear_attachments() -> void:
+	for item in _attachments:
+		if typeof(item) != TYPE_DICTIONARY:
+			continue
+		var path := str(item.get("path", ""))
+		if path.begins_with(AttachmentHelper.DRAFT_DIR) and FileAccess.file_exists(path):
+			DirAccess.remove_absolute(path)
+	_attachments.clear()
+	_refresh_attachments_ui()
+
+
 func _build_summary_card() -> PanelContainer:
 	var card := _make_card()
 	var col := _card_body(card)
@@ -995,7 +1404,7 @@ func _build_summary_card() -> PanelContainer:
 func _build_bottom_actions() -> PanelContainer:
 	_bottom_area = PanelContainer.new()
 	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.06, 0.04, 0.12, 0.96)
+	style.bg_color = Color(0.06, 0.04, 0.12, 0.42)
 	style.border_color = COL_GOLD_MUTED
 	style.border_width_top = 1
 	style.content_margin_left = 12
@@ -1042,9 +1451,8 @@ func _make_card() -> PanelContainer:
 	style.content_margin_right = MobileUi.CARD_PAD
 	style.content_margin_top = 12
 	style.content_margin_bottom = 12
-	style.shadow_color = Color(0, 0, 0, 0.35)
-	style.shadow_size = 6
-	style.shadow_offset = Vector2(0, 3)
+	## No heavy drop-shadow rectangles that read as purple bands on OLED.
+	style.shadow_size = 0
 	card.add_theme_stylebox_override("panel", style)
 	return card
 
@@ -1240,22 +1648,32 @@ func _refresh_summary() -> void:
 	)
 	var loc_on := _location_toggle != null and _location_toggle.button_pressed
 	var lines: PackedStringArray = PackedStringArray([
-		"Recipient: %s" % to_name,
-		"Opens: %s" % schedule_label,
+		"Recipient:",
+		to_name,
+		"",
+		"Opens:",
+		schedule_label,
 	])
 	if loc_on:
 		var place := _location_name if not _location_name.is_empty() else "Not selected"
+		lines.append("")
+		lines.append("Location:")
+		lines.append(place)
 		if not _location_address.is_empty():
-			place = "%s, %s" % [_location_name, _location_address]
-		if immediate:
-			lines.append("Location: %s" % place)
-			lines.append("Unlock radius: %s" % LocationHelper.format_radius(_location_radius_m))
-		else:
-			lines.append("Available after: %s" % schedule_label)
-			lines.append("And only within %s of %s" % [LocationHelper.format_radius(_location_radius_m), place])
-	var pw := "Required" if (_pw_toggle and _pw_toggle.button_pressed) else "Not required"
-	lines.append("Magic Password: %s" % pw)
+			lines.append(_location_address)
+		lines.append("")
+		lines.append("Radius:")
+		lines.append(LocationHelper.format_radius(_location_radius_m))
+	var pw_on := _pw_toggle != null and _pw_toggle.button_pressed
+	lines.append("")
+	lines.append("Password:")
+	lines.append("Required" if pw_on else "Not required")
+	if not _attachments.is_empty():
+		lines.append("")
+		lines.append("Attachments:")
+		lines.append("%d of %d photos" % [_attachments.size(), AttachmentHelper.MAX_ATTACHMENTS])
 	_summary_label.text = "\n".join(lines)
+	_refresh_optional_summaries()
 
 
 func _timezone_friendly_name() -> String:

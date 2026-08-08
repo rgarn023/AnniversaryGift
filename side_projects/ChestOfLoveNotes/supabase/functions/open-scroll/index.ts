@@ -13,6 +13,8 @@ interface Body {
   /** Recipient current fix when Location Lock is enabled */
   location_lat?: number;
   location_lng?: number;
+  /** Optional GPS accuracy in meters — fail closed for tiny radii. */
+  location_accuracy_m?: number;
 }
 
 function haversineMeters(
@@ -136,6 +138,14 @@ Deno.serve(async (req) => {
         throw new AppError(
           "location_required",
           "Move near the locked place and allow location access to open this scroll",
+          403,
+        );
+      }
+      const accuracy = Number(body.location_accuracy_m ?? NaN);
+      if (Number.isFinite(accuracy) && accuracy > 0 && accuracy > Math.max(radius, 1)) {
+        throw new AppError(
+          "location_accuracy",
+          "Location accuracy is too low for this unlock radius. Try again outdoors.",
           403,
         );
       }

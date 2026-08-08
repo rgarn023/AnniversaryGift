@@ -6,7 +6,11 @@ class_name LocationHelper
 
 const PLUGIN_NAME := "ChestLocation"
 const DEFAULT_RADIUS_M := 500
-const RADIUS_OPTIONS: Array[int] = [100, 250, 500, 1000]
+const MIN_RADIUS_M := 1
+const MAX_RADIUS_M := 10000
+const SMALL_RADIUS_WARN_M := 50
+## Optional quick shortcuts only — not the sole radius control.
+const RADIUS_OPTIONS: Array[int] = [25, 100, 250, 500, 1000]
 const PERM_FINE := "android.permission.ACCESS_FINE_LOCATION"
 const PERM_COARSE := "android.permission.ACCESS_COARSE_LOCATION"
 const MAX_ACCEPTABLE_ACCURACY_M := 200.0
@@ -161,6 +165,16 @@ static func evaluate_unlock_requirements(item: Dictionary, now_unix: int, fix: D
 		elif not bool(fix.get("ok", false)):
 			reasons.append("location_unavailable")
 		else:
+			var accuracy := float(fix.get("accuracy_m", 0.0))
+			## Do not unlock when reported GPS uncertainty is worse than the lock radius.
+			if accuracy > 0.0 and accuracy > float(maxi(radius, 1)):
+				reasons.append("location_accuracy")
+				return {
+					"ok": false,
+					"reasons": reasons,
+					"distance_m": -1.0,
+					"message": "Location accuracy is too low for this small unlock radius. Try again outdoors.",
+				}
 			var dist := haversine_m(float(fix.get("lat")), float(fix.get("lng")), tlat, tlng)
 			if dist > float(radius):
 				reasons.append("location_far")

@@ -133,8 +133,8 @@ func _test_performance_contracts() -> void:
 
 
 func _test_version() -> void:
-	_assert(BuildFlags.APP_VERSION_CODE >= 16, "versionCode >= 16")
+	_assert(BuildFlags.APP_VERSION_CODE >= 17, "versionCode >= 17")
 	var preset := FileAccess.get_file_as_string("res://export_presets.cfg")
-	_assert(preset.contains("ChestOfLoveNotes-location-lock-online-debug.apk"), "APK filename")
-	_assert(preset.contains("version/code=16"), "export versionCode 16")
+	_assert(preset.contains("ChestOfLoveNotes-preview-radius-attachments-debug.apk"), "APK filename")
+	_assert(preset.contains("version/code=17"), "export versionCode 16")
 	_assert(preset.contains("access_fine_location=true"), "fine location permission enabled")

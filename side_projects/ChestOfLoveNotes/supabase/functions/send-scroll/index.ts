@@ -21,6 +21,15 @@ interface Body {
   location_lat?: number;
   location_lng?: number;
   location_radius_m?: number;
+  /** Pending photo uploads from prepare-attachment-uploads (max 5). */
+  attachments?: Array<{
+    path: string;
+    mime_type?: string;
+    width?: number;
+    height?: number;
+    byte_size?: number;
+    sort_order?: number;
+  }>;
 }
 
 const MIN_PASSWORD = 4;
@@ -107,8 +116,8 @@ Deno.serve(async (req) => {
       if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
         throw new AppError("invalid_location", "Location coordinates out of range", 400);
       }
-      if (!Number.isFinite(radius) || radius < 50 || radius > 50000) {
-        throw new AppError("invalid_location", "Location radius must be 50–50000 meters", 400);
+      if (!Number.isFinite(radius) || radius < 1 || radius > 10000) {
+        throw new AppError("invalid_location", "Location radius must be 1–10000 meters", 400);
       }
       if (!locationName) {
         locationName = "a set place";
@@ -254,6 +263,55 @@ Deno.serve(async (req) => {
       );
     }
 
+
+    // Attach pending photos (must already exist in private storage under pending/{me}/…).
+    const pending = Array.isArray(body.attachments) ? body.attachments.slice(0, 5) : [];
+    const attachedMeta: Array<Record<string, unknown>> = [];
+    if (pending.length > 0) {
+      for (let i = 0; i < pending.length; i++) {
+        const item = pending[i];
+        const srcPath = String(item.path ?? "");
+        const prefix = `pending/${me}/`;
+        if (!srcPath.startsWith(prefix)) {
+          await service.from("scrolls").update({ deleted_at: new Date().toISOString() }).eq("id", scroll.id);
+          throw new AppError("invalid_attachments", "Invalid attachment upload path", 400);
+        }
+        const mime = String(item.mime_type ?? "image/jpeg");
+        const ext = mime === "image/png" ? "png" : mime === "image/webp" ? "webp" : "jpg";
+        const destPath = `${me}/${scroll.id}/${i}.${ext}`;
+        const { error: moveErr } = await service.storage
+          .from("scroll-attachments")
+          .move(srcPath, destPath);
+        if (moveErr) {
+          console.error(moveErr);
+          await service.storage.from("scroll-attachments").remove(pending.map((p) => String(p.path ?? "")).filter(Boolean));
+          await service.from("scrolls").update({ deleted_at: new Date().toISOString() }).eq("id", scroll.id);
+          throw new AppError("attachment_failed", "Photo upload could not be finalized. Please try again.", 500);
+        }
+        const row = {
+          scroll_id: scroll.id,
+          storage_path: destPath,
+          mime_type: mime,
+          width: Number.isFinite(Number(item.width)) ? Math.round(Number(item.width)) : null,
+          height: Number.isFinite(Number(item.height)) ? Math.round(Number(item.height)) : null,
+          byte_size: Number.isFinite(Number(item.byte_size)) ? Math.round(Number(item.byte_size)) : null,
+          sort_order: Number.isFinite(Number(item.sort_order)) ? Math.round(Number(item.sort_order)) : i,
+        };
+        const { error: attErr } = await service.from("scroll_attachments").insert(row);
+        if (attErr) {
+          console.error(attErr);
+          await service.storage.from("scroll-attachments").remove([destPath]);
+          await service.from("scrolls").update({ deleted_at: new Date().toISOString() }).eq("id", scroll.id);
+          throw new AppError("attachment_failed", "Could not save photo attachments.", 500);
+        }
+        attachedMeta.push({
+          storage_path: destPath,
+          mime_type: mime,
+          sort_order: row.sort_order,
+        });
+      }
+    }
+
     // Never return ciphertext / password material.
     return jsonResponse({
       scroll: {
@@ -271,7 +329,9 @@ Deno.serve(async (req) => {
         location_radius_m: Number(scroll.location_radius_m ?? 500),
         created_at: scroll.created_at,
         is_opened: false,
+        attachment_count: attachedMeta.length,
       },
+      attachments: attachedMeta,
     });
   } catch (err) {
     return errorResponse(err);

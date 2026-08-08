@@ -3,6 +3,7 @@ extends Control
 
 var state: AppState
 var _scroll_viewer: LoveNotesScrollViewer
+var _image_preview: ImagePreviewOverlay
 var _chest: LoveNotesChest
 var _screen_host: Control
 var _banner: Label
@@ -51,7 +52,10 @@ func _ready() -> void:
 	_scroll_viewer = LoveNotesScrollViewer.new()
 	_scroll_viewer.set_reduced_motion(state.reduced_motion)
 	_scroll_viewer.closed.connect(_on_scroll_closed)
+	_scroll_viewer.attachment_tapped.connect(_on_scroll_attachment_tapped)
 	add_child(_scroll_viewer)
+	_image_preview = ImagePreviewOverlay.new()
+	add_child(_image_preview)
 	if state.api:
 		state.api.session_invalidated.connect(_on_session_invalidated)
 	# Cold start: short Charoite boot while session/backend init runs in parallel.
@@ -220,7 +224,15 @@ func _persist_compose_draft_if_needed() -> void:
 
 
 func _clear_compose_draft() -> void:
+	var atts = _compose_draft.get("attachments", [])
+	if typeof(atts) == TYPE_ARRAY:
+		for a in atts:
+			if typeof(a) == TYPE_DICTIONARY:
+				var path := str(a.get("path", ""))
+				if path.begins_with(AttachmentHelper.DRAFT_DIR) and FileAccess.file_exists(path):
+					DirAccess.remove_absolute(path)
 	_compose_draft.clear()
+	AttachmentHelper.clear_draft_dir()
 
 
 func _clear_screen() -> void:
@@ -1516,6 +1528,7 @@ func _show_password_dialog(item: Dictionary) -> void:
 func _open_authorized_scroll(scroll_id: String, magic_password: String, needs_location: bool = false) -> void:
 	var lat := NAN
 	var lng := NAN
+	var accuracy := NAN
 	if needs_location:
 		if OS.get_name() == "Android":
 			var status := LocationHelper.request_permission_if_needed()
@@ -1532,11 +1545,12 @@ func _open_authorized_scroll(scroll_id: String, magic_password: String, needs_lo
 			return
 		lat = float(fix.get("lat", NAN))
 		lng = float(fix.get("lng", NAN))
+		accuracy = float(fix.get("accuracy_m", NAN))
 	var result: Dictionary = {}
 	if state.is_demo():
 		result = state.demo.open_scroll(scroll_id, magic_password, lat, lng)
 	elif state.is_online():
-		result = await state.scrolls.open_scroll(scroll_id, magic_password, lat, lng)
+		result = await state.scrolls.open_scroll(scroll_id, magic_password, lat, lng, accuracy)
 		if bool(result.get("ok", false)):
 			var data: Dictionary = result.get("data", {})
 			result = {
@@ -1563,7 +1577,53 @@ func _open_authorized_scroll(scroll_id: String, magic_password: String, needs_lo
 	var ephemeral := bool(result.get("ephemeral", false))
 	var heading := str(meta.get("title", "A Love Note"))
 	var meta_line := "From %s" % str(meta.get("sender_display_name", meta.get("sender_id", "Friend")))
-	await _scroll_viewer.open_message(heading, meta_line, body, false, ephemeral)
+	var open_atts: Array = []
+	if state.is_online():
+		var att_res: Dictionary = await state.scrolls.get_scroll_attachments(scroll_id)
+		if bool(att_res.get("ok", false)):
+			var att_data: Dictionary = att_res.get("data", {})
+			var rows = att_data.get("attachments", [])
+			if typeof(rows) == TYPE_ARRAY:
+				for row in rows:
+					if typeof(row) == TYPE_DICTIONARY:
+						open_atts.append({
+							"id": str(row.get("id", "")),
+							"signed_url": str(row.get("signed_url", "")),
+							"mime": str(row.get("mime_type", "")),
+						})
+	await _scroll_viewer.open_message(heading, meta_line, body, true, ephemeral, open_atts, "Love Note")
+
+
+func _on_scroll_attachment_tapped(attachment: Dictionary) -> void:
+	var path := str(attachment.get("path", attachment.get("local_path", "")))
+	if not path.is_empty() and FileAccess.file_exists(path):
+		if _image_preview:
+			_image_preview.open_path(path, "Attachment")
+		return
+	var url := str(attachment.get("signed_url", ""))
+	if url.is_empty() or _image_preview == null:
+		_show_toast("Photo unavailable.")
+		return
+	_show_toast("Loading photo…")
+	var http := HTTPRequest.new()
+	http.timeout = 30.0
+	add_child(http)
+	var err := http.request(url)
+	if err != OK:
+		http.queue_free()
+		_show_toast("Could not load photo.")
+		return
+	var completed: Array = await http.request_completed
+	http.queue_free()
+	if completed.is_empty() or int(completed[0]) != HTTPRequest.RESULT_SUCCESS or int(completed[1]) != 200:
+		_show_toast("Could not load photo.")
+		return
+	var bytes: PackedByteArray = completed[3]
+	var img := Image.new()
+	if img.load_jpg_from_buffer(bytes) != OK and img.load_png_from_buffer(bytes) != OK and img.load_webp_from_buffer(bytes) != OK:
+		_show_toast("Could not read photo.")
+		return
+	_image_preview.open_texture(ImageTexture.create_from_image(img), "Attachment")
 
 
 func _on_scroll_closed() -> void:
@@ -1655,14 +1715,21 @@ func _on_compose_preview(draft: Dictionary) -> void:
 		var place := str(draft.get("location_name", "")).strip_edges()
 		var addr := str(draft.get("location_address", "")).strip_edges()
 		var radius := int(draft.get("location_radius_m", LocationHelper.DEFAULT_RADIUS_M))
-		var place_line := place if addr.is_empty() else "%s, %s" % [place, addr]
-		meta_bits.append("This scroll is location locked.")
-		meta_bits.append("Go within %s of %s to open it." % [LocationHelper.format_radius(radius), place_line])
-	var pw_note := "Magic password required" if bool(draft.get("has_password", false)) else "No magic password"
-	meta_bits.append(pw_note)
-	var meta := " · ".join(meta_bits)
+		var place_line := place if addr.is_empty() else "%s · %s" % [place, addr]
+		meta_bits.append("Location Lock · within %s of %s" % [LocationHelper.format_radius(radius), place_line])
+	if bool(draft.get("has_password", false)):
+		meta_bits.append("Magic password required")
+	var atts = draft.get("attachments", [])
+	if typeof(atts) == TYPE_ARRAY and not atts.is_empty():
+		meta_bits.append("%d photo%s" % [atts.size(), "" if atts.size() == 1 else "s"])
+	var meta := "\n".join(meta_bits)
 	var body := str(draft.get("message", ""))
-	await _scroll_viewer.open_message(title, meta, body, false, false)
+	var preview_atts: Array = []
+	if typeof(atts) == TYPE_ARRAY:
+		for a in atts:
+			if typeof(a) == TYPE_DICTIONARY:
+				preview_atts.append((a as Dictionary).duplicate(true))
+	await _scroll_viewer.open_message(title, meta, body, true, false, preview_atts, "Scroll Preview")
 
 
 func _on_compose_send_requested(draft: Dictionary) -> void:
@@ -1696,7 +1763,7 @@ func _on_compose_send_requested(draft: Dictionary) -> void:
 			has_location_lock, location_name, location_lat, location_lng, location_radius_m, location_address
 		)
 	elif state.is_online():
-		# Existing send-scroll contract + optional Location Lock fields.
+		# Existing send-scroll contract + optional Location Lock + photo attachments.
 		var unlock_at := Time.get_datetime_string_from_unix_time(unlock_unix, true) + "Z"
 		var payload := {
 			"recipient_id": rid,
@@ -1713,11 +1780,62 @@ func _on_compose_send_requested(draft: Dictionary) -> void:
 			payload["location_lat"] = location_lat
 			payload["location_lng"] = location_lng
 			payload["location_radius_m"] = location_radius_m
+		var draft_atts = draft.get("attachments", [])
+		var pending_paths: Array = []
+		if typeof(draft_atts) == TYPE_ARRAY and not draft_atts.is_empty():
+			if _compose_screen:
+				_compose_screen.set_sending(true)
+			var prep_items: Array = []
+			for a in draft_atts:
+				if typeof(a) != TYPE_DICTIONARY:
+					continue
+				prep_items.append({
+					"mime_type": str(a.get("mime", "image/jpeg")),
+					"byte_size": int(a.get("byte_size", 0)),
+				})
+			var prep: Dictionary = await state.scrolls.prepare_attachment_uploads(prep_items)
+			if not bool(prep.get("ok", false)):
+				_compose_screen.restore_after_failed_send()
+				_show_toast(str(prep.get("error", "Could not prepare photo uploads.")))
+				return
+			var prep_data: Dictionary = prep.get("data", {})
+			var uploads = prep_data.get("uploads", [])
+			if typeof(uploads) != TYPE_ARRAY or uploads.size() != prep_items.size():
+				_compose_screen.restore_after_failed_send()
+				_show_toast("Could not prepare photo uploads.")
+				return
+			var registered: Array = []
+			for i in range(uploads.size()):
+				var up: Dictionary = uploads[i]
+				var src: Dictionary = draft_atts[i]
+				var local_path := str(src.get("path", ""))
+				if _compose_screen and _compose_screen._attach_status:
+					_compose_screen._attach_status.text = "Uploading %d of %d photos…" % [i + 1, uploads.size()]
+				var up_res: Dictionary = await state.scrolls.upload_to_signed_url(
+					str(up.get("signed_url", "")),
+					local_path,
+					str(src.get("mime", "image/jpeg")),
+					str(up.get("token", ""))
+				)
+				if not bool(up_res.get("ok", false)):
+					_compose_screen.restore_after_failed_send()
+					_show_toast(str(up_res.get("error", "Photo upload failed.")))
+					return
+				registered.append({
+					"path": str(up.get("path", "")),
+					"mime_type": str(src.get("mime", "image/jpeg")),
+					"width": int(src.get("width", 0)),
+					"height": int(src.get("height", 0)),
+					"byte_size": int(src.get("byte_size", 0)),
+					"sort_order": i,
+				})
+				pending_paths.append(str(up.get("path", "")))
+			payload["attachments"] = registered
 		result = await state.scrolls.send_scroll(payload)
 		if bool(result.get("ok", false)):
 			result = {"ok": true}
 		else:
-			result = {"ok": false, "error": "Could not send your scroll. Please try again."}
+			result = {"ok": false, "error": str(result.get("error", "Could not send your scroll. Please try again."))}
 	else:
 		_compose_screen.restore_after_failed_send()
 		_show_toast("Backend is not configured.")
@@ -2517,6 +2635,9 @@ func _hide_overlay() -> void:
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_GO_BACK_REQUEST:
+		if _image_preview != null and _image_preview.visible:
+			_image_preview.close_preview()
+			return
 		if _scroll_viewer.visible:
 			_scroll_viewer.close_viewer()
 			return
