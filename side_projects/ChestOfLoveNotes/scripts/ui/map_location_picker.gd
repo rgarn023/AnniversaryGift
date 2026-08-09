@@ -639,6 +639,7 @@ func _set_zoom_level(z: int, focal_screen: Vector2 = Vector2.INF, from_pinch: bo
 	_zoom = nz
 	## Keep the focal lat/lng under the same screen point after zoom.
 	_recenter_so_latlng_at_screen(keep.x, keep.y, focus, area)
+	## Never blank / never re-show full loading overlay after first paint.
 	## During active pinch, debounce tile network fetches to avoid thrashing.
 	if from_pinch and _pinch_active:
 		_refresh_tiles(false)
