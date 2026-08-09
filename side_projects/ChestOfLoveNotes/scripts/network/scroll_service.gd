@@ -26,7 +26,31 @@ func send_scroll(payload: Dictionary) -> Dictionary:
 	# sender_id is never accepted from the client; edge derives it from the JWT.
 	var body := payload.duplicate(true)
 	body.erase("sender_id")
-	return await api.call_edge_function("send-scroll", body, "POST")
+	## Never log Magic Password plaintext or message body.
+	var safe_keys: PackedStringArray = PackedStringArray()
+	for k in body.keys():
+		if str(k) in ["password", "message"]:
+			continue
+		safe_keys.append(str(k))
+	print("send_scroll_request keys=%s recipient=%s loc=%s act=%s focus=%s" % [
+		str(safe_keys),
+		str(body.get("recipient_id", "")),
+		str(body.get("has_location_lock", false)),
+		str(body.get("activity_lock_enabled", false)),
+		str(body.get("focus_lock_enabled", false)),
+	])
+	var result: Dictionary = await api.call_edge_function("send-scroll", body, "POST")
+	if not bool(result.get("ok", false)):
+		var data: Variant = result.get("data", {})
+		var code := ""
+		if typeof(data) == TYPE_DICTIONARY:
+			code = str((data as Dictionary).get("code", ""))
+		print("send_scroll_response ok=false status=%d code=%s err=%s" % [
+			int(result.get("status", 0)),
+			code,
+			str(result.get("error", "")),
+		])
+	return result
 
 
 func mark_activity_lock_progress(scroll_id: String, distance_km: float, completed: bool = false) -> Dictionary:

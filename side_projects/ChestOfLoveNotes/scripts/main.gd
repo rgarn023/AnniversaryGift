@@ -1911,8 +1911,8 @@ func _on_compose_send_requested(draft: Dictionary) -> void:
 	var location_lng := float(draft.get("location_lng", 0.0))
 	var location_radius_m := int(draft.get("location_radius_m", LocationHelper.DEFAULT_RADIUS_M))
 	if has_location_lock and (not bool(draft.get("location_fix_ok", false)) or not is_finite(location_lat) or not is_finite(location_lng)):
-		_compose_screen.restore_after_failed_send()
-		_show_toast("Select a location from the search results or choose one on the map.")
+		## One user-facing error only (inline Ready Check) — no competing toast.
+		_compose_screen.restore_after_failed_send("Select a location from the search results or choose one on the map.")
 		return
 	var result: Dictionary = {}
 	if state.is_demo():
@@ -1949,10 +1949,22 @@ func _on_compose_send_requested(draft: Dictionary) -> void:
 		if bool(result.get("ok", false)):
 			result = {"ok": true}
 		else:
-			result = {"ok": false, "error": str(result.get("error", "Could not send your scroll. Please try again."))}
+			## Map backend/schema failures to one simple user message; keep diagnostics in logs.
+			var status := int(result.get("status", 0))
+			var raw_err := str(result.get("error", ""))
+			var code := ""
+			var data: Variant = result.get("data", {})
+			if typeof(data) == TYPE_DICTIONARY:
+				code = str((data as Dictionary).get("code", (data as Dictionary).get("error", "")))
+			print("send_scroll_failed status=%d code=%s err=%s" % [status, code, raw_err])
+			var user_msg := "Could not send your scroll. Please try again."
+			if status == 401:
+				user_msg = "Your session expired. Please sign in again."
+			elif raw_err.to_lower().contains("not friends"):
+				user_msg = "You can only send scrolls to friends."
+			result = {"ok": false, "error": user_msg}
 	else:
-		_compose_screen.restore_after_failed_send()
-		_show_toast("Backend is not configured.")
+		_compose_screen.restore_after_failed_send("Backend is not configured.")
 		return
 	if bool(result.get("ok", false)):
 		_compose_screen.set_sending(false)
@@ -1963,8 +1975,8 @@ func _on_compose_send_requested(draft: Dictionary) -> void:
 		_show_toast("Scroll sent.")
 		_show_main_chest()
 	else:
-		_compose_screen.restore_after_failed_send()
-		_show_toast(str(result.get("error", "Could not send your scroll. Please try again.")))
+		## Single inline error — do not also toast the same failure.
+		_compose_screen.restore_after_failed_send(str(result.get("error", "Could not send your scroll. Please try again.")))
 
 
 func _play_friends_celebration() -> void:

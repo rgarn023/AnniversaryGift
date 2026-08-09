@@ -14,6 +14,8 @@ const RADIUS_OPTIONS: Array[int] = [25, 100, 250, 500, 1000]
 const PERM_FINE := "android.permission.ACCESS_FINE_LOCATION"
 const PERM_COARSE := "android.permission.ACCESS_COARSE_LOCATION"
 const MAX_ACCEPTABLE_ACCURACY_M := 200.0
+## Reject cached fixes older than this for "Use Current Location".
+const MAX_FIX_AGE_MS := 45000
 
 ## Desktop / headless mock (never used to falsely unlock online scrolls).
 const MOCK_LAT := 33.4484
@@ -79,16 +81,24 @@ static func request_permission_if_needed() -> String:
 	return permission_status()
 
 
-static func _parse_fix_raw(raw: String, require_accuracy: bool) -> Dictionary:
+static func _parse_fix_raw(raw: String, require_accuracy: bool, max_age_ms: int = -1) -> Dictionary:
 	var parts := raw.split("|")
 	if parts.is_empty():
 		return {"ok": false, "error": "We couldn't determine your location. Try again.", "unavailable": true}
 	if parts[0] == "ok" and parts.size() >= 4:
 		var accuracy := float(parts[3])
+		var age_ms := int(parts[4]) if parts.size() >= 5 and str(parts[4]).is_valid_int() else -1
+		if max_age_ms >= 0 and age_ms >= 0 and age_ms > max_age_ms:
+			return {
+				"ok": false,
+				"error": "We couldn't determine your location. Try again.",
+				"stale": true,
+				"age_ms": age_ms,
+			}
 		if require_accuracy and accuracy > 0.0 and accuracy > MAX_ACCEPTABLE_ACCURACY_M:
 			return {
 				"ok": false,
-				"error": "Location accuracy is too low right now. Try again outdoors.",
+				"error": "Location accuracy is low. Try again.",
 				"inaccurate": true,
 				"accuracy_m": accuracy,
 			}
@@ -97,21 +107,26 @@ static func _parse_fix_raw(raw: String, require_accuracy: bool) -> Dictionary:
 			"lat": float(parts[1]),
 			"lng": float(parts[2]),
 			"accuracy_m": accuracy,
+			"age_ms": age_ms,
 			"mock": false,
+			"source": "device_gps",
 		}
 	var code := str(parts[2]) if parts.size() >= 3 else "unavailable"
 	var msg := str(parts[1]) if parts.size() >= 2 else "We couldn't determine your location. Try again."
 	if code == "disabled":
 		msg = "Turn on Location Services to use your current location."
 	elif code == "denied":
-		msg = "Location permission is required."
+		msg = "Location permission is needed to use your current location."
 	elif code == "timeout":
 		msg = "We couldn't determine your location. Try again."
+	elif code == "pending":
+		msg = "Getting your location…"
 	return {
 		"ok": false,
 		"error": msg,
 		"denied": code == "denied",
 		"disabled": code == "disabled",
+		"pending": code == "pending",
 		"unavailable": code == "unavailable" or code == "timeout",
 	}
 
@@ -123,12 +138,14 @@ static func get_current_fix(require_accuracy: bool = true) -> Dictionary:
 			"lat": MOCK_LAT,
 			"lng": MOCK_LNG,
 			"accuracy_m": 25.0,
+			"age_ms": 0,
 			"mock": true,
+			"source": "mock",
 		}
 	if permission_status() != "granted":
 		return {
 			"ok": false,
-			"error": "Location permission is required.",
+			"error": "Location permission is needed to use your current location.",
 			"denied": true,
 		}
 	var p = _plugin()
@@ -142,13 +159,13 @@ static func get_current_fix(require_accuracy: bool = true) -> Dictionary:
 
 
 static func get_fresh_fix(require_accuracy: bool = true) -> Dictionary:
-	## Poll a short fresh GPS sample (non-blocking for Godot frames).
+	## Obtain a fresh sender GPS fix. Does NOT silently reuse stale last-known.
 	if OS.get_name() != "Android":
 		return get_current_fix(require_accuracy)
 	if permission_status() != "granted":
 		return {
 			"ok": false,
-			"error": "Location permission is required.",
+			"error": "Location permission is needed to use your current location.",
 			"denied": true,
 		}
 	var p = _plugin()
@@ -159,22 +176,41 @@ static func get_fresh_fix(require_accuracy: bool = true) -> Dictionary:
 			"unavailable": true,
 		}
 	if p.has_method("begin_fresh_location") and p.has_method("poll_fresh_location"):
-		p.begin_fresh_location()
+		if not bool(p.begin_fresh_location()):
+			## begin failed — often Location Services off.
+			var probe := get_current_fix(false)
+			if bool(probe.get("disabled", false)):
+				return probe
+			return {
+				"ok": false,
+				"error": "Turn on Location Services to use your current location.",
+				"disabled": true,
+			}
 		var tree := Engine.get_main_loop() as SceneTree
-		for _i in range(24):
+		for _i in range(28):
 			if tree != null:
 				await tree.create_timer(0.35).timeout
 			var raw := str(p.poll_fresh_location())
 			if raw.begins_with("ok|"):
-				return _parse_fix_raw(raw, require_accuracy)
+				## Fresh listener result — age should be near-zero; still enforce accuracy.
+				return _parse_fix_raw(raw, require_accuracy, MAX_FIX_AGE_MS)
 			if raw.contains("|pending"):
 				continue
-			## Non-pending error from poll — try last-known before failing.
-			break
+			## Non-pending error from poll (timeout / disabled / denied).
+			var parsed := _parse_fix_raw(raw, require_accuracy, MAX_FIX_AGE_MS)
+			if p.has_method("cancel_fresh_location"):
+				p.cancel_fresh_location()
+			return parsed
 		if p.has_method("cancel_fresh_location"):
 			p.cancel_fresh_location()
-		var last := get_current_fix(require_accuracy)
+		## Only accept last-known if it is recent enough; never hours-old cache.
+		var last := _parse_fix_raw(
+			str(p.get_last_known_location()) if p.has_method("get_last_known_location") else "",
+			require_accuracy,
+			MAX_FIX_AGE_MS
+		)
 		if bool(last.get("ok", false)):
+			last["source"] = "recent_cached"
 			return last
 		return {
 			"ok": false,
@@ -182,8 +218,12 @@ static func get_fresh_fix(require_accuracy: bool = true) -> Dictionary:
 			"unavailable": true,
 		}
 	if p.has_method("request_fresh_location"):
-		return _parse_fix_raw(str(p.request_fresh_location()), require_accuracy)
-	return get_current_fix(require_accuracy)
+		return _parse_fix_raw(str(p.request_fresh_location()), require_accuracy, MAX_FIX_AGE_MS)
+	return {
+		"ok": false,
+		"error": "We couldn't determine your location. Try again.",
+		"unavailable": true,
+	}
 
 
 static func format_lock_summary(location_name: String, has_schedule: bool, schedule_label: String, radius_m: int = DEFAULT_RADIUS_M) -> String:

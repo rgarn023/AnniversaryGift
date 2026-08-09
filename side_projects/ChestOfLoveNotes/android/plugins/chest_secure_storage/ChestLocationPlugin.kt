@@ -55,7 +55,8 @@ class ChestLocationPlugin(godot: Godot) : GodotPlugin(godot) {
 
 	private fun encodeLocation(loc: Location): String {
 		val accuracy = if (loc.hasAccuracy()) loc.accuracy else -1f
-		return "ok|${loc.latitude}|${loc.longitude}|$accuracy"
+		val ageMs = (System.currentTimeMillis() - loc.time).coerceAtLeast(0L)
+		return "ok|${loc.latitude}|${loc.longitude}|$accuracy|$ageMs"
 	}
 
 	@UsedByGodot
@@ -128,7 +129,7 @@ class ChestLocationPlugin(godot: Godot) : GodotPlugin(godot) {
 		}
 	}
 
-	/** Poll during begin_fresh_location window. */
+	/** Poll during begin_fresh_location window. Never silently returns stale last-known. */
 	@UsedByGodot
 	fun poll_fresh_location(): String {
 		val loc = freshFix.get()
@@ -137,7 +138,7 @@ class ChestLocationPlugin(godot: Godot) : GodotPlugin(godot) {
 			return encodeLocation(loc)
 		}
 		if (!freshListening) {
-			return get_last_known_location()
+			return "error|We couldn't determine your location. Try again.|timeout"
 		}
 		return "error|Still getting location…|pending"
 	}
@@ -172,8 +173,15 @@ class ChestLocationPlugin(godot: Godot) : GodotPlugin(godot) {
 				}
 			}
 			stopFreshListen()
+			// Prefer only a sufficiently fresh last-known (≤45s); otherwise timeout.
 			val last = get_last_known_location()
-			if (last.startsWith("ok|")) last else "error|We couldn't determine your location. Try again.|timeout"
+			if (last.startsWith("ok|")) {
+				val parts = last.split("|")
+				val age = if (parts.size >= 5) parts[4].toLongOrNull() ?: Long.MAX_VALUE else Long.MAX_VALUE
+				if (age <= 45_000L) last else "error|We couldn't determine your location. Try again.|timeout"
+			} else {
+				"error|We couldn't determine your location. Try again.|timeout"
+			}
 		} catch (e: Exception) {
 			Log.w(TAG, "request_fresh_location failed: ${e.javaClass.simpleName}")
 			"error|We couldn't determine your location. Try again.|unavailable"

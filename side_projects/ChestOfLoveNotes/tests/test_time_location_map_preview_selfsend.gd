@@ -45,7 +45,7 @@ func _run() -> void:
 	_assert(compose.contains("get_fresh_fix"), "fresh location path")
 	_assert(loc.contains("get_fresh_fix"), "LocationHelper fresh fix")
 	_assert(loc_kt.contains("begin_fresh_location"), "plugin fresh listen")
-	_assert(compose.contains("Location permission is required"), "permission error copy")
+	_assert(compose.contains("Location permission is needed") or compose.contains("Location permission is required"), "permission error copy")
 
 	## MAP
 	_assert(map.contains("set_process_input(true)"), "map processes _input for multitouch")
@@ -75,9 +75,9 @@ func _run() -> void:
 	_assert(scrolls.contains("mark_activity_lock_progress"), "client sync activity")
 	_assert(scrolls.contains("mark_focus_lock_complete"), "client sync focus")
 
-	_assert(BuildFlags.APP_VERSION_CODE >= 22, "versionCode 22+")
-	_assert(preset.contains("version/code=22"), "export 22")
-	_assert(preset.contains("ChestOfLoveNotes-time-location-map-preview-selfsend-fixes-debug.apk"), "APK name")
+	_assert(BuildFlags.APP_VERSION_CODE >= 23, "versionCode 23+")
+	_assert(preset.contains("version/code=23"), "export 23")
+	_assert(preset.contains("version/name=\"0.1.23-map-currentlocation-schedule-selfsend\""), "version name 23")
 
 	print("=== Results: %d passed, %d failed ===" % [_passed, _failed])
 	quit(0 if _failed == 0 else 1)

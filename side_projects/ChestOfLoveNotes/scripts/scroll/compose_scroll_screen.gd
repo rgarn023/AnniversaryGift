@@ -77,6 +77,10 @@ var _location_name: String = ""
 var _location_address: String = ""
 var _location_lat: float = 0.0
 var _location_lng: float = 0.0
+## "current" | "search" | "map" | "" — shown on selected-location card after GPS pick.
+var _location_source: String = ""
+## Stale generic send error (cleared on edit / retry / successful validation).
+var _send_error: String = ""
 var _location_radius_m: int = LocationHelper.DEFAULT_RADIUS_M
 var _location_fix_ok: bool = false
 var _location_search_service: LocationSearchService = LocationSearchService.new()
@@ -254,14 +258,8 @@ func apply_draft(draft: Dictionary) -> void:
 	if not immediate:
 		var unlock_unix := int(draft.get("unlock_unix", 0))
 		if unlock_unix > 0:
-			var dt := Time.get_datetime_dict_from_unix_time(unlock_unix)
-			_unlock_date = {
-				"year": int(dt.year),
-				"month": int(dt.month),
-				"day": int(dt.day),
-			}
-			_unlock_hour = int(dt.hour)
-			_unlock_minute = int(dt.minute)
+			## Restore LOCAL wall-clock fields from canonical unix (not UTC components).
+			_apply_unlock_unix(unlock_unix)
 	if _pw_toggle:
 		var has_pw := bool(draft.get("has_password", false))
 		_pw_toggle.set_pressed_no_signal(has_pw)
@@ -319,9 +317,21 @@ func set_sending(active: bool) -> void:
 		_hide_overlay()
 
 
-func restore_after_failed_send() -> void:
+func restore_after_failed_send(user_message: String = "") -> void:
+	## Single user-facing send error path — caller passes the message; no toast duplicate.
 	set_sending(false)
-	_set_inline_error("Could not send your scroll. Please try again.")
+	var msg := user_message.strip_edges()
+	if msg.is_empty():
+		msg = "Could not send your scroll. Please try again."
+	_send_error = msg
+	_set_inline_error(msg)
+
+
+func clear_send_error() -> void:
+	if _send_error.is_empty():
+		return
+	_send_error = ""
+	_update_validation()
 
 
 func handle_back() -> bool:
@@ -926,14 +936,29 @@ func _refresh_location_summary() -> void:
 		return
 	_location_summary.visible = _has_location_lock and _location_fix_ok
 	if _location_summary_title:
-		_location_summary_title.text = _location_name if not _location_name.is_empty() else "Selected place"
+		if _location_source == "current":
+			_location_summary_title.text = "Current Location"
+		else:
+			_location_summary_title.text = _location_name if not _location_name.is_empty() else "Selected place"
 	if _location_summary_addr:
-		_location_summary_addr.text = _location_address if not _location_address.is_empty() else "Resolved place"
+		var lines: PackedStringArray = PackedStringArray()
+		if _location_source == "current" and not _location_name.is_empty() and _location_name.to_lower() != "current location":
+			lines.append(_location_name)
+		if not _location_address.is_empty():
+			lines.append(_location_address)
+		elif _location_source != "current":
+			lines.append("Resolved place")
+		_location_summary_addr.text = "\n".join(lines) if not lines.is_empty() else (
+			"Your current GPS position" if _location_source == "current" else "Resolved place"
+		)
 	if _location_status:
 		if not _has_location_lock:
 			_location_status.text = ""
 		elif _location_fix_ok:
-			_location_status.text = "Place selected."
+			if _location_source == "current":
+				_location_status.text = "Current location selected"
+			else:
+				_location_status.text = "Place selected."
 		else:
 			_location_status.text = "Select a location from the search results or choose one on the map."
 
@@ -944,6 +969,8 @@ func _clear_resolved_location() -> void:
 	_location_address = ""
 	_location_lat = 0.0
 	_location_lng = 0.0
+	_location_source = ""
+	clear_send_error()
 	_refresh_location_summary()
 	_refresh_summary()
 	_update_validation()
@@ -955,6 +982,8 @@ func _apply_resolved_place(place: Dictionary) -> void:
 	_location_name = str(place.get("name", "Selected place")).strip_edges()
 	_location_address = str(place.get("address", "")).strip_edges()
 	_location_fix_ok = is_finite(_location_lat) and is_finite(_location_lng)
+	_location_source = str(place.get("source", "search"))
+	clear_send_error()
 	_hide_location_suggestions()
 	if _location_search:
 		_location_search.text = ""
@@ -1022,6 +1051,7 @@ func _show_location_suggestions(results: Array) -> void:
 		if selected:
 			btn.add_theme_color_override("font_color", COL_GOLD)
 		var captured: Dictionary = (place as Dictionary).duplicate(true)
+		captured["source"] = "search"
 		btn.pressed.connect(func() -> void:
 			_apply_resolved_place(captured)
 		)
@@ -1066,7 +1096,9 @@ func _on_choose_on_map() -> void:
 	_map_picker = MapLocationPicker.new()
 	get_tree().root.add_child(_map_picker)
 	_map_picker.confirmed.connect(func(place: Dictionary) -> void:
-		_apply_resolved_place(place)
+		var p: Dictionary = place.duplicate(true)
+		p["source"] = "map"
+		_apply_resolved_place(p)
 		_map_picker = null
 	)
 	_map_picker.cancelled.connect(func() -> void:
@@ -1075,8 +1107,15 @@ func _on_choose_on_map() -> void:
 	_map_picker.setup(initial, _location_radius_m, _location_search_service)
 
 
+func _finish_current_location_attempt() -> void:
+	if _location_use_btn:
+		_location_use_btn.text = "Use Current Location"
+		_location_use_btn.disabled = false
+
+
 func _on_use_current_location() -> void:
 	## GPS permission only for this sender action — never for typing search.
+	## Must use the sender phone's actual current position (fresh fix), not map center / last search.
 	if _location_use_btn == null:
 		return
 	if _location_use_btn.disabled:
@@ -1088,47 +1127,49 @@ func _on_use_current_location() -> void:
 		var status := LocationHelper.request_permission_if_needed()
 		## Permission dialog is async — poll briefly for grant.
 		var waits := 0
-		while status != "granted" and waits < 20:
+		while status != "granted" and waits < 24:
 			await get_tree().create_timer(0.25).timeout
 			status = LocationHelper.permission_status()
 			waits += 1
 			if waits == 1 and status != "granted":
 				_location_status.text = "Allow location access to use your current position."
 		if status != "granted":
-			_location_status.text = "Location permission is required. Enable it in Android Settings if you previously denied it."
-			_location_use_btn.text = "Use Current Location"
-			_location_use_btn.disabled = false
+			_location_status.text = "Location permission is needed to use your current location. Enable it in Android Settings if previously denied."
+			_finish_current_location_attempt()
 			_update_validation()
 			return
-	## Prefer a fresh fix; fall back to last-known.
 	var fix: Dictionary = await LocationHelper.get_fresh_fix(true)
 	if not bool(fix.get("ok", false)):
 		_location_status.text = str(fix.get("error", "We couldn't determine your location. Try again."))
-		_location_use_btn.text = "Use Current Location"
-		_location_use_btn.disabled = false
+		_finish_current_location_attempt()
 		_update_validation()
 		return
 	var lat := float(fix.get("lat", 0.0))
 	var lng := float(fix.get("lng", 0.0))
+	if not is_finite(lat) or not is_finite(lng):
+		_location_status.text = "We couldn't determine your location. Try again."
+		_finish_current_location_attempt()
+		_update_validation()
+		return
 	_location_status.text = "Resolving place…"
 	var token := _location_search_service.next_token()
 	var rev: Dictionary = await _location_search_service.reverse_geocode(lat, lng, token)
-	_location_use_btn.text = "Use Current Location"
-	_location_use_btn.disabled = false
+	_finish_current_location_attempt()
 	if bool(rev.get("ok", false)) and typeof(rev.get("place")) == TYPE_DICTIONARY:
 		var place: Dictionary = (rev.get("place") as Dictionary).duplicate(true)
 		place["lat"] = lat
 		place["lng"] = lng
+		place["source"] = "current"
 		_apply_resolved_place(place)
-		_location_status.text = "Using your current location."
 	else:
 		_apply_resolved_place({
-			"name": "Current location",
-			"address": "",
+			"name": "Current Location",
+			"address": "%.5f, %.5f" % [lat, lng],
 			"lat": lat,
 			"lng": lng,
+			"source": "current",
 		})
-		_location_status.text = "Using your current location."
+	_location_status.text = "Current location selected"
 
 
 func _build_password_card() -> PanelContainer:
@@ -1600,12 +1641,12 @@ func _toggle_optional_section(key: String, header: Button) -> void:
 
 func _refresh_optional_summaries() -> void:
 	if _delivery_summary:
-		var immediate := _open_immediately != null and _open_immediately.button_pressed
-		_delivery_summary.text = "Immediately" if immediate else "%s at %s" % [_format_date(_unlock_date), _format_time(_unlock_hour, _unlock_minute)]
+		_delivery_summary.text = _format_unlock_label()
 		_delivery_summary.visible = not _delivery_expanded
 	if _location_header_summary:
 		if _has_location_lock and _location_fix_ok:
-			_location_header_summary.text = "%s · %s" % [_location_name, LocationHelper.format_radius(_location_radius_m)]
+			var place_label := "Current Location" if _location_source == "current" else _location_name
+			_location_header_summary.text = "%s · %s" % [place_label, LocationHelper.format_radius(_location_radius_m)]
 		elif _has_location_lock:
 			_location_header_summary.text = "Enabled — choose a place"
 		else:
@@ -2015,6 +2056,7 @@ func _refresh_recipient_row() -> void:
 
 
 func _refresh_schedule_labels() -> void:
+	## Button labels stay in sync with the same local fields that feed canonical unix.
 	if _date_btn:
 		_date_btn.text = "%s                    ›" % _format_date(_unlock_date)
 	if _time_btn:
@@ -2025,10 +2067,8 @@ func _refresh_summary() -> void:
 	if _summary_label == null:
 		return
 	var to_name := str(_selected_friend.get("display_name", "Not chosen"))
-	var immediate := _open_immediately != null and _open_immediately.button_pressed
-	var schedule_label := "Immediately" if immediate else (
-		"%s at %s" % [_format_date(_unlock_date), _format_time(_unlock_hour, _unlock_minute)]
-	)
+	## Opens label always derived from the same canonical unlock unix as validation/payload.
+	var schedule_label := _format_unlock_label()
 	var loc_on := _location_toggle != null and _location_toggle.button_pressed
 	var lines: PackedStringArray = PackedStringArray([
 		"Recipient:",
@@ -2065,7 +2105,10 @@ func _refresh_summary() -> void:
 	var v: Dictionary = _last_validation if not _last_validation.is_empty() else validate_compose_draft()
 	var blockers: PackedStringArray = v.get("blockers", PackedStringArray())
 	lines.append("")
-	if blockers.is_empty():
+	if not _send_error.is_empty():
+		lines.append("Status:")
+		lines.append(_send_error)
+	elif blockers.is_empty():
 		lines.append("Status:")
 		lines.append("Ready to send")
 	else:
@@ -2107,22 +2150,51 @@ func _format_time(hour: int, minute: int) -> String:
 	return "%d:%02d %s" % [display, minute, suffix]
 
 
+func _timezone_bias_minutes() -> int:
+	return int(Time.get_time_zone_from_system().get("bias", 0))
+
+
+func _local_datetime_dict_from_unix(unix: int) -> Dictionary:
+	## Convert absolute unix → local wall-clock components (Godot dicts are UTC-based).
+	var bias_min := _timezone_bias_minutes()
+	return Time.get_datetime_dict_from_unix_time(unix + bias_min * 60)
+
+
+func _apply_unlock_unix(unix: int) -> void:
+	## Commit canonical unix into the single local draft representation.
+	var dt := _local_datetime_dict_from_unix(unix)
+	_unlock_date = {"year": int(dt.year), "month": int(dt.month), "day": int(dt.day)}
+	_unlock_hour = int(dt.hour)
+	_unlock_minute = int(dt.minute)
+
+
 func _compute_unlock_unix() -> int:
 	if _open_immediately and _open_immediately.button_pressed:
 		return int(Time.get_unix_time_from_system())
 	## Interpret unlock fields as LOCAL wall-clock time.
 	## Godot treats datetime dicts as UTC, so compensate with system timezone bias.
 	var dt := {
-		"year": int(_unlock_date.year),
-		"month": int(_unlock_date.month),
-		"day": int(_unlock_date.day),
+		"year": int(_unlock_date.get("year", 2026)),
+		"month": int(_unlock_date.get("month", 1)),
+		"day": int(_unlock_date.get("day", 1)),
 		"hour": _unlock_hour,
 		"minute": _unlock_minute,
 		"second": 0,
 	}
 	var as_utc := int(Time.get_unix_time_from_datetime_dict(dt))
-	var bias_min := int(Time.get_time_zone_from_system().get("bias", 0))
-	return as_utc - bias_min * 60
+	return as_utc - _timezone_bias_minutes() * 60
+
+
+func _format_unlock_label() -> String:
+	## Display Always from the same canonical unix used for validation + payload.
+	if _open_immediately != null and _open_immediately.button_pressed:
+		return "Immediately"
+	var unix := _compute_unlock_unix()
+	var dt := _local_datetime_dict_from_unix(unix)
+	return "%s at %s" % [
+		_format_date({"year": int(dt.year), "month": int(dt.month), "day": int(dt.day)}),
+		_format_time(int(dt.hour), int(dt.minute)),
+	]
 
 
 func _password_value() -> String:
@@ -2207,8 +2279,15 @@ func _update_validation() -> void:
 	var v := validate_compose_draft()
 	var blockers: PackedStringArray = v.get("blockers", PackedStringArray())
 	var warnings: PackedStringArray = v.get("warnings", PackedStringArray())
+	## Valid schedule/form clears stale future-time / send errors immediately.
+	if bool(v.get("valid", false)) and not _send_error.is_empty():
+		_send_error = ""
 	if _validation_label:
-		if blockers.is_empty():
+		if not _send_error.is_empty():
+			_validation_label.visible = true
+			_validation_label.add_theme_color_override("font_color", COL_ERROR)
+			_validation_label.text = _send_error
+		elif blockers.is_empty():
 			if warnings.is_empty():
 				_validation_label.visible = true
 				_validation_label.add_theme_color_override("font_color", Color(0.55, 0.85, 0.62))
@@ -2238,15 +2317,15 @@ func _update_validation() -> void:
 func _set_inline_error(msg: String) -> void:
 	if _validation_label:
 		_validation_label.visible = true
+		_validation_label.add_theme_color_override("font_color", COL_ERROR)
 		_validation_label.text = msg
+	_refresh_summary()
 
 
 func _apply_relative_unlock(offset_secs: int) -> void:
 	var target := int(Time.get_unix_time_from_system()) + offset_secs
-	var dt := Time.get_datetime_dict_from_unix_time(target)
-	_unlock_date = {"year": int(dt.year), "month": int(dt.month), "day": int(dt.day)}
-	_unlock_hour = int(dt.hour)
-	_unlock_minute = int(dt.minute)
+	_apply_unlock_unix(target)
+	clear_send_error()
 	_refresh_schedule_labels()
 	_refresh_summary()
 	_update_validation()
@@ -2384,6 +2463,7 @@ func _open_date_picker() -> void:
 			"month": _commit_spin_value(month.spin),
 			"day": _commit_spin_value(day.spin),
 		}
+		clear_send_error()
 		_refresh_schedule_labels()
 		_refresh_summary()
 		_update_validation()
@@ -2491,6 +2571,8 @@ func _open_time_picker() -> void:
 			h24 = 12
 		_unlock_hour = h24
 		_unlock_minute = mins
+		## Commit → rebuild canonical datetime → validate (never stale pre-edit state).
+		clear_send_error()
 		_refresh_schedule_labels()
 		_refresh_summary()
 		_update_validation()
@@ -2644,6 +2726,7 @@ func _on_preview_pressed() -> void:
 
 
 func _on_send_pressed() -> void:
+	clear_send_error()
 	var v := validate_compose_draft()
 	if not bool(v.get("valid", false)):
 		_update_validation()
@@ -2663,9 +2746,7 @@ func _show_confirm_modal() -> void:
 	var col: VBoxContainer = box.get_child(0)
 	col.add_child(_modal_title("Ready to Send?"))
 	var draft := get_draft()
-	var when := "Immediately"
-	if not bool(draft.open_immediately):
-		when = "%s at %s" % [_format_date(_unlock_date), _format_time(_unlock_hour, _unlock_minute)]
+	var when := _format_unlock_label()
 	var body := Label.new()
 	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	body.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

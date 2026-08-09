@@ -54,9 +54,16 @@ var _load_failed: bool = false
 var _pinch_touches: Dictionary = {}
 var _pinch_last_dist: float = 0.0
 var _pinch_active: bool = false
-var _pinch_accum: float = 0.0
+## Fractional zoom accumulator — pinch uses continuous scale, not raw ±1 jumps.
+var _pinch_zoom_frac: float = 0.0
 var _refresh_queued: bool = false
 var _last_refresh_msec: int = 0
+var _pinch_tile_debounce: Timer
+## Previous-zoom tiles kept visible/scaled while the new zoom level loads (no black flash).
+var _hold_tile_layer: Control
+const PINCH_DAMPING := 0.42
+const PINCH_MAX_DELTA_PER_EVENT := 0.12
+const PINCH_MIN_DIST := 16.0
 
 
 func setup(initial: Dictionary = {}, p_radius_m: int = 500, search_service: LocationSearchService = null) -> void:
@@ -132,6 +139,13 @@ func _build_ui() -> void:
 	_map_host.clip_contents = true
 	_map_host.mouse_filter = Control.MOUSE_FILTER_STOP
 	root.add_child(_map_host)
+
+	## Hold layer stays under the live tile layer so prior zoom tiles remain visible
+	## (scaled) while higher/lower zoom tiles load — prevents black flashes.
+	_hold_tile_layer = Control.new()
+	_hold_tile_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_hold_tile_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_map_host.add_child(_hold_tile_layer)
 
 	_tile_layer = Control.new()
 	_tile_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -262,6 +276,15 @@ func _build_ui() -> void:
 	_debounce.wait_time = 0.35
 	_debounce.timeout.connect(_run_search)
 	add_child(_debounce)
+
+	_pinch_tile_debounce = Timer.new()
+	_pinch_tile_debounce.one_shot = true
+	_pinch_tile_debounce.wait_time = 0.12
+	_pinch_tile_debounce.timeout.connect(func() -> void:
+		if _alive and not _pinch_active:
+			_refresh_tiles(false)
+	)
+	add_child(_pinch_tile_debounce)
 
 	_map_host.resized.connect(func() -> void:
 		if _layout_ready and _map_host.size.x > 8.0:
@@ -505,9 +528,7 @@ func _input(event: InputEvent) -> void:
 				return
 			_pinch_touches.erase(st.index)
 			if _pinch_touches.size() < 2:
-				_pinch_active = false
-				_pinch_last_dist = 0.0
-				_pinch_accum = 0.0
+				_end_pinch_gesture()
 		_drag_active = st.pressed and _pinch_touches.size() == 1
 		_drag_last = _to_map_local(st.position)
 		get_viewport().set_input_as_handled()
@@ -525,13 +546,10 @@ func _input(event: InputEvent) -> void:
 		var mag := event as InputEventMagnifyGesture
 		if not area.has_point(mag.position) and _pinch_touches.is_empty():
 			return
-		if mag.factor > 1.01:
-			_pinch_accum += 1.0
-		elif mag.factor < 0.99:
-			_pinch_accum -= 1.0
-		if absf(_pinch_accum) >= 1.0:
-			_set_zoom_level(_zoom + int(signf(_pinch_accum)), _to_map_local(mag.position))
-			_pinch_accum = 0.0
+		## Desktop magnify: convert scale factor to damped fractional zoom.
+		var factor := maxf(float(mag.factor), 0.01)
+		var delta := clampf(log(factor) / log(2.0) * PINCH_DAMPING, -PINCH_MAX_DELTA_PER_EVENT, PINCH_MAX_DELTA_PER_EVENT)
+		_apply_fractional_zoom(delta, _to_map_local(mag.position))
 		get_viewport().set_input_as_handled()
 
 
@@ -558,6 +576,15 @@ func _on_map_input(ev: InputEvent) -> void:
 		_overlay.accept_event()
 
 
+func _end_pinch_gesture() -> void:
+	_pinch_active = false
+	_pinch_last_dist = 0.0
+	_pinch_zoom_frac = 0.0
+	## Settle: fetch any remaining tiles for the final canonical zoom.
+	if _pinch_tile_debounce != null:
+		_pinch_tile_debounce.start()
+
+
 func _handle_map_pinch() -> void:
 	var keys: Array = _pinch_touches.keys()
 	keys.sort()
@@ -566,25 +593,39 @@ func _handle_map_pinch() -> void:
 	var a: Vector2 = _pinch_touches[keys[0]]
 	var b: Vector2 = _pinch_touches[keys[1]]
 	var dist := a.distance_to(b)
-	if dist < 12.0:
+	if dist < PINCH_MIN_DIST:
 		return
 	var mid := (a + b) * 0.5
 	if not _pinch_active:
 		_pinch_active = true
 		_pinch_last_dist = dist
+		_pinch_zoom_frac = 0.0
 		_drag_active = false
 		return
+	## Normalized pinch scale ratio → gradual zoom delta (not raw discrete jumps).
 	var ratio := dist / maxf(_pinch_last_dist, 1.0)
-	## Sensitive enough for physical phone pinches; still discrete OSM levels.
-	if ratio > 1.08:
-		_set_zoom_level(_zoom + 1, mid)
-		_pinch_last_dist = dist
-	elif ratio < 0.93:
-		_set_zoom_level(_zoom - 1, mid)
-		_pinch_last_dist = dist
+	_pinch_last_dist = dist
+	if ratio < 0.01:
+		return
+	var raw_delta := log(ratio) / log(2.0)
+	var delta := clampf(raw_delta * PINCH_DAMPING, -PINCH_MAX_DELTA_PER_EVENT, PINCH_MAX_DELTA_PER_EVENT)
+	_apply_fractional_zoom(delta, mid)
 
 
-func _set_zoom_level(z: int, focal_screen: Vector2 = Vector2.INF) -> void:
+func _apply_fractional_zoom(delta: float, focal_screen: Vector2) -> void:
+	if absf(delta) < 0.0001:
+		return
+	_pinch_zoom_frac += delta
+	## Cross integer OSM zoom levels only after enough accumulated pinch motion.
+	while _pinch_zoom_frac >= 1.0:
+		_pinch_zoom_frac -= 1.0
+		_set_zoom_level(_zoom + 1, focal_screen, true)
+	while _pinch_zoom_frac <= -1.0:
+		_pinch_zoom_frac += 1.0
+		_set_zoom_level(_zoom - 1, focal_screen, true)
+
+
+func _set_zoom_level(z: int, focal_screen: Vector2 = Vector2.INF, from_pinch: bool = false) -> void:
 	var nz := clampi(z, MIN_ZOOM, MAX_ZOOM)
 	if nz == _zoom:
 		return
@@ -593,12 +634,59 @@ func _set_zoom_level(z: int, focal_screen: Vector2 = Vector2.INF) -> void:
 	if not is_finite(focus.x) or not is_finite(focus.y):
 		focus = area * 0.5
 	var keep := _screen_to_latlng(focus, area)
+	## Preserve currently painted tiles (scaled) under the new zoom level.
+	_snapshot_tiles_to_hold(_zoom, nz, focus, area)
 	_zoom = nz
 	## Keep the focal lat/lng under the same screen point after zoom.
 	_recenter_so_latlng_at_screen(keep.x, keep.y, focus, area)
-	## Never blank / never re-show full loading overlay after first paint.
-	_refresh_tiles(true)
+	## During active pinch, debounce tile network fetches to avoid thrashing.
+	if from_pinch and _pinch_active:
+		_refresh_tiles(false)
+		if _pinch_tile_debounce != null:
+			_pinch_tile_debounce.start()
+	else:
+		_refresh_tiles(true)
 	_overlay.queue_redraw()
+
+
+func _snapshot_tiles_to_hold(old_zoom: int, new_zoom: int, focus: Vector2, area: Vector2) -> void:
+	if _hold_tile_layer == null or _tile_layer == null or not _initial_paint_done:
+		return
+	## Clear previous hold snapshot.
+	for c in _hold_tile_layer.get_children():
+		(c as Node).queue_free()
+	var scale_factor := pow(2.0, float(new_zoom - old_zoom))
+	## Copy textured tiles into hold layer, scaled around the pinch midpoint.
+	for k in _tile_nodes.keys():
+		var src = _tile_nodes[k]
+		if not (src is TextureRect) or not is_instance_valid(src):
+			continue
+		var tr := src as TextureRect
+		if tr.texture == null:
+			continue
+		var copy := TextureRect.new()
+		copy.texture = tr.texture
+		copy.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		copy.stretch_mode = TextureRect.STRETCH_SCALE
+		copy.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var rel := tr.position - focus
+		copy.position = focus + rel * scale_factor
+		copy.size = Vector2(TILE_PX, TILE_PX) * scale_factor
+		copy.modulate = Color(1, 1, 1, 0.92)
+		_hold_tile_layer.add_child(copy)
+	## Fade hold layer out once new tiles have had a moment to arrive.
+	get_tree().create_timer(0.55).timeout.connect(func() -> void:
+		if not _alive or _hold_tile_layer == null:
+			return
+		## Only clear if we have some live textures at the new zoom.
+		var painted := 0
+		for n in _tile_nodes.values():
+			if n is TextureRect and (n as TextureRect).texture != null:
+				painted += 1
+		if painted >= 2:
+			for c2 in _hold_tile_layer.get_children():
+				(c2 as Node).queue_free()
+	, CONNECT_ONE_SHOT)
 
 
 func _pan_by_pixels(delta: Vector2) -> void:
