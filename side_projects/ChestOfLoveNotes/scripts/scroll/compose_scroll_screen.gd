@@ -258,7 +258,7 @@ func apply_draft(draft: Dictionary) -> void:
 		if _selected_friend.is_empty():
 			_selected_friend = {
 				"id": rid,
-				"display_name": str(draft.get("recipient_display_name", "Friend")),
+				"display_name": str(draft.get("recipient_display_name", ProductStrings.PERSON)),
 				"username": str(draft.get("username", draft.get("recipient_username", ""))),
 			}
 			if _self_send_enabled() and rid == str(self_profile.get("id", "")):
@@ -520,7 +520,8 @@ func _build_recipient_card() -> PanelContainer:
 	_recipient_btn.clip_text = true
 	_recipient_btn.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	_style_row_button(_recipient_btn)
-	_recipient_btn.pressed.connect(_open_friend_picker)
+	## Debug-only: tap cycles Myself (Test) ↔ My Person. No recipient modal.
+	_recipient_btn.pressed.connect(_toggle_debug_self_send)
 	_recipient_btn.visible = false
 	row_wrap.add_child(_recipient_btn)
 	_need_person_panel = _make_card()
@@ -716,7 +717,7 @@ func _build_location_card() -> PanelContainer:
 	var col := _location_body
 
 	var blurb := Label.new()
-	blurb.text = "Require your friend to be near a specific place to open this scroll."
+	blurb.text = "Require your Person to be near a specific place to open this scroll."
 	blurb.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	blurb.add_theme_font_size_override("font_size", 15)
 	blurb.add_theme_color_override("font_color", COL_SUPPORT)
@@ -788,9 +789,10 @@ func _build_location_card() -> PanelContainer:
 	_location_suggestions.add_theme_constant_override("separation", 4)
 	_location_fields.add_child(_location_suggestions)
 
-	var action_row := HBoxContainer.new()
-	action_row.add_theme_constant_override("separation", 8)
-	_location_fields.add_child(action_row)
+	## Stack full-width on portrait phones — side-by-side labels were cramped.
+	var action_col := VBoxContainer.new()
+	action_col.add_theme_constant_override("separation", 8)
+	_location_fields.add_child(action_col)
 	_location_map_btn = Button.new()
 	_location_map_btn.text = "Choose on Map"
 	_location_map_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -798,7 +800,7 @@ func _build_location_card() -> PanelContainer:
 	_location_map_btn.focus_mode = Control.FOCUS_NONE
 	_style_secondary_button(_location_map_btn)
 	_location_map_btn.pressed.connect(_on_choose_on_map)
-	action_row.add_child(_location_map_btn)
+	action_col.add_child(_location_map_btn)
 	_location_use_btn = Button.new()
 	_location_use_btn.text = "Use Current Location"
 	_location_use_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -806,7 +808,7 @@ func _build_location_card() -> PanelContainer:
 	_location_use_btn.focus_mode = Control.FOCUS_NONE
 	_style_secondary_button(_location_use_btn)
 	_location_use_btn.pressed.connect(_on_use_current_location)
-	action_row.add_child(_location_use_btn)
+	action_col.add_child(_location_use_btn)
 
 	_location_summary = PanelContainer.new()
 	_location_summary.visible = false
@@ -1159,27 +1161,34 @@ func _finish_current_location_attempt() -> void:
 
 
 func _on_use_current_location() -> void:
-	## GPS permission only for this sender action — never for typing search.
-	## Must use the sender phone's actual current position (fresh fix), not map center / last search.
+	## Must use the sender phone's actual current position (fresh fused fix), not map center / last search.
 	if _location_use_btn == null:
 		return
 	if _location_use_btn.disabled:
 		return
 	_location_use_btn.disabled = true
 	_location_use_btn.text = "Getting your location…"
+	## Clear any prior embedded error immediately.
 	_location_status.text = "Getting your location…"
+	_location_status.visible = true
 	if OS.get_name() == "Android":
-		var status := LocationHelper.request_permission_if_needed()
-		## Permission dialog is async — poll briefly for grant.
-		var waits := 0
-		while status != "granted" and waits < 24:
-			await get_tree().create_timer(0.25).timeout
-			status = LocationHelper.permission_status()
-			waits += 1
-			if waits == 1 and status != "granted":
-				_location_status.text = "Allow location access to use your current position."
-		if status != "granted":
-			_location_status.text = "Location permission is needed to use your current location. Enable it in Android Settings if previously denied."
+		if LocationHelper.permission_status() != "granted":
+			LocationHelper.request_permission_if_needed()
+			var waits := 0
+			var status := LocationHelper.permission_status()
+			while status != "granted" and waits < 32:
+				await get_tree().create_timer(0.25).timeout
+				status = LocationHelper.permission_status()
+				waits += 1
+				if waits == 1 and status != "granted":
+					_location_status.text = "Allow Location permission to use your current location."
+			if status != "granted":
+				_location_status.text = "Allow Location permission to use your current location."
+				_finish_current_location_attempt()
+				_update_validation()
+				return
+		if not LocationHelper.location_services_enabled():
+			_location_status.text = "Turn on Location Services to use your current location."
 			_finish_current_location_attempt()
 			_update_validation()
 			return
@@ -2095,32 +2104,34 @@ func _sync_person_gate() -> void:
 func _refresh_recipient_row() -> void:
 	if _recipient_label == null and _recipient_btn == null:
 		return
-	## Production: fixed "Sending to X" — no multi-recipient picker.
+	## Production: fixed "To X" — no recipient modal / friend picker.
 	var self_mode := bool(_selected_friend.get("is_self_test", false))
 	if not my_person.is_empty() and not self_mode:
 		_selected_friend = my_person.duplicate(true)
-	if _recipient_btn:
-		_recipient_btn.visible = _self_send_enabled()
 	if _selected_friend.is_empty():
 		if _recipient_label:
 			_recipient_label.visible = true
 			_recipient_label.text = ProductStrings.COMPOSE_NEED_PERSON
-		if _recipient_btn and _recipient_btn.visible:
-			_recipient_btn.text = "Send to Myself (Test)  ›"
-	elif self_mode:
-		if _recipient_label:
-			_recipient_label.visible = false
 		if _recipient_btn:
-			_recipient_btn.visible = true
-			_recipient_btn.text = "Self (Test)  ›"
+			_recipient_btn.visible = _self_send_enabled()
+			_recipient_btn.text = "Test recipient: Myself"
+	elif self_mode:
+		var self_name := IdentityHelper.display_name_from_profile(_selected_friend, "Me")
+		if _recipient_label:
+			_recipient_label.visible = true
+			_recipient_label.text = "To %s (Test)" % self_name
+		if _recipient_btn:
+			_recipient_btn.visible = _self_send_enabled()
+			_recipient_btn.text = "Send to Myself (Test) · tap to restore Person"
 	else:
 		var name := IdentityHelper.display_name_from_profile(_selected_friend, ProductStrings.PERSON)
 		if _recipient_label:
 			_recipient_label.visible = true
-			_recipient_label.text = ProductStrings.sending_to(name)
+			_recipient_label.text = ProductStrings.to_label(name)
 		if _recipient_btn:
+			## Unobtrusive debug control under the recipient label, not a giant modal.
 			_recipient_btn.visible = _self_send_enabled()
-			_recipient_btn.text = "Change (Test)  ›"
+			_recipient_btn.text = "Send to Myself (Test)"
 	_sync_person_gate()
 
 
@@ -2401,124 +2412,20 @@ func _apply_relative_unlock(offset_secs: int) -> void:
 	_update_validation()
 
 
-func _open_friend_picker() -> void:
-	_clear_overlay()
-	_overlay.visible = true
-	var dim := ColorRect.new()
-	dim.color = Color(0, 0, 0, 0.72)
-	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_overlay.add_child(dim)
-
-	var host := MarginContainer.new()
-	host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	SafeAreaHelper.apply_to_margin(host, 24, 24, 24)
-	_overlay.add_child(host)
-	var panel := PanelContainer.new()
-	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.10, 0.07, 0.16, 0.98)
-	style.border_color = COL_GOLD_MUTED
-	style.set_border_width_all(1)
-	style.set_corner_radius_all(20)
-	style.content_margin_left = 20
-	style.content_margin_right = 20
-	style.content_margin_top = 20
-	style.content_margin_bottom = 20
-	panel.add_theme_stylebox_override("panel", style)
-	host.add_child(panel)
-
-	var col := VBoxContainer.new()
-	col.add_theme_constant_override("separation", 12)
-	panel.add_child(col)
-	var title := Label.new()
-	title.text = "Debug Recipient"
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 26)
-	title.add_theme_color_override("font_color", COL_GOLD)
-	col.add_child(title)
-
-	var list_scroll := ScrollContainer.new()
-	list_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	MobileUi.configure_scroll(list_scroll)
-	col.add_child(list_scroll)
-	var list := VBoxContainer.new()
-	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	list.add_theme_constant_override("separation", MobileUi.GAP_CARDS)
-	list_scroll.add_child(list)
-	MobileUi.enable_touch_scroll_on_tree(list)
-
-	## Production has no friend picker — only debug self-send + restore My Person.
-	if not my_person.is_empty():
-		var person_row := Button.new()
-		person_row.custom_minimum_size = Vector2(0, 60)
-		person_row.focus_mode = Control.FOCUS_NONE
-		person_row.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		person_row.text = ProductStrings.sending_to(IdentityHelper.display_name_from_profile(my_person))
-		_style_row_button(person_row)
-		person_row.pressed.connect(func() -> void:
+func _toggle_debug_self_send() -> void:
+	## Unobtrusive DEBUG toggle — no oversized recipient modal.
+	if not _self_send_enabled():
+		return
+	if bool(_selected_friend.get("is_self_test", false)):
+		if not my_person.is_empty():
 			_selected_friend = my_person.duplicate(true)
-			_refresh_recipient_row()
-			_refresh_summary()
-			_update_validation()
-			_hide_overlay()
-		)
-		list.add_child(person_row)
-	if _self_send_enabled():
-		var self_row := Button.new()
-		self_row.custom_minimum_size = Vector2(0, 60)
-		self_row.focus_mode = Control.FOCUS_NONE
-		self_row.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		self_row.text = "Send to Myself (Test)"
-		_style_row_button(self_row)
-		self_row.pressed.connect(func() -> void:
-			_selected_friend = _self_recipient_dict()
-			_refresh_recipient_row()
-			_refresh_summary()
-			_update_validation()
-			_hide_overlay()
-		)
-		list.add_child(self_row)
-		var hint := Label.new()
-		hint.text = "Uses your real account as recipient. All locks still apply."
-		hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		hint.add_theme_font_size_override("font_size", 14)
-		hint.add_theme_color_override("font_color", COL_SUPPORT)
-		list.add_child(hint)
-	if my_person.is_empty() and not _self_send_enabled():
-		var empty := Label.new()
-		empty.text = ProductStrings.COMPOSE_NEED_PERSON
-		empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		empty.add_theme_font_size_override("font_size", 19)
-		empty.add_theme_color_override("font_color", COL_SUPPORT)
-		list.add_child(empty)
-	if false:
-		for f in friends:
-			if typeof(f) != TYPE_DICTIONARY:
-				continue
-			var friend: Dictionary = f
-			var row := Button.new()
-			row.custom_minimum_size = Vector2(0, 60)
-			row.focus_mode = Control.FOCUS_NONE
-			row.alignment = HORIZONTAL_ALIGNMENT_LEFT
-			row.text = "%s  ·  @%s" % [str(friend.get("display_name", "")), str(friend.get("username", ""))]
-			_style_row_button(row)
-			row.pressed.connect(func() -> void:
-				_selected_friend = friend.duplicate(true)
-				_refresh_recipient_row()
-				_refresh_summary()
-				_update_validation()
-				_hide_overlay()
-			)
-			list.add_child(row)
-
-	var cancel := Button.new()
-	cancel.text = "Cancel"
-	cancel.custom_minimum_size = Vector2(0, 52)
-	cancel.focus_mode = Control.FOCUS_NONE
-	_style_secondary_button(cancel)
-	cancel.pressed.connect(_hide_overlay)
-	col.add_child(cancel)
+		else:
+			_selected_friend = {}
+	else:
+		_selected_friend = _self_recipient_dict()
+	_refresh_recipient_row()
+	_refresh_summary()
+	_update_validation()
 
 
 func _open_date_picker() -> void:

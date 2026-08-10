@@ -3443,7 +3443,7 @@ func _show_permissions_setup() -> void:
 	for row in [
 		["Notifications", ProductStrings.NOTIFY_RATIONALE, func() -> void: PermissionsHelper.request_notifications()],
 		["Location", ProductStrings.LOCATION_RATIONALE, func() -> void: PermissionsHelper.request_location()],
-		["Camera", ProductStrings.CAMERA_RATIONALE, func() -> void: PermissionsHelper.request_camera()],
+		["Camera", ProductStrings.CAMERA_SETUP_RATIONALE, func() -> void: PermissionsHelper.request_camera()],
 	]:
 		var card := _make_card()
 		var box := VBoxContainer.new()
@@ -3553,7 +3553,7 @@ func _add_geofence_opt_in(box: VBoxContainer, item: Dictionary) -> void:
 	toggle.focus_mode = Control.FOCUS_NONE
 	toggle.toggled.connect(func(on: bool) -> void:
 		if on:
-			_show_toast("Background location is used only to nudge you when you're near this unlock place.")
+			_show_toast(ProductStrings.GEOFENCE_RATIONALE)
 			LocationHelper.request_background_location_permission()
 			await get_tree().create_timer(0.35).timeout
 			if LocationHelper.register_geofence(sid, lat, lng, radius):

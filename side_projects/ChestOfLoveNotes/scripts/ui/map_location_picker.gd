@@ -59,11 +59,15 @@ var _pinch_zoom_frac: float = 0.0
 var _refresh_queued: bool = false
 var _last_refresh_msec: int = 0
 var _pinch_tile_debounce: Timer
+## Dedicated transparent gesture layer — sole owner of map pan/pinch.
+var _gesture_layer: Control
 ## Previous-zoom tiles kept visible/scaled while the new zoom level loads (no black flash).
 var _hold_tile_layer: Control
-const PINCH_DAMPING := 0.42
-const PINCH_MAX_DELTA_PER_EVENT := 0.12
-const PINCH_MIN_DIST := 16.0
+## Debug multitouch logging (debug builds only; silent in production).
+var _gesture_debug: bool = false
+const PINCH_DAMPING := 0.85
+const PINCH_MAX_DELTA_PER_EVENT := 0.22
+const PINCH_MIN_DIST := 12.0
 
 
 func setup(initial: Dictionary = {}, p_radius_m: int = 500, search_service: LocationSearchService = null) -> void:
@@ -92,8 +96,10 @@ func setup(initial: Dictionary = {}, p_radius_m: int = 500, search_service: Loca
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	z_index = 80
-	## Android multitouch often bypasses Control.gui_input — capture via _input.
+	## Android multitouch often bypasses Control.gui_input — capture via _input/_unhandled_input.
 	set_process_input(true)
+	set_process_unhandled_input(true)
+	_gesture_debug = OS.is_debug_build() and OS.get_environment("COLN_MAP_GESTURE_DEBUG") == "1"
 	_build_ui()
 	_show_initial_loading(true)
 	_sync_action_enabled()
@@ -150,12 +156,19 @@ func _build_ui() -> void:
 	_tile_layer = Control.new()
 	_tile_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_tile_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_tile_layer.pivot_offset = Vector2.ZERO
 	_map_host.add_child(_tile_layer)
+
+	## Transparent gesture owner above tiles; pin/radius overlay draws on top but ignores touch.
+	_gesture_layer = Control.new()
+	_gesture_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_gesture_layer.mouse_filter = Control.MOUSE_FILTER_STOP
+	_gesture_layer.gui_input.connect(_on_map_input)
+	_map_host.add_child(_gesture_layer)
 
 	_overlay = Control.new()
 	_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
-	_overlay.gui_input.connect(_on_map_input)
+	_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_overlay.draw.connect(_draw_overlay)
 	_map_host.add_child(_overlay)
 
@@ -501,55 +514,75 @@ func _map_host_global_rect() -> Rect2:
 
 
 func _to_map_local(global_pos: Vector2) -> Vector2:
-	if _overlay == null:
+	var layer := _gesture_layer if _gesture_layer != null else _overlay
+	if layer == null:
 		return global_pos
-	return _overlay.get_global_transform_with_canvas().affine_inverse() * global_pos
+	return layer.get_global_transform_with_canvas().affine_inverse() * global_pos
 
 
-func _input(event: InputEvent) -> void:
-	## Critical for Android: multitouch ScreenTouch/Drag often never reach gui_input.
-	if not _alive or not visible or _map_host == null or _overlay == null:
-		return
-	if not _initial_paint_done and not _tiles_ready and _loading_overlay != null and _loading_overlay.visible:
-		## Still allow gestures once layout exists — but prefer after first paint.
-		pass
+func _gesture_log(msg: String) -> void:
+	if _gesture_debug:
+		print("[COLN-MAP] %s" % msg)
+
+
+func _handle_touch_event(event: InputEvent) -> bool:
+	## Canonical map multitouch path. Returns true if consumed.
+	if not _alive or not visible or _map_host == null:
+		return false
 	var area := _map_host_global_rect()
 	if area.size.x < 8.0:
-		return
+		return false
 	if event is InputEventScreenTouch:
 		var st := event as InputEventScreenTouch
 		var inside := area.has_point(st.position)
 		if st.pressed:
 			if not inside and not _pinch_touches.has(st.index):
-				return
+				return false
 			_pinch_touches[st.index] = _to_map_local(st.position)
+			_gesture_log("Touch %d down @%s count=%d" % [st.index, str(st.position), _pinch_touches.size()])
 		else:
 			if not _pinch_touches.has(st.index) and not inside:
-				return
+				return false
 			_pinch_touches.erase(st.index)
+			_gesture_log("Touch %d up count=%d" % [st.index, _pinch_touches.size()])
 			if _pinch_touches.size() < 2:
 				_end_pinch_gesture()
 		_drag_active = st.pressed and _pinch_touches.size() == 1
 		_drag_last = _to_map_local(st.position)
-		get_viewport().set_input_as_handled()
+		if _pinch_touches.size() >= 2:
+			_handle_map_pinch()
+		return true
 	elif event is InputEventScreenDrag:
 		var sd := event as InputEventScreenDrag
 		if _pinch_touches.is_empty() and not area.has_point(sd.position):
-			return
+			return false
 		_pinch_touches[sd.index] = _to_map_local(sd.position)
+		_gesture_log("Touch %d drag count=%d" % [sd.index, _pinch_touches.size()])
 		if _pinch_touches.size() >= 2:
 			_handle_map_pinch()
 		elif not _pinch_active:
 			_pan_by_pixels(sd.relative)
-		get_viewport().set_input_as_handled()
+		return true
 	elif event is InputEventMagnifyGesture:
 		var mag := event as InputEventMagnifyGesture
 		if not area.has_point(mag.position) and _pinch_touches.is_empty():
-			return
-		## Desktop magnify: convert scale factor to damped fractional zoom.
+			return false
 		var factor := maxf(float(mag.factor), 0.01)
 		var delta := clampf(log(factor) / log(2.0) * PINCH_DAMPING, -PINCH_MAX_DELTA_PER_EVENT, PINCH_MAX_DELTA_PER_EVENT)
 		_apply_fractional_zoom(delta, _to_map_local(mag.position))
+		return true
+	return false
+
+
+func _input(event: InputEvent) -> void:
+	## Critical for Android: multitouch ScreenTouch/Drag often never reach gui_input.
+	if _handle_touch_event(event):
+		get_viewport().set_input_as_handled()
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	## Fallback if another Control marked the first finger handled but second still arrives here.
+	if _handle_touch_event(event):
 		get_viewport().set_input_as_handled()
 
 
@@ -564,23 +597,35 @@ func _on_map_input(ev: InputEvent) -> void:
 			_set_zoom_level(_zoom + 1, mb.position)
 		elif mb.button_index == MOUSE_BUTTON_WHEEL_DOWN and mb.pressed:
 			_set_zoom_level(_zoom - 1, mb.position)
-		_overlay.accept_event()
+		if _gesture_layer:
+			_gesture_layer.accept_event()
 	elif ev is InputEventMouseMotion and _drag_active and not _pinch_active:
 		var mm := ev as InputEventMouseMotion
 		var delta := mm.position - _drag_last
 		_drag_last = mm.position
 		_pan_by_pixels(delta)
-		_overlay.accept_event()
+		if _gesture_layer:
+			_gesture_layer.accept_event()
 	elif ev is InputEventScreenTouch or ev is InputEventScreenDrag or ev is InputEventMagnifyGesture:
 		## Prefer _input path for multitouch; still consume so parent scroll stops.
-		_overlay.accept_event()
+		if _handle_touch_event(ev) and _gesture_layer:
+			_gesture_layer.accept_event()
 
 
 func _end_pinch_gesture() -> void:
 	_pinch_active = false
 	_pinch_last_dist = 0.0
+	## Commit any remaining fractional zoom visually.
+	_apply_live_pinch_scale(Vector2.INF)
 	_pinch_zoom_frac = 0.0
+	if _tile_layer:
+		_tile_layer.scale = Vector2.ONE
+		_tile_layer.position = Vector2.ZERO
+	if _hold_tile_layer:
+		_hold_tile_layer.scale = Vector2.ONE
+		_hold_tile_layer.position = Vector2.ZERO
 	## Settle: fetch any remaining tiles for the final canonical zoom.
+	_refresh_tiles(true)
 	if _pinch_tile_debounce != null:
 		_pinch_tile_debounce.start()
 
@@ -601,6 +646,7 @@ func _handle_map_pinch() -> void:
 		_pinch_last_dist = dist
 		_pinch_zoom_frac = 0.0
 		_drag_active = false
+		_gesture_log("pinch start dist=%.1f" % dist)
 		return
 	## Normalized pinch scale ratio → gradual zoom delta (not raw discrete jumps).
 	var ratio := dist / maxf(_pinch_last_dist, 1.0)
@@ -612,17 +658,40 @@ func _handle_map_pinch() -> void:
 	_apply_fractional_zoom(delta, mid)
 
 
+func _apply_live_pinch_scale(focal_screen: Vector2) -> void:
+	## Continuous visual scale so small pinches feel alive before integer OSM zoom crosses.
+	if _tile_layer == null:
+		return
+	var area := _map_host.size if _map_host else Vector2(400, 400)
+	var focus := focal_screen
+	if not is_finite(focus.x) or not is_finite(focus.y):
+		focus = area * 0.5
+	var visual := pow(2.0, _pinch_zoom_frac)
+	_tile_layer.pivot_offset = focus
+	_tile_layer.scale = Vector2(visual, visual)
+	if _hold_tile_layer:
+		_hold_tile_layer.pivot_offset = focus
+		_hold_tile_layer.scale = Vector2(visual, visual)
+	if _overlay:
+		_overlay.queue_redraw()
+
+
 func _apply_fractional_zoom(delta: float, focal_screen: Vector2) -> void:
 	if absf(delta) < 0.0001:
 		return
 	_pinch_zoom_frac += delta
-	## Cross integer OSM zoom levels only after enough accumulated pinch motion.
+	## Cross integer OSM zoom levels after enough accumulated pinch motion.
 	while _pinch_zoom_frac >= 1.0:
 		_pinch_zoom_frac -= 1.0
+		if _tile_layer:
+			_tile_layer.scale = Vector2.ONE
 		_set_zoom_level(_zoom + 1, focal_screen, true)
 	while _pinch_zoom_frac <= -1.0:
 		_pinch_zoom_frac += 1.0
+		if _tile_layer:
+			_tile_layer.scale = Vector2.ONE
 		_set_zoom_level(_zoom - 1, focal_screen, true)
+	_apply_live_pinch_scale(focal_screen)
 
 
 func _set_zoom_level(z: int, focal_screen: Vector2 = Vector2.INF, from_pinch: bool = false) -> void:

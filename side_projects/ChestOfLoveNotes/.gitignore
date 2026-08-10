@@ -52,3 +52,4 @@ android/build/.cxx/
 *~
 .idea/
 .vscode/
+!build/ChestOfLoveNotes-permissions-map-chest-notification-performance-debug.apk

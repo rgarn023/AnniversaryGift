@@ -102,9 +102,9 @@ func _run() -> void:
 	## Activity/focus schema migration still present
 	_assert(act_mig.contains("activity_lock_enabled"), "activity/focus migration present")
 
-	_assert(BuildFlags.APP_VERSION_CODE >= 24, "versionCode 24+")
-	_assert(preset.contains("version/code=24"), "export 24")
-	_assert(preset.contains("ChestOfLoveNotes-my-person-qr-notifications-debug.apk"), "APK name")
+	_assert(BuildFlags.APP_VERSION_CODE >= 25, "versionCode 25+")
+	_assert(preset.contains("version/code=25"), "export 24")
+	_assert(preset.contains("ChestOfLoveNotes-permissions-map-chest-notification-performance-debug.apk"), "APK name")
 
 	## Runtime preview composite clamp (static source checks already cover ZoomPanRoot).
 	_assert(viewer.contains("MAX_COMPOSITE_SCALE: float = 3.0"), "max composite scale is 3x")

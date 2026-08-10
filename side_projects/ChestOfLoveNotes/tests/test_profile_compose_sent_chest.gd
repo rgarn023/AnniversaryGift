@@ -144,4 +144,4 @@ func _test_main_wiring() -> void:
 	var main := FileAccess.get_file_as_string("res://scripts/main.gd")
 	_assert(main.contains("_nav_content_inset"), "global nav content inset")
 	_assert(main.contains("bottom_chrome_inset"), "compose bottom chrome inset")
-	_assert(BuildFlags.APP_VERSION_CODE >= 24, "versionCode bumped for this fix pass")
+	_assert(BuildFlags.APP_VERSION_CODE >= 25, "versionCode bumped for this fix pass")

@@ -130,13 +130,13 @@ func create_profile(username: String, display_name: String) -> Dictionary:
 		dname = uname
 	var code_result: Dictionary = await api.rest_rpc("generate_friend_code", {})
 	if not bool(code_result.get("ok", false)):
-		return {"ok": false, "error": str(code_result.get("error", "Could not generate friend code."))}
+		return {"ok": false, "error": str(code_result.get("error", "Could not generate connection code."))}
 	var friend_code := str(code_result.get("data", ""))
 	# RPC may return a bare JSON string.
 	if friend_code.begins_with("\"") and friend_code.ends_with("\""):
 		friend_code = friend_code.substr(1, friend_code.length() - 2)
 	if friend_code.is_empty():
-		return {"ok": false, "error": "Friend code generation returned empty."}
+		return {"ok": false, "error": "Connection code generation returned empty."}
 	var body := {
 		"id": tokens.user_id,
 		"username": uname,
