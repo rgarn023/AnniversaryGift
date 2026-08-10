@@ -1,6 +1,7 @@
 package com.charoitegames.chestoflovenotes.securestorage
 
 import android.Manifest
+import android.app.Activity
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -10,6 +11,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.util.Log
+import android.view.View
 import org.godotengine.godot.Godot
 import org.godotengine.godot.plugin.GodotPlugin
 import org.godotengine.godot.plugin.UsedByGodot
@@ -62,24 +64,16 @@ class ChestNotifyPlugin(godot: Godot) : GodotPlugin(godot) {
 		}
 	}
 
-	/** Capture launch/new-intent deep link extras for Godot cold/warm start. */
-	override fun onMainCreate(activity: android.app.Activity?) {
-		super.onMainCreate(activity)
+	/** Capture launch deep link extras for Godot cold/warm start. */
+	override fun onMainCreate(activity: Activity?): View? {
+		val view = super.onMainCreate(activity)
 		captureDeepLink(activity?.intent)
+		return view
 	}
 
 	override fun onMainResume() {
 		super.onMainResume()
 		captureDeepLink(getActivity()?.intent)
-	}
-
-	override fun onMainNewIntent(intent: Intent?) {
-		super.onMainNewIntent(intent)
-		captureDeepLink(intent)
-		try {
-			getActivity()?.intent = intent
-		} catch (_: Exception) {
-		}
 	}
 
 	private fun captureDeepLink(intent: Intent?) {
