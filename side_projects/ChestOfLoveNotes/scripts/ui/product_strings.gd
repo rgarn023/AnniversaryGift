@@ -25,6 +25,10 @@ const INVALID_QR := "This isn't a valid Chest of Love Notes connection code."
 const CAMERA_RATIONALE := "Camera access lets you scan your Person's connection code."
 const CAMERA_NEEDED := "Camera permission is needed to scan a connection code."
 const NOTIFY_RATIONALE := "Allow notifications so Chest of Love Notes can tell you when a new scroll arrives or when a scroll requirement is completed."
+const LOCATION_RATIONALE := "Location access lets you unlock scrolls that require being near a place, and optionally get a nudge when you're close enough."
+const CONNECTION_REQUEST_ACCEPTED := "Connection request accepted"
+const PERMISSIONS_SETUP_WHY := "A few optional permissions help Chest of Love Notes work smoothly. You can change these anytime in Profile."
+const PERMISSIONS_SECTION := "PERMISSIONS"
 
 
 static func sending_to(display_name: String) -> String:

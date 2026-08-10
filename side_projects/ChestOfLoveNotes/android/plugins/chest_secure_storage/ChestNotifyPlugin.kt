@@ -24,10 +24,16 @@ class ChestNotifyPlugin(godot: Godot) : GodotPlugin(godot) {
 	companion object {
 		private const val TAG = "ChestNotify"
 		private const val PLUGIN_NAME = "ChestNotify"
-		const val CH_NEW = "coln_new_scroll"
-		const val CH_READY = "coln_scheduled_ready"
-		const val CH_ACTIVITY = "coln_activity"
-		const val CH_FOCUS = "coln_focus"
+		const val CH_SCROLLS = "coln_scrolls"
+		const val CH_CHALLENGES = "coln_challenges"
+		const val CH_CONNECTIONS = "coln_connections"
+		/** Legacy aliases kept for existing schedule payloads. */
+		const val CH_NEW = CH_SCROLLS
+		const val CH_READY = CH_SCROLLS
+		const val CH_ACTIVITY = CH_CHALLENGES
+		const val CH_FOCUS = CH_CHALLENGES
+		private const val PREFS = "coln_notify"
+		private const val KEY_PENDING_DEEPLINK = "pending_deeplink"
 	}
 
 	override fun getPluginName(): String = PLUGIN_NAME
@@ -45,14 +51,94 @@ class ChestNotifyPlugin(godot: Godot) : GodotPlugin(godot) {
 		return try {
 			if (Build.VERSION.SDK_INT >= 26) {
 				val nm = appContext().getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-				nm.createNotificationChannel(NotificationChannel(CH_NEW, "New Scroll", NotificationManager.IMPORTANCE_DEFAULT))
-				nm.createNotificationChannel(NotificationChannel(CH_READY, "Scroll Ready", NotificationManager.IMPORTANCE_DEFAULT))
-				nm.createNotificationChannel(NotificationChannel(CH_ACTIVITY, "Activity Lock", NotificationManager.IMPORTANCE_LOW))
-				nm.createNotificationChannel(NotificationChannel(CH_FOCUS, "Focus Lock", NotificationManager.IMPORTANCE_DEFAULT))
+				nm.createNotificationChannel(NotificationChannel(CH_SCROLLS, "Scrolls", NotificationManager.IMPORTANCE_DEFAULT))
+				nm.createNotificationChannel(NotificationChannel(CH_CHALLENGES, "Challenges", NotificationManager.IMPORTANCE_DEFAULT))
+				nm.createNotificationChannel(NotificationChannel(CH_CONNECTIONS, "Connections", NotificationManager.IMPORTANCE_DEFAULT))
 			}
 			true
 		} catch (e: Exception) {
 			Log.w(TAG, "ensure_channels failed: ${e.javaClass.simpleName}")
+			false
+		}
+	}
+
+	/** Capture launch/new-intent deep link extras for Godot cold/warm start. */
+	override fun onMainCreate(activity: android.app.Activity?) {
+		super.onMainCreate(activity)
+		captureDeepLink(activity?.intent)
+	}
+
+	override fun onMainResume() {
+		super.onMainResume()
+		captureDeepLink(getActivity()?.intent)
+	}
+
+	override fun onMainNewIntent(intent: Intent?) {
+		super.onMainNewIntent(intent)
+		captureDeepLink(intent)
+		try {
+			getActivity()?.intent = intent
+		} catch (_: Exception) {
+		}
+	}
+
+	private fun captureDeepLink(intent: Intent?) {
+		if (intent == null) return
+		val link = intent.getStringExtra("coln_deeplink")?.trim().orEmpty()
+		if (link.isEmpty()) return
+		appContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+			.edit()
+			.putString(KEY_PENDING_DEEPLINK, link)
+			.apply()
+		Log.i(TAG, "captured deeplink")
+		try {
+			intent.removeExtra("coln_deeplink")
+		} catch (_: Exception) {
+		}
+	}
+
+	@UsedByGodot
+	fun peek_pending_deeplink(): String {
+		return try {
+			appContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+				.getString(KEY_PENDING_DEEPLINK, "") ?: ""
+		} catch (_: Exception) {
+			""
+		}
+	}
+
+	@UsedByGodot
+	fun consume_pending_deeplink(): String {
+		return try {
+			val prefs = appContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+			val link = prefs.getString(KEY_PENDING_DEEPLINK, "") ?: ""
+			if (link.isNotEmpty()) {
+				prefs.edit().remove(KEY_PENDING_DEEPLINK).apply()
+			}
+			link
+		} catch (_: Exception) {
+			""
+		}
+	}
+
+	@UsedByGodot
+	fun open_app_notification_settings(): Boolean {
+		return try {
+			val act = getActivity() ?: return false
+			val intent = if (Build.VERSION.SDK_INT >= 26) {
+				Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+					putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, act.packageName)
+				}
+			} else {
+				Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+					data = android.net.Uri.fromParts("package", act.packageName, null)
+				}
+			}
+			intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+			act.startActivity(intent)
+			true
+		} catch (e: Exception) {
+			Log.w(TAG, "open_app_notification_settings failed: ${e.javaClass.simpleName}")
 			false
 		}
 	}
@@ -100,11 +186,10 @@ class ChestNotifyPlugin(godot: Godot) : GodotPlugin(godot) {
 				PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
 			)
 			val ch = when (channel) {
-				"new_scroll" -> CH_NEW
-				"scheduled_ready" -> CH_READY
-				"activity" -> CH_ACTIVITY
-				"focus" -> CH_FOCUS
-				else -> CH_NEW
+				"new_scroll", "scheduled_ready", "scrolls", "ready" -> CH_SCROLLS
+				"activity", "focus", "challenges" -> CH_CHALLENGES
+				"connection", "connections", "friend_request" -> CH_CONNECTIONS
+				else -> CH_SCROLLS
 			}
 			val builder = if (Build.VERSION.SDK_INT >= 26) {
 				Notification.Builder(ctx, ch)
@@ -195,4 +280,11 @@ class ChestNotifyPlugin(godot: Godot) : GodotPlugin(godot) {
 			false
 		}
 	}
+
+	/**
+	 * Stub until an FCM/client push token API is wired.
+	 * Empty string means registration should no-op.
+	 */
+	@UsedByGodot
+	fun get_push_token(): String = ""
 }

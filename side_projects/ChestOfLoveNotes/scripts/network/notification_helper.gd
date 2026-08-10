@@ -31,20 +31,46 @@ static func has_permission() -> bool:
 	return false
 
 
-static func request_permission_contextual() -> void:
-	## Call only after a user-relevant moment (e.g. first send / first received scroll).
+static func request_permission_contextual(force: bool = false) -> void:
+	## Call from first-run Permissions Setup or after a user-relevant moment.
 	if OS.get_name() != "Android":
 		return
 	if has_permission():
 		ensure_channels()
 		return
-	if bool(ProjectSettings.get_setting(PREF_ASKED, false)):
+	if not force and bool(ProjectSettings.get_setting(PREF_ASKED, false)):
 		return
 	ProjectSettings.set_setting(PREF_ASKED, true)
 	var p = _plugin()
 	if p != null and p.has_method("request_notification_permission"):
 		p.request_notification_permission()
 	ensure_channels()
+
+
+static func consume_pending_deeplink() -> String:
+	var p = _plugin()
+	if p != null and p.has_method("consume_pending_deeplink"):
+		return str(p.consume_pending_deeplink())
+	return ""
+
+
+static func peek_pending_deeplink() -> String:
+	var p = _plugin()
+	if p != null and p.has_method("peek_pending_deeplink"):
+		return str(p.peek_pending_deeplink())
+	return ""
+
+
+static func push_token_placeholder() -> String:
+	## No FCM client plugin wired yet — returns empty so registration no-ops.
+	return get_push_token()
+
+
+static func get_push_token() -> String:
+	var p = _plugin()
+	if p != null and p.has_method("get_push_token"):
+		return str(p.get_push_token()).strip_edges()
+	return ""
 
 
 static func show(channel: String, title: String, body: String, deep_link: String = "chest", notif_id: int = 1001) -> void:
@@ -56,16 +82,24 @@ static func show(channel: String, title: String, body: String, deep_link: String
 	p.show_notification(channel, title, body, deep_link, notif_id)
 
 
-static func notify_new_scroll(from_name: String) -> void:
+static func notify_new_scroll(from_name: String, scroll_id: String = "") -> void:
 	var who := from_name.strip_edges()
-	var title := "New scroll"
+	var title := "New Scroll"
 	var body := "You received a new scroll." if who.is_empty() else "You received a new scroll from %s." % who
-	show("new_scroll", title, body, "chest", 1101)
+	var link := "chest" if scroll_id.is_empty() else "chest:%s" % scroll_id
+	show("new_scroll", title, body, link, 1101)
+
+
+static func notify_connection_request(from_name: String) -> void:
+	var who := from_name.strip_edges()
+	if who.is_empty():
+		who = "Someone"
+	show("connections", "%s wants to connect with you." % who, ProductStrings.CONNECTION_REQUEST, "person", 1201)
 
 
 static func notify_scheduled_ready(scroll_id: String = "") -> void:
 	var link := "chest" if scroll_id.is_empty() else "chest:%s" % scroll_id
-	show("scheduled_ready", "Scroll ready", "A scroll is now available to open.", link, 1102)
+	show("scheduled_ready", "Your scroll is ready to open.", "A scroll's requirements are complete.", link, 1102)
 
 
 static func schedule_ready_at(unlock_unix: int, scroll_id: String) -> void:

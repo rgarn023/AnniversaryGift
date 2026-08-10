@@ -86,14 +86,15 @@ func _startup_navigate() -> void:
 	if bool(restore.get("ok", false)):
 		## Create Your Profile only when backend definitively reports NOT_CREATED.
 		if bool(restore.get("profile_exists", false)) or state.profiles.has_known_profile():
-			await _show_main_chest()
+			await _enter_app_home()
 		elif state.profiles.is_definitively_missing():
 			_show_profile_setup()
 		else:
 			## Soft/unknown: stay in-app with cached/loading profile, never false onboarding.
-			await _show_main_chest()
+			await _enter_app_home()
 		_startup_done = true
 		_log_secure_debug("startup_destination_chest")
+		await _consume_notification_deeplink()
 		return
 	## Missing/expired/soft-fail/unconfirmed sessions are silent on the login form.
 	## Only definitive membership denials toast.
@@ -104,6 +105,7 @@ func _startup_navigate() -> void:
 	_show_welcome()
 	_startup_done = true
 	_log_secure_debug("startup_destination_login")
+	await _consume_notification_deeplink()
 
 
 func _log_secure_debug(tag: String) -> void:
@@ -132,9 +134,14 @@ func _log_secure_debug(tag: String) -> void:
 
 func _on_session_invalidated() -> void:
 	_clear_compose_draft()
-	await state.sign_out_full()
+	await _sign_out_cleanup()
 	_show_toast("Your session has expired. Please sign in again.")
 	_show_welcome()
+
+
+func _log_nav_paint(screen: String, t0_ms: int) -> void:
+	if OS.is_debug_build():
+		print("[COLN-NAV] %s first_paint_ms=%d" % [screen, Time.get_ticks_msec() - t0_ms])
 
 
 func _build_chrome() -> void:
@@ -395,7 +402,7 @@ func _show_welcome() -> void:
 	box.add_child(title)
 
 	var sub := Label.new()
-	sub.text = "Send sealed scrolls to friends.\nThey wait in the chest until their unlock time."
+	sub.text = "Send sealed scrolls to your Person.\nThey wait in the chest until their unlock time."
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	MobileUi.apply_label(sub, MobileUi.SIZE_WELCOME, MobileUi.COLOR_BODY)
 	if _body_font():
@@ -430,7 +437,7 @@ func _enter_demo() -> void:
 	if state.is_private_onboarding_build() and not state.is_demo():
 		_show_toast("Local Demo Mode is disabled in this build.")
 		return
-	_show_main_chest()
+	await _enter_app_home()
 
 
 func _show_auth(sign_up: bool) -> void:
@@ -685,7 +692,16 @@ func _after_verified_sign_in() -> void:
 	if state.profiles.is_definitively_missing():
 		_show_profile_setup()
 		return
+	await _enter_app_home()
+
+
+func _enter_app_home() -> void:
+	## First-run permissions once for online/demo members, then main chest.
+	if not PermissionsHelper.setup_completed() and (state.is_demo() or (state.is_online() and state.membership.is_member)):
+		_show_permissions_setup()
+		return
 	await _show_main_chest()
+	_try_register_push_token()
 
 
 func _show_profile_setup() -> void:
@@ -703,7 +719,7 @@ func _show_profile_setup() -> void:
 	MobileUi.apply_label(title, MobileUi.SIZE_SCREEN_TITLE, MobileUi.COLOR_TITLE)
 	box.add_child(title)
 	var info := Label.new()
-	info.text = "Choose a username and display name. Your friend code is generated securely."
+	info.text = "Choose a username and display name. Your connection code is generated securely."
 	info.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	MobileUi.apply_label(info, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY)
 	box.add_child(info)
@@ -728,10 +744,10 @@ func _show_profile_setup() -> void:
 			status.text = str(result.get("error", "Could not save profile."))
 			return
 		_show_toast("Profile ready.")
-		_show_main_chest()
+		await _enter_app_home()
 	, Vector2(0, MobileUi.TOUCH_CTA_H)))
 	box.add_child(_make_button("Sign Out", func() -> void:
-		await state.sign_out_full()
+		await _sign_out_cleanup()
 		_show_welcome()
 	))
 
@@ -752,38 +768,32 @@ func _guard_private_chest() -> bool:
 	return true
 
 
+func _counts_from_chest_cache() -> Dictionary:
+	var counts := {"unread": 0, "locked": 0, "requests": 0}
+	if state.is_demo():
+		return state.demo.counts()
+	if not state.cached_chest.is_empty():
+		var cached: Dictionary = state.cached_chest.get("chest", {}) if typeof(state.cached_chest.get("chest")) == TYPE_DICTIONARY else {}
+		if not cached.is_empty():
+			counts.unread = int(cached.get("unread", cached.get("unopened", 0)))
+			counts.locked = int(cached.get("locked", 0))
+			var cfr: Array = cached.get("friend_requests", []) if typeof(cached.get("friend_requests")) == TYPE_ARRAY else []
+			counts.requests = cfr.size()
+			return counts
+	if not _last_chest_counts.is_empty():
+		return _last_chest_counts.duplicate()
+	return counts
+
+
 func _show_main_chest() -> void:
 	if not _guard_private_chest():
 		return
+	var nav_t0 := Time.get_ticks_msec()
 	_current_screen = "main_chest"
-	## Soft-cache chest counts so tab taps do not always hit the network.
-	var counts := {"unread": 0, "locked": 0, "requests": 0}
-	var fetch_error := ""
+	## Paint from cache immediately — refresh network after first paint.
+	var counts := _counts_from_chest_cache()
 	if state.is_demo():
-		counts = state.demo.counts()
 		state.mark_cache_fresh("chest")
-	elif state.is_online():
-		var used_cache := false
-		if state.cache_is_fresh("chest") and not state.cached_chest.is_empty():
-			var cached: Dictionary = state.cached_chest.get("chest", {}) if typeof(state.cached_chest.get("chest")) == TYPE_DICTIONARY else {}
-			if not cached.is_empty():
-				counts.unread = int(cached.get("unread", cached.get("unopened", 0)))
-				counts.locked = int(cached.get("locked", 0))
-				var cfr: Array = cached.get("friend_requests", []) if typeof(cached.get("friend_requests")) == TYPE_ARRAY else []
-				counts.requests = cfr.size()
-				used_cache = true
-		if not used_cache:
-			var chest_result: Dictionary = await state.scrolls.get_chest()
-			if bool(chest_result.get("ok", false)):
-				state.cached_chest = chest_result.get("data", {}) if typeof(chest_result.get("data")) == TYPE_DICTIONARY else {}
-				state.mark_cache_fresh("chest")
-				var chest: Dictionary = state.cached_chest.get("chest", {}) if typeof(state.cached_chest.get("chest")) == TYPE_DICTIONARY else {}
-				counts.unread = int(chest.get("unread", chest.get("unopened", 0)))
-				counts.locked = int(chest.get("locked", 0))
-				var fr: Array = chest.get("friend_requests", []) if typeof(chest.get("friend_requests")) == TYPE_ARRAY else []
-				counts.requests = fr.size()
-			else:
-				fetch_error = str(chest_result.get("error", "Could not refresh chest."))
 	if _dev_force_chest_scroll and OS.is_debug_build():
 		counts.unread = maxi(int(counts.unread), 1)
 	_last_chest_counts = counts.duplicate()
@@ -820,6 +830,7 @@ func _show_main_chest() -> void:
 	sum_row.alignment = BoxContainer.ALIGNMENT_CENTER
 	sum_row.add_theme_constant_override("separation", 8)
 	summary.add_child(sum_row)
+	var count_labels: Dictionary = {}
 	for item in [
 		["Unread", counts.unread],
 		["Locked", counts.locked],
@@ -839,6 +850,7 @@ func _show_main_chest() -> void:
 		MobileUi.apply_label(lab, MobileUi.SIZE_STAT_LABEL, MobileUi.COLOR_SECONDARY)
 		cell.add_child(lab)
 		sum_row.add_child(cell)
+		count_labels[str(item[0]).to_lower()] = num
 
 	## Intentionally composed chest stage — less empty air, still chest-first.
 	var chest_area := Control.new()
@@ -894,8 +906,30 @@ func _show_main_chest() -> void:
 
 	_add_bottom_nav("chest")
 	_finish_nav_transition()
-	if not fetch_error.is_empty():
-		_show_toast(fetch_error)
+	_log_nav_paint("main_chest", nav_t0)
+	## Async refresh when cache is stale (does not block first paint).
+	if state.is_online() and not state.cache_is_fresh("chest"):
+		var chest_result: Dictionary = await state.scrolls.get_chest()
+		if _current_screen != "main_chest":
+			return
+		if bool(chest_result.get("ok", false)):
+			state.cached_chest = chest_result.get("data", {}) if typeof(chest_result.get("data")) == TYPE_DICTIONARY else {}
+			state.mark_cache_fresh("chest")
+			var fresh := _counts_from_chest_cache()
+			_last_chest_counts = fresh.duplicate()
+			if count_labels.has("unread") and is_instance_valid(count_labels.unread):
+				count_labels.unread.text = str(fresh.unread)
+			if count_labels.has("locked") and is_instance_valid(count_labels.locked):
+				count_labels.locked.text = str(fresh.locked)
+			if count_labels.has("requests") and is_instance_valid(count_labels.requests):
+				count_labels.requests.text = str(fresh.requests)
+			if _chest != null and is_instance_valid(_chest):
+				_chest.set_unread_badge(int(fresh.unread))
+		else:
+			var err := str(chest_result.get("error", "Could not refresh chest."))
+			if not err.is_empty():
+				_show_toast(err)
+	_try_register_push_token()
 
 
 func _add_bottom_nav(selected: String) -> void:
@@ -916,10 +950,11 @@ func _add_bottom_nav(selected: String) -> void:
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	row.add_theme_constant_override("separation", 2)
 	nav.add_child(row)
+	## Nav uses short "Person" under heart to avoid crowding; screen title stays My Person.
 	var tabs := [
 		["chest", "▣", "Chest", _show_main_chest],
 		["compose", "✎", "Compose", _show_compose],
-		["friends", "♡", ProductStrings.MY_PERSON, _show_friends],
+		["friends", "♡", ProductStrings.PERSON, _show_friends],
 		["sent", "✉", "Sent", _show_sent],
 		["profile", "◎", "Profile", _show_profile],
 	]
@@ -929,8 +964,11 @@ func _add_bottom_nav(selected: String) -> void:
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.custom_minimum_size = Vector2(0, MobileUi.font_touch(MobileUi.TOUCH_NAV_H) - 2)
 		b.focus_mode = Control.FOCUS_NONE
-		b.add_theme_font_size_override("font_size", MobileUi.font(MobileUi.SIZE_NAV_LABEL))
-		b.add_theme_constant_override("line_spacing", -2)
+		var nav_fs := MobileUi.SIZE_NAV_LABEL
+		if str(t[0]) == "friends":
+			nav_fs = maxi(13, MobileUi.SIZE_NAV_LABEL - 2)
+		b.add_theme_font_size_override("font_size", MobileUi.font(nav_fs))
+		b.add_theme_constant_override("line_spacing", -3 if str(t[0]) == "friends" else -2)
 		var sel := str(t[0]) == selected
 		b.add_theme_color_override("font_color", MobileUi.COLOR_NAV_SELECTED if sel else MobileUi.COLOR_NAV_IDLE)
 		var flat := StyleBoxFlat.new()
@@ -1059,8 +1097,8 @@ func _normalize_friend_request_item(raw: Dictionary) -> Dictionary:
 		"id": str(raw.get("id", "")),
 		"kind": "friend_request",
 		"state": "friend_request",
-		"title": "Friend request",
-		"sender_display_name": str(sender.get("display_name", "Someone")),
+		"title": ProductStrings.CONNECTION_REQUEST,
+		"sender_display_name": IdentityHelper.display_name_from_profile(sender, "Someone"),
 		"sender_id": str(raw.get("sender_id", "")),
 		"has_magic_password": false,
 	}
@@ -1125,60 +1163,120 @@ func _now_unix() -> int:
 	return int(Time.get_unix_time_from_system())
 
 
+func _format_unlock_countdown(remain_sec: int) -> String:
+	if remain_sec <= 0:
+		return "Ready to unlock"
+	var unlock_unix := _now_unix() + remain_sec
+	var now_dt := Time.get_datetime_dict_from_unix_time(_now_unix())
+	var unlock_dt := Time.get_datetime_dict_from_unix_time(unlock_unix)
+	var day_diff := int(unlock_dt.day) - int(now_dt.day)
+	var same_month_year := int(unlock_dt.month) == int(now_dt.month) and int(unlock_dt.year) == int(now_dt.year)
+	## Cross-day but within ~36h → “tomorrow at …”
+	if remain_sec >= 12 * 3600 and ((same_month_year and day_diff == 1) or (not same_month_year and remain_sec < 36 * 3600)):
+		var hour := int(unlock_dt.hour)
+		var minute := int(unlock_dt.minute)
+		var ampm := "AM" if hour < 12 else "PM"
+		var h12 := hour % 12
+		if h12 == 0:
+			h12 = 12
+		return "Unlocks tomorrow at %d:%02d %s" % [h12, minute, ampm]
+	var hours := int(remain_sec / 3600)
+	var mins := int((remain_sec % 3600) / 60)
+	if hours >= 1:
+		if mins > 0:
+			return "Unlocks in %d hr %d min" % [hours, mins]
+		return "Unlocks in %d hr" % hours
+	return "Unlocks in %d min" % maxi(mins, 1)
+
+
+func _style_inventory_filter_chip(chip: Button, selected: bool) -> void:
+	chip.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	if selected:
+		chip.add_theme_color_override("font_color", MobileUi.COLOR_TITLE)
+		var gold := StyleBoxFlat.new()
+		gold.bg_color = Color(0.18, 0.12, 0.22, 0.95)
+		gold.border_color = MobileUi.COLOR_TITLE
+		gold.set_border_width_all(2)
+		gold.set_corner_radius_all(12)
+		gold.content_margin_left = 6
+		gold.content_margin_right = 6
+		gold.content_margin_top = 6
+		gold.content_margin_bottom = 6
+		chip.add_theme_stylebox_override("normal", gold)
+		chip.add_theme_stylebox_override("hover", gold)
+		chip.add_theme_stylebox_override("pressed", gold)
+
+
 func _show_inventory() -> void:
 	if not _guard_private_chest():
 		return
 	_current_screen = "inventory"
+	## Saved is its own screen — keep inventory filters coherent.
+	if _inventory_filter == "saved":
+		_show_saved()
+		return
 	_clear_screen()
 	var margin := MarginContainer.new()
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	MobileUi.apply_safe_margins(margin, _nav_content_inset())
 	_screen_host.add_child(margin)
 	var root := VBoxContainer.new()
-	root.add_theme_constant_override("separation", 14)
+	root.add_theme_constant_override("separation", 12)
 	margin.add_child(root)
 
+	## Compact back + primary heading — fits phone width.
 	var header := HBoxContainer.new()
+	header.add_theme_constant_override("separation", 8)
+	header.custom_minimum_size.y = MobileUi.font_touch(48)
 	root.add_child(header)
+	var back := Button.new()
+	back.text = "←"
+	back.tooltip_text = "Back"
+	back.focus_mode = Control.FOCUS_NONE
+	back.custom_minimum_size = Vector2(MobileUi.font_touch(48), MobileUi.font_touch(48))
+	MobileUi.style_button(back, 48)
+	back.pressed.connect(_show_main_chest)
+	header.add_child(back)
 	var title := Label.new()
-	title.text = "Your Chest"
+	title.text = "YOUR CHEST"
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	MobileUi.apply_label(title, MobileUi.SIZE_SCREEN_TITLE, MobileUi.COLOR_TITLE)
+	if _title_font():
+		title.add_theme_font_override("font", _title_font())
 	header.add_child(title)
-	header.add_child(_make_button("Back", _show_main_chest, Vector2(160, MobileUi.TOUCH_PRIMARY_H)))
 
-	# Horizontally swipeable filter chips — tall enough not to clip, no scrollbar.
-	var chip_scroll := _wire_scroll(ScrollContainer.new(), true)
-	chip_scroll.custom_minimum_size.y = MobileUi.font_touch(MobileUi.FILTER_CHIP_H + 14)
-	chip_scroll.clip_contents = true
-	root.add_child(chip_scroll)
-	var filters := HBoxContainer.new()
-	filters.add_theme_constant_override("separation", 8)
-	chip_scroll.add_child(filters)
-	var chip_pad := Control.new()
-	chip_pad.custom_minimum_size = Vector2(4, 0)
-	filters.add_child(chip_pad)
+	## Two-row filter grid — all categories visible without horizontal scroll.
+	var chip_h := MobileUi.font_touch(MobileUi.FILTER_CHIP_H)
+	var row1 := HBoxContainer.new()
+	row1.add_theme_constant_override("separation", 8)
+	root.add_child(row1)
+	var row2 := HBoxContainer.new()
+	row2.add_theme_constant_override("separation", 8)
+	root.add_child(row2)
 	for f in [
-		["all", "Current"],
-		["unread", "Unread"],
-		["locked", "Locked"],
-		["requests", "Requests"],
+		["all", "Current", row1],
+		["unread", "Unread", row1],
+		["locked", "Locked", row1],
+		["requests", "Requests", row2],
+		["saved", "Saved", row2],
 	]:
 		var fname: String = str(f[0])
+		var parent: HBoxContainer = f[2]
 		var chip := _make_button(str(f[1]), func() -> void:
-			_inventory_filter = fname
-			_show_inventory()
-		, Vector2(118, MobileUi.FILTER_CHIP_H))
-		chip.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-		if _inventory_filter == fname:
-			chip.add_theme_color_override("font_color", MobileUi.COLOR_TITLE)
-		filters.add_child(chip)
-	var saved_chip := _make_button("Saved", _show_saved, Vector2(110, MobileUi.FILTER_CHIP_H))
-	saved_chip.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	filters.add_child(saved_chip)
-	var chip_pad2 := Control.new()
-	chip_pad2.custom_minimum_size = Vector2(12, 0)
-	filters.add_child(chip_pad2)
+			if fname == "saved":
+				_inventory_filter = "saved"
+				_show_saved()
+			else:
+				_inventory_filter = fname
+				_show_inventory()
+		, Vector2(0, chip_h))
+		_style_inventory_filter_chip(chip, _inventory_filter == fname)
+		parent.add_child(chip)
+	## Balance row2 with a spacer so Requests|Saved sit as equal thirds visually.
+	var row2_pad := Control.new()
+	row2_pad.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row2.add_child(row2_pad)
 
 	var scroll := _wire_scroll(ScrollContainer.new())
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -1189,11 +1287,22 @@ func _show_inventory() -> void:
 	scroll.add_child(list)
 	MobileUi.enable_touch_scroll_on_tree(list)
 
+	## Paint shell first; fill items after (network may await).
+	var loading := Label.new()
+	loading.text = "Loading…"
+	loading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	MobileUi.apply_label(loading, MobileUi.SIZE_BODY, MobileUi.COLOR_HELPER)
+	list.add_child(loading)
+
 	var items: Array[Dictionary] = []
 	if state.is_demo():
 		items = state.demo.get_chest_items(_inventory_filter)
 	elif state.is_online():
 		items = await _load_online_chest_items(_inventory_filter)
+	if _current_screen != "inventory":
+		return
+	for c in list.get_children():
+		c.queue_free()
 	if items.is_empty():
 		var empty := Label.new()
 		empty.text = "Your chest is empty.\n\nNew love notes will appear here."
@@ -1214,7 +1323,8 @@ func _make_chest_item_row(item: Dictionary) -> PanelContainer:
 	style.content_margin_right = 16
 	style.content_margin_top = 14
 	style.content_margin_bottom = 14
-	match str(item.get("state", "")):
+	var st := str(item.get("state", ""))
+	match st:
 		"friend_request":
 			style.border_color = Color(0.55, 0.75, 1.0)
 			style.set_border_width_all(2)
@@ -1229,38 +1339,74 @@ func _make_chest_item_row(item: Dictionary) -> PanelContainer:
 	panel.add_theme_stylebox_override("panel", style)
 
 	var row := VBoxContainer.new()
-	row.add_theme_constant_override("separation", 6)
+	row.add_theme_constant_override("separation", 4)
 	panel.add_child(row)
+
 	var title := Label.new()
 	title.text = str(item.get("title", "Scroll"))
+	title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	title.add_theme_font_size_override("font_size", MobileUi.font(MobileUi.SIZE_SECTION))
 	title.add_theme_color_override("font_color", Color(0.98, 0.9, 0.75))
 	row.add_child(title)
-	var meta := Label.new()
-	var state_label := str(item.get("state", "")).replace("_", " ")
-	meta.text = "%s  ·  %s" % [str(item.get("sender_display_name", "")), state_label]
-	if bool(item.get("has_magic_password", false)):
-		meta.text += "  ·  Magic Password Required"
-	if str(item.get("state", "")) == "locked":
-		var remain := int(item.get("unlock_at_unix", 0)) - _now_unix()
-		meta.text += "  ·  unlocks in %dm" % maxi(int(ceil(remain / 60.0)), 0)
-	meta.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	meta.add_theme_font_size_override("font_size", MobileUi.font(MobileUi.SIZE_SECONDARY))
-	meta.add_theme_color_override("font_color", Color(0.82, 0.76, 0.88))
-	row.add_child(meta)
+
+	var sender_prof: Dictionary = item.get("sender", {}) if typeof(item.get("sender")) == TYPE_DICTIONARY else {}
+	var sender_name := IdentityHelper.display_name_from_profile(
+		sender_prof,
+		IdentityHelper.safe_label(str(item.get("sender_display_name", "")), IdentityHelper.UNKNOWN_SENDER)
+	)
+	var sender_lab := Label.new()
+	sender_lab.text = "From %s" % sender_name
+	sender_lab.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	MobileUi.apply_label(sender_lab, MobileUi.SIZE_SECONDARY, MobileUi.COLOR_SECONDARY, true)
+	row.add_child(sender_lab)
+
+	var status_text := "Locked"
+	match st:
+		"friend_request":
+			status_text = ProductStrings.CONNECTION_REQUEST
+		"unlocked_unread", "password_unlocked_unread":
+			status_text = "Ready to open"
+		"opened":
+			status_text = "Opened"
+		"locked":
+			status_text = "Locked"
+		_:
+			status_text = st.replace("_", " ").capitalize()
+	var status_lab := Label.new()
+	status_lab.text = "Status: %s" % status_text
+	MobileUi.apply_label(status_lab, MobileUi.SIZE_SECONDARY, Color(0.82, 0.76, 0.88), true)
+	row.add_child(status_lab)
+
+	if st == "locked":
+		var unlock_unix := int(item.get("unlock_at_unix", 0))
+		if unlock_unix > 0:
+			var time_lab := Label.new()
+			time_lab.text = _format_unlock_countdown(unlock_unix - _now_unix())
+			time_lab.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			MobileUi.apply_label(time_lab, MobileUi.SIZE_SECONDARY, MobileUi.COLOR_TITLE, true)
+			row.add_child(time_lab)
+		if bool(item.get("has_magic_password", false)):
+			var pw := Label.new()
+			pw.text = "Magic Password required"
+			MobileUi.apply_label(pw, MobileUi.SIZE_HELPER, MobileUi.COLOR_HELPER, true)
+			row.add_child(pw)
+
 	var actions := HBoxContainer.new()
 	actions.add_theme_constant_override("separation", 8)
 	row.add_child(actions)
 	var btn_h := MobileUi.font_touch(MobileUi.TOUCH_SECONDARY_H)
-	actions.add_child(_make_button("Open", func() -> void: _open_chest_item(item), Vector2(120, btn_h)))
+	var open_label := "View Locks" if st == "locked" else "Open"
+	actions.add_child(_make_button(open_label, func() -> void: _open_chest_item(item), Vector2(0, btn_h)))
 	if str(item.get("kind", "love_note")) != "friend_request":
-		var fav := bool(item.get("is_favorite", false))
-		actions.add_child(_make_button("★" if fav else "☆", func() -> void:
+		var fav := bool(item.get("is_favorite", false)) or bool(item.get("is_saved", false))
+		var save_btn := _make_button("★ Saved" if fav else "☆ Save", func() -> void:
 			_toggle_favorite(str(item.id), not fav)
-		, Vector2(64, btn_h)))
+		, Vector2(0, btn_h))
+		save_btn.tooltip_text = "Remove from Saved" if fav else "Save this scroll"
+		actions.add_child(save_btn)
 		actions.add_child(_make_button("Delete", func() -> void:
 			_confirm_delete_received(str(item.id))
-		, Vector2(110, btn_h)))
+		, Vector2(0, btn_h)))
 	return panel
 
 
@@ -1268,16 +1414,67 @@ func _show_saved() -> void:
 	if not _guard_private_chest():
 		return
 	_current_screen = "saved"
+	_inventory_filter = "saved"
 	_clear_screen()
-	var root := _make_screen_root(_nav_content_inset())
+	var margin := MarginContainer.new()
+	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	MobileUi.apply_safe_margins(margin, _nav_content_inset())
+	_screen_host.add_child(margin)
+	var root := VBoxContainer.new()
+	root.add_theme_constant_override("separation", 12)
+	margin.add_child(root)
 	var header := HBoxContainer.new()
+	header.add_theme_constant_override("separation", 8)
+	header.custom_minimum_size.y = MobileUi.font_touch(48)
 	root.add_child(header)
+	var back := Button.new()
+	back.text = "←"
+	back.tooltip_text = "Back"
+	back.focus_mode = Control.FOCUS_NONE
+	back.custom_minimum_size = Vector2(MobileUi.font_touch(48), MobileUi.font_touch(48))
+	MobileUi.style_button(back, 48)
+	back.pressed.connect(func() -> void:
+		_inventory_filter = "all"
+		_show_inventory()
+	)
+	header.add_child(back)
 	var title := Label.new()
-	title.text = "Saved Scrolls"
+	title.text = "YOUR CHEST"
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	MobileUi.apply_label(title, MobileUi.SIZE_SCREEN_TITLE, MobileUi.COLOR_TITLE, false)
+	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	MobileUi.apply_label(title, MobileUi.SIZE_SCREEN_TITLE, MobileUi.COLOR_TITLE)
+	if _title_font():
+		title.add_theme_font_override("font", _title_font())
 	header.add_child(title)
-	header.add_child(_make_button("Back", _show_inventory, Vector2(100, MobileUi.TOUCH_SECONDARY_H)))
+	var chip_h := MobileUi.font_touch(MobileUi.FILTER_CHIP_H)
+	var row1 := HBoxContainer.new()
+	row1.add_theme_constant_override("separation", 8)
+	root.add_child(row1)
+	var row2 := HBoxContainer.new()
+	row2.add_theme_constant_override("separation", 8)
+	root.add_child(row2)
+	for f in [
+		["all", "Current", row1],
+		["unread", "Unread", row1],
+		["locked", "Locked", row1],
+		["requests", "Requests", row2],
+		["saved", "Saved", row2],
+	]:
+		var fname: String = str(f[0])
+		var parent: HBoxContainer = f[2]
+		var chip := _make_button(str(f[1]), func() -> void:
+			if fname == "saved":
+				_inventory_filter = "saved"
+				_show_saved()
+			else:
+				_inventory_filter = fname
+				_show_inventory()
+		, Vector2(0, chip_h))
+		_style_inventory_filter_chip(chip, fname == "saved")
+		parent.add_child(chip)
+	var row2_pad := Control.new()
+	row2_pad.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row2.add_child(row2_pad)
 	var scroll := _wire_scroll(ScrollContainer.new())
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	root.add_child(scroll)
@@ -1286,11 +1483,20 @@ func _show_saved() -> void:
 	list.add_theme_constant_override("separation", MobileUi.GAP_CARDS)
 	scroll.add_child(list)
 	MobileUi.enable_touch_scroll_on_tree(list)
+	var loading := Label.new()
+	loading.text = "Loading…"
+	loading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	MobileUi.apply_label(loading, MobileUi.SIZE_BODY, MobileUi.COLOR_HELPER)
+	list.add_child(loading)
 	var items: Array[Dictionary] = []
 	if state.is_demo():
 		items = state.demo.get_saved_scrolls()
 	elif state.is_online():
 		items = await _load_online_saved_items()
+	if _current_screen != "saved":
+		return
+	for c in list.get_children():
+		c.queue_free()
 	if items.is_empty():
 		var empty := Label.new()
 		empty.text = "No saved scrolls yet. Open a note to keep it here."
@@ -1558,6 +1764,8 @@ func _show_lock_actions_panel(item: Dictionary, lines: PackedStringArray, eval: 
 				_hide_overlay()
 				_show_locked_details(item)
 			))
+	if bool(item.get("has_location_lock", false)):
+		_add_geofence_opt_in(box, item)
 	if bool(eval.get("ok", false)):
 		box.add_child(_make_button("Open Scroll", func() -> void:
 			_hide_overlay()
@@ -1587,7 +1795,7 @@ func _show_friend_request(item: Dictionary) -> void:
 	box.add_theme_constant_override("separation", MobileUi.GAP_RELATED)
 	_overlay.add_child(box)
 	var title := Label.new()
-	title.text = "Friend Request"
+	title.text = ProductStrings.CONNECTION_REQUEST
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.add_theme_font_size_override("font_size", MobileUi.font(MobileUi.SIZE_SCREEN_TITLE))
 	title.add_theme_color_override("font_color", Color(0.85, 0.9, 1.0))
@@ -1604,14 +1812,14 @@ func _show_friend_request(item: Dictionary) -> void:
 			state.demo.respond_friend_request(str(item.id), true)
 			_hide_overlay()
 			_play_friends_celebration()
-			_show_toast("Friend request accepted")
+			_show_toast(ProductStrings.CONNECTION_REQUEST_ACCEPTED)
 			_show_inventory()
 			return
 		var result: Dictionary = await state.friends.respond_to_friend_request(str(item.id), true)
 		_hide_overlay()
 		if bool(result.get("ok", false)):
 			_play_friends_celebration()
-			_show_toast("Friend request accepted")
+			_show_toast(ProductStrings.CONNECTION_REQUEST_ACCEPTED)
 			_show_inventory()
 		else:
 			_show_toast(str(result.get("error", "Could not accept request.")))
@@ -1815,40 +2023,36 @@ func _on_scroll_closed() -> void:
 			_show_main_chest()
 
 
+func _person_from_friends_cache() -> Dictionary:
+	var person: Dictionary = {}
+	if state.is_demo():
+		var demo_friends: Array = state.demo.get_friends()
+		if not demo_friends.is_empty() and typeof(demo_friends[0]) == TYPE_DICTIONARY:
+			return demo_friends[0]
+		return person
+	var data: Dictionary = state.cached_friends if typeof(state.cached_friends) == TYPE_DICTIONARY else {}
+	if typeof(data.get("person")) == TYPE_DICTIONARY:
+		return data.get("person")
+	if typeof(data.get("friends")) == TYPE_ARRAY and not (data.get("friends") as Array).is_empty():
+		var arr: Array = data.get("friends")
+		if typeof(arr[0]) == TYPE_DICTIONARY:
+			return arr[0]
+	return person
+
+
 func _show_compose() -> void:
 	if not _guard_private_chest():
 		return
+	var nav_t0 := Time.get_ticks_msec()
 	## Capture draft before screen teardown if we are leaving another compose instance.
 	_persist_compose_draft_if_needed()
 	_current_screen = "compose"
 	_compose_screen = null
 
-	var person: Dictionary = {}
-	var fetch_error := ""
+	## Paint with cached person first; refresh async if needed.
+	var person: Dictionary = _person_from_friends_cache()
 	if state.is_demo():
-		var demo_friends: Array = state.demo.get_friends()
-		if not demo_friends.is_empty() and typeof(demo_friends[0]) == TYPE_DICTIONARY:
-			person = demo_friends[0]
-	elif state.is_online():
-		var data: Dictionary = {}
-		if state.cache_is_fresh("friends") and typeof(state.cached_friends) == TYPE_DICTIONARY:
-			data = state.cached_friends
-		else:
-			var fr: Dictionary = await state.friends.get_my_person()
-			if bool(fr.get("ok", false)):
-				data = fr.get("data", {}) if typeof(fr.get("data")) == TYPE_DICTIONARY else {}
-				state.cached_friends = data
-				state.mark_cache_fresh("friends")
-			else:
-				fetch_error = str(fr.get("error", "Could not load My Person."))
-				if typeof(state.cached_friends) == TYPE_DICTIONARY:
-					data = state.cached_friends
-		if typeof(data.get("person")) == TYPE_DICTIONARY:
-			person = data.get("person")
-		elif typeof(data.get("friends")) == TYPE_ARRAY and not (data.get("friends") as Array).is_empty():
-			var arr: Array = data.get("friends")
-			if typeof(arr[0]) == TYPE_DICTIONARY:
-				person = arr[0]
+		state.mark_cache_fresh("friends")
 
 	var draft_to_restore: Dictionary = _compose_draft.duplicate(true)
 	_begin_nav_transition()
@@ -1878,8 +2082,22 @@ func _show_compose() -> void:
 	compose.setup_with_person(person, false, draft_to_restore, me_profile)
 	_add_bottom_nav("compose")
 	_finish_nav_transition()
-	if not fetch_error.is_empty():
-		_show_toast(fetch_error)
+	_log_nav_paint("compose", nav_t0)
+	if state.is_online() and not state.cache_is_fresh("friends"):
+		var fr: Dictionary = await state.friends.get_my_person()
+		if _current_screen != "compose" or _compose_screen == null or not is_instance_valid(_compose_screen):
+			return
+		if bool(fr.get("ok", false)):
+			var data: Dictionary = fr.get("data", {}) if typeof(fr.get("data")) == TYPE_DICTIONARY else {}
+			state.cached_friends = data
+			state.mark_cache_fresh("friends")
+			var fresh_person := _person_from_friends_cache()
+			if not fresh_person.is_empty() and fresh_person.hash() != person.hash():
+				_compose_screen.setup_with_person(fresh_person, false, _compose_screen.get_draft(), me_profile)
+		else:
+			var err := str(fr.get("error", "Could not load My Person."))
+			if not err.is_empty() and person.is_empty():
+				_show_toast(err)
 
 
 func _on_compose_preview(draft: Dictionary) -> void:
@@ -1887,9 +2105,9 @@ func _on_compose_preview(draft: Dictionary) -> void:
 	var title := str(draft.get("title", "")).strip_edges()
 	if title.is_empty():
 		title = "A Love Note"
-	var recipient := str(draft.get("recipient_display_name", "Friend"))
+	var recipient := str(draft.get("recipient_display_name", ProductStrings.PERSON))
 	if recipient.is_empty():
-		recipient = "Friend"
+		recipient = ProductStrings.PERSON
 	var immediate := bool(draft.get("open_immediately", true))
 	var when := "Opens immediately"
 	if not immediate:
@@ -1986,7 +2204,7 @@ func _on_compose_send_requested(draft: Dictionary) -> void:
 			if status == 401:
 				user_msg = "Your session expired. Please sign in again."
 			elif raw_err.to_lower().contains("not friends"):
-				user_msg = "You can only send scrolls to friends."
+				user_msg = "You can only send scrolls to your Person."
 			result = {"ok": false, "error": user_msg}
 	else:
 		_compose_screen.restore_after_failed_send("Backend is not configured.")
@@ -2015,11 +2233,11 @@ func _show_friends() -> void:
 	## My Person — strict one-to-one pairing (no multi-friend list).
 	if not _guard_private_chest():
 		return
+	var nav_t0 := Time.get_ticks_msec()
 	_current_screen = "friends"
 	var person: Dictionary = {}
 	var me: Dictionary = {}
 	var incoming: Array = []
-	var fetch_error := ""
 	if state.is_demo():
 		var demo_friends: Array = state.demo.get_friends()
 		if not demo_friends.is_empty() and typeof(demo_friends[0]) == TYPE_DICTIONARY:
@@ -2027,19 +2245,8 @@ func _show_friends() -> void:
 		me = state.demo.get_profile()
 		state.mark_cache_fresh("friends")
 	elif state.is_online():
-		var data: Dictionary = {}
-		if state.cache_is_fresh("friends") and typeof(state.cached_friends) == TYPE_DICTIONARY and not state.cached_friends.is_empty():
-			data = state.cached_friends
-		else:
-			var fr: Dictionary = await state.friends.get_my_person()
-			if bool(fr.get("ok", false)):
-				data = fr.get("data", {}) if typeof(fr.get("data")) == TYPE_DICTIONARY else {}
-				state.cached_friends = data
-				state.mark_cache_fresh("friends")
-			else:
-				fetch_error = str(fr.get("error", "Could not load My Person."))
-				if typeof(state.cached_friends) == TYPE_DICTIONARY:
-					data = state.cached_friends
+		## Cache-first paint — refresh after finish_nav_transition.
+		var data: Dictionary = state.cached_friends if typeof(state.cached_friends) == TYPE_DICTIONARY else {}
 		if typeof(data.get("person")) == TYPE_DICTIONARY:
 			person = data.get("person")
 		elif typeof(data.get("friends")) == TYPE_ARRAY and not (data.get("friends") as Array).is_empty():
@@ -2230,8 +2437,21 @@ func _show_friends() -> void:
 
 	_add_bottom_nav("friends")
 	_finish_nav_transition()
-	if not fetch_error.is_empty():
-		_show_toast(fetch_error)
+	_log_nav_paint("friends", nav_t0)
+	if state.is_online() and not state.cache_is_fresh("friends"):
+		var fr: Dictionary = await state.friends.get_my_person()
+		if _current_screen != "friends":
+			return
+		if bool(fr.get("ok", false)):
+			var data: Dictionary = fr.get("data", {}) if typeof(fr.get("data")) == TYPE_DICTIONARY else {}
+			state.cached_friends = data
+			state.mark_cache_fresh("friends")
+			## Rebuild once with fresh person data (still after first paint).
+			_show_friends()
+		elif person.is_empty():
+			var err := str(fr.get("error", "Could not load My Person."))
+			if not err.is_empty():
+				_show_toast(err)
 
 
 func _confirm_disconnect_person(person: Dictionary) -> void:
@@ -2508,30 +2728,20 @@ func _confirm_send_connection_from_scan(profile: Dictionary, token: String) -> v
 func _show_sent() -> void:
 	if not _guard_private_chest():
 		return
+	var nav_t0 := Time.get_ticks_msec()
 	# Leaving/rebuilding Sent clears any previously revealed passwords from memory.
 	_clear_reveal_timers()
 	state.clear_revealed_passwords()
 	_current_screen = "sent"
 	state.load_hidden_sent()
 	var sent_items: Array = []
-	var fetch_error := ""
 	if state.is_demo():
 		## Include locally-hidden demo scrolls so Hidden tab can restore them.
 		sent_items = _demo_sent_including_hidden()
 	elif state.is_online():
-		if state.cache_is_fresh("sent") and typeof(state.cached_sent.get("sent_scrolls")) == TYPE_ARRAY:
+		## Cache-first; network refresh after paint.
+		if typeof(state.cached_sent.get("sent_scrolls")) == TYPE_ARRAY:
 			sent_items = state.cached_sent.get("sent_scrolls", [])
-		else:
-			var sent_result: Dictionary = await state.scrolls.get_sent_scrolls()
-			if bool(sent_result.get("ok", false)):
-				var data: Dictionary = sent_result.get("data", {}) if typeof(sent_result.get("data")) == TYPE_DICTIONARY else {}
-				state.cached_sent = data
-				state.mark_cache_fresh("sent")
-				sent_items = data.get("sent_scrolls", []) if typeof(data.get("sent_scrolls")) == TYPE_ARRAY else []
-			else:
-				fetch_error = str(sent_result.get("error", "Could not load sent scrolls."))
-				if typeof(state.cached_sent.get("sent_scrolls")) == TYPE_ARRAY:
-					sent_items = state.cached_sent.get("sent_scrolls", [])
 
 	var visible_items: Array = []
 	var hidden_items: Array = []
@@ -2606,8 +2816,20 @@ func _show_sent() -> void:
 			list.add_child(_build_sent_item_card(s, _sent_show_hidden))
 	_add_bottom_nav("sent")
 	_finish_nav_transition()
-	if not fetch_error.is_empty():
-		_show_toast(fetch_error)
+	_log_nav_paint("sent", nav_t0)
+	if state.is_online() and not state.cache_is_fresh("sent"):
+		var sent_result: Dictionary = await state.scrolls.get_sent_scrolls()
+		if _current_screen != "sent":
+			return
+		if bool(sent_result.get("ok", false)):
+			var data: Dictionary = sent_result.get("data", {}) if typeof(sent_result.get("data")) == TYPE_DICTIONARY else {}
+			state.cached_sent = data
+			state.mark_cache_fresh("sent")
+			_show_sent()
+		elif sent_items.is_empty():
+			var err := str(sent_result.get("error", "Could not load sent scrolls."))
+			if not err.is_empty():
+				_show_toast(err)
 
 
 func _demo_sent_including_hidden() -> Array:
@@ -2630,7 +2852,7 @@ func _build_sent_item_card(s: Dictionary, is_hidden_view: bool) -> PanelContaine
 	title_lab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title_lab.text = "%s → %s" % [
 		str(s.get("title", "Love Note")),
-		str(s.get("recipient_display_name", recipient.get("display_name", "Friend"))),
+		str(s.get("recipient_display_name", recipient.get("display_name", ProductStrings.PERSON))),
 	]
 	MobileUi.apply_label(title_lab, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY, true)
 	col.add_child(title_lab)
@@ -2898,6 +3120,7 @@ func _settings_long_value_card(label_text: String, value_text: String, copyable:
 
 
 func _show_profile() -> void:
+	var nav_t0 := Time.get_ticks_msec()
 	_current_screen = "profile"
 	var me: Dictionary = {}
 	if state.is_demo():
@@ -2907,11 +3130,6 @@ func _show_profile() -> void:
 		if state.profiles.profile.is_empty():
 			state.profiles.hydrate_from_cache()
 		me = state.profiles.profile.duplicate(true)
-		var pref: Dictionary = await state.profiles.fetch_own_profile()
-		if bool(pref.get("ok", false)) and bool(pref.get("exists", false)):
-			me = state.profiles.profile
-		elif state.profiles.has_known_profile():
-			me = state.profiles.profile
 
 	_begin_nav_transition()
 	var root := _make_screen_root(_nav_content_inset())
@@ -2936,10 +3154,14 @@ func _show_profile() -> void:
 	MobileUi.apply_label(section, MobileUi.SIZE_SECTION, MobileUi.COLOR_TITLE)
 	col.add_child(section)
 	## Full username on its own wrapping line — no accidental ellipsis.
-	col.add_child(_settings_long_value_card("Display Name", str(me.get("display_name", "—")), false))
-	col.add_child(_settings_long_value_card("Username", "@" + str(me.get("username", "—")), false))
-	col.add_child(_settings_long_value_card("Email", str(state.tokens.user_email if state.tokens.user_email != "" else "—"), false))
-	col.add_child(_settings_long_value_card(ProductStrings.CONNECTION_CODE, str(me.get("friend_code", "—")), true))
+	var display_card := _settings_long_value_card("Display Name", str(me.get("display_name", "—")), false)
+	var user_card := _settings_long_value_card("Username", "@" + str(me.get("username", "—")), false)
+	var email_card := _settings_long_value_card("Email", str(state.tokens.user_email if state.tokens.user_email != "" else "—"), false)
+	var code_card := _settings_long_value_card(ProductStrings.CONNECTION_CODE, str(me.get("friend_code", me.get("public_connection_token", "—"))), true)
+	col.add_child(display_card)
+	col.add_child(user_card)
+	col.add_child(email_card)
+	col.add_child(code_card)
 	var _dev_tap := {"n": 0}
 	if OS.is_debug_build():
 		var tip := Label.new()
@@ -2994,11 +3216,22 @@ func _show_profile() -> void:
 		)
 		col.add_child(_settings_row("Keep Me Signed In", keep_toggle))
 
+	var perm_sec := Label.new()
+	perm_sec.text = ProductStrings.PERMISSIONS_SECTION
+	MobileUi.apply_label(perm_sec, MobileUi.SIZE_SECTION, MobileUi.COLOR_TITLE)
+	col.add_child(perm_sec)
+	col.add_child(_settings_row("Notifications", _settings_value_label(PermissionsHelper.status_label(PermissionsHelper.notification_allowed()))))
+	col.add_child(_settings_row("Location", _settings_value_label(PermissionsHelper.status_label(PermissionsHelper.location_allowed()))))
+	col.add_child(_settings_row("Camera", _settings_value_label(PermissionsHelper.status_label(PermissionsHelper.camera_allowed()))))
+	col.add_child(_make_button("Manage Permissions", func() -> void:
+		_show_permissions_manage_sheet()
+	, Vector2(0, MobileUi.TOUCH_SECONDARY_H)))
+
 	## Online Diagnostics is not shown in normal Profile UI (7 silent taps above).
 	col.add_child(_make_button("Sign Out", func() -> void:
 		_clear_reveal_timers()
 		_clear_compose_draft()
-		await state.sign_out_full()
+		await _sign_out_cleanup()
 		if state.is_demo():
 			state.demo.enable()
 		_show_welcome()
@@ -3009,6 +3242,18 @@ func _show_profile() -> void:
 	else:
 		col.add_child(_make_button("Back", _show_welcome))
 	_finish_nav_transition()
+	_log_nav_paint("profile", nav_t0)
+	if state.is_online() and state.tokens.has_session():
+		var pref: Dictionary = await state.profiles.fetch_own_profile()
+		if _current_screen != "profile":
+			return
+		if bool(pref.get("ok", false)) and bool(pref.get("exists", false)):
+			## Soft refresh — rebuild only when display fields changed.
+			var fresh: Dictionary = state.profiles.profile
+			if str(fresh.get("display_name", "")) != str(me.get("display_name", "")) \
+				or str(fresh.get("username", "")) != str(me.get("username", "")) \
+				or str(fresh.get("friend_code", fresh.get("public_connection_token", ""))) != str(me.get("friend_code", me.get("public_connection_token", ""))):
+				_show_profile()
 
 
 func _show_diagnostics() -> void:
@@ -3119,7 +3364,7 @@ func _show_diagnostics() -> void:
 			await _show_main_chest()
 		))
 	root.add_child(_make_button("Sign Out", func() -> void:
-		await state.sign_out_full()
+		await _sign_out_cleanup()
 		_show_welcome()
 	))
 	root.add_child(_make_button("Back", _show_profile if state.tokens.has_session() else _show_welcome))
@@ -3170,6 +3415,254 @@ func _hide_overlay() -> void:
 		c.queue_free()
 
 
+func _show_permissions_setup() -> void:
+	_current_screen = "permissions_setup"
+	_clear_screen()
+	var root := _make_screen_root()
+	var scroll := _wire_scroll(ScrollContainer.new())
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	root.add_child(scroll)
+	var col := VBoxContainer.new()
+	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	col.add_theme_constant_override("separation", 14)
+	scroll.add_child(col)
+	MobileUi.enable_touch_scroll_on_tree(col)
+	var title := Label.new()
+	title.text = "Permissions Setup"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	MobileUi.apply_label(title, MobileUi.SIZE_SCREEN_TITLE, MobileUi.COLOR_TITLE)
+	if _title_font():
+		title.add_theme_font_override("font", _title_font())
+	col.add_child(title)
+	var why := Label.new()
+	why.text = ProductStrings.PERMISSIONS_SETUP_WHY
+	why.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	why.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	MobileUi.apply_label(why, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY, true)
+	col.add_child(why)
+	for row in [
+		["Notifications", ProductStrings.NOTIFY_RATIONALE, func() -> void: PermissionsHelper.request_notifications()],
+		["Location", ProductStrings.LOCATION_RATIONALE, func() -> void: PermissionsHelper.request_location()],
+		["Camera", ProductStrings.CAMERA_RATIONALE, func() -> void: PermissionsHelper.request_camera()],
+	]:
+		var card := _make_card()
+		var box := VBoxContainer.new()
+		box.add_theme_constant_override("separation", 8)
+		card.add_child(box)
+		var h := Label.new()
+		h.text = str(row[0])
+		MobileUi.apply_label(h, MobileUi.SIZE_SECTION, MobileUi.COLOR_TITLE)
+		box.add_child(h)
+		var p := Label.new()
+		p.text = str(row[1])
+		p.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		MobileUi.apply_label(p, MobileUi.SIZE_SECONDARY, MobileUi.COLOR_SECONDARY, true)
+		box.add_child(p)
+		var allow := _make_button("Allow", row[2], Vector2(0, MobileUi.TOUCH_SECONDARY_H))
+		box.add_child(allow)
+		col.add_child(card)
+	col.add_child(_make_button("Continue", func() -> void:
+		## Always allowed even if some permissions were denied.
+		PermissionsHelper.request_notifications()
+		await get_tree().create_timer(0.15).timeout
+		PermissionsHelper.request_location()
+		await get_tree().create_timer(0.15).timeout
+		PermissionsHelper.request_camera()
+		await get_tree().create_timer(0.2).timeout
+		PermissionsHelper.mark_setup_completed()
+		await _show_main_chest()
+		_try_register_push_token()
+		await _consume_notification_deeplink()
+	, Vector2(0, MobileUi.TOUCH_CTA_H)))
+
+
+func _show_permissions_manage_sheet() -> void:
+	_overlay.visible = true
+	for c in _overlay.get_children():
+		c.queue_free()
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.72)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_overlay.add_child(dim)
+	var box := VBoxContainer.new()
+	var modal_w := 354.0
+	var modal_h := 420.0
+	box.set_anchors_preset(Control.PRESET_CENTER)
+	box.position = Vector2(-modal_w * 0.5, -modal_h * 0.5)
+	box.size = Vector2(modal_w, modal_h)
+	box.add_theme_constant_override("separation", MobileUi.GAP_RELATED)
+	_overlay.add_child(box)
+	var title := Label.new()
+	title.text = "Manage Permissions"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	MobileUi.apply_label(title, MobileUi.SIZE_SCREEN_TITLE, MobileUi.COLOR_TITLE)
+	box.add_child(title)
+	for row in [
+		["Notifications", PermissionsHelper.notification_allowed(), func() -> void: PermissionsHelper.request_notifications()],
+		["Location", PermissionsHelper.location_allowed(), func() -> void: PermissionsHelper.request_location()],
+		["Camera", PermissionsHelper.camera_allowed(), func() -> void: PermissionsHelper.request_camera()],
+	]:
+		var lab := Label.new()
+		lab.text = "%s — %s" % [str(row[0]), PermissionsHelper.status_label(bool(row[1]))]
+		lab.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		MobileUi.apply_label(lab, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY, true)
+		box.add_child(lab)
+		box.add_child(_make_button("Allow %s" % str(row[0]), row[2], Vector2(0, MobileUi.TOUCH_SECONDARY_H)))
+	box.add_child(_make_button("Open App Settings", func() -> void:
+		PermissionsHelper.open_app_settings()
+	, Vector2(0, MobileUi.TOUCH_PRIMARY_H)))
+	box.add_child(_make_button("Done", func() -> void:
+		_hide_overlay()
+		if _current_screen == "profile":
+			_show_profile()
+	))
+
+
+func _geofence_cfg() -> ConfigFile:
+	var c := ConfigFile.new()
+	c.load("user://coln_geofence_optin.cfg")
+	return c
+
+
+func _is_geofence_opted_in(scroll_id: String) -> bool:
+	if scroll_id.is_empty():
+		return false
+	return bool(_geofence_cfg().get_value("optin", scroll_id, false))
+
+
+func _set_geofence_opted_in(scroll_id: String, on: bool) -> void:
+	if scroll_id.is_empty():
+		return
+	var c := _geofence_cfg()
+	c.set_value("optin", scroll_id, on)
+	c.save("user://coln_geofence_optin.cfg")
+
+
+func _add_geofence_opt_in(box: VBoxContainer, item: Dictionary) -> void:
+	var sid := str(item.get("id", ""))
+	if sid.is_empty():
+		return
+	var lat := float(item.get("location_lat", NAN))
+	var lng := float(item.get("location_lng", NAN))
+	var radius := float(item.get("location_radius_m", LocationHelper.DEFAULT_RADIUS_M))
+	if not is_finite(lat) or not is_finite(lng):
+		return
+	var toggle := CheckButton.new()
+	toggle.text = "Notify me when I'm close enough"
+	toggle.button_pressed = _is_geofence_opted_in(sid)
+	toggle.focus_mode = Control.FOCUS_NONE
+	toggle.toggled.connect(func(on: bool) -> void:
+		if on:
+			_show_toast("Background location is used only to nudge you when you're near this unlock place.")
+			LocationHelper.request_background_location_permission()
+			await get_tree().create_timer(0.35).timeout
+			if LocationHelper.register_geofence(sid, lat, lng, radius):
+				_set_geofence_opted_in(sid, true)
+				_show_toast("You'll be notified when you're close enough.")
+			else:
+				toggle.set_pressed_no_signal(false)
+				_set_geofence_opted_in(sid, false)
+				_show_toast("Could not enable nearby unlock alerts. Check location permission.")
+		else:
+			LocationHelper.remove_geofence(sid)
+			_set_geofence_opted_in(sid, false)
+	)
+	box.add_child(toggle)
+
+
+func _try_register_push_token() -> void:
+	if not state.is_online() or state.friends == null:
+		return
+	if not state.friends.has_method("register_push_token"):
+		return
+	var token := NotificationHelper.push_token_placeholder()
+	if token.is_empty():
+		return
+	state.friends.register_push_token(token, "android")
+
+
+func _sign_out_cleanup() -> void:
+	LocationHelper.clear_all_geofences()
+	if state.is_online() and state.friends != null and state.friends.has_method("deactivate_push_token"):
+		var token := NotificationHelper.push_token_placeholder()
+		if not token.is_empty():
+			await state.friends.deactivate_push_token(token)
+	await state.sign_out_full()
+
+
+func _find_scroll_item_by_id(scroll_id: String) -> Dictionary:
+	if scroll_id.is_empty():
+		return {}
+	## Prefer chest cache.
+	if typeof(state.cached_chest) == TYPE_DICTIONARY:
+		var chest: Dictionary = state.cached_chest.get("chest", {}) if typeof(state.cached_chest.get("chest")) == TYPE_DICTIONARY else {}
+		var scrolls: Array = chest.get("scrolls", []) if typeof(chest.get("scrolls")) == TYPE_ARRAY else []
+		for s in scrolls:
+			if typeof(s) == TYPE_DICTIONARY and str(s.get("id", "")) == scroll_id:
+				return _normalize_online_scroll_item(s)
+	if state.is_demo():
+		for it in state.demo.get_chest_items("all"):
+			if str(it.get("id", "")) == scroll_id:
+				return it
+		for it in state.demo.get_saved_scrolls():
+			if str(it.get("id", "")) == scroll_id:
+				return it
+	return {}
+
+
+func _consume_notification_deeplink() -> void:
+	## Don't steal first-run Permissions Setup; leave pending for next resume/chest.
+	if _current_screen == "permissions_setup" or _current_screen == "profile_setup" or _current_screen == "welcome":
+		return
+	var link := NotificationHelper.consume_pending_deeplink().strip_edges().to_lower()
+	if link.is_empty():
+		return
+	if not _guard_private_chest():
+		return
+	## person / person:request → My Person
+	if link == "person" or link.begins_with("person:"):
+		_show_friends()
+		return
+	## chest / chest:<id>
+	if link == "chest":
+		_show_inventory()
+		return
+	if link.begins_with("chest:"):
+		var sid := link.get_slice(":", 1)
+		var item := _find_scroll_item_by_id(sid)
+		if item.is_empty() and state.is_online():
+			var loaded: Array = await _load_online_chest_items("all")
+			for it in loaded:
+				if str(it.get("id", "")) == sid:
+					item = it
+					break
+		if item.is_empty():
+			_show_inventory()
+			return
+		if str(item.get("state", "")) == "locked":
+			_show_locked_details(item)
+		else:
+			_open_chest_item(item)
+		return
+	## activity:<id> / focus:<id> → locked details
+	if link.begins_with("activity:") or link.begins_with("focus:"):
+		var sid2 := link.get_slice(":", 1)
+		var item2 := _find_scroll_item_by_id(sid2)
+		if item2.is_empty() and state.is_online():
+			var loaded2: Array = await _load_online_chest_items("all")
+			for it2 in loaded2:
+				if str(it2.get("id", "")) == sid2:
+					item2 = it2
+					break
+		if item2.is_empty():
+			_show_inventory()
+		else:
+			_show_locked_details(item2)
+		return
+	if link == "activity" or link == "focus":
+		_show_inventory()
+
+
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_GO_BACK_REQUEST:
 		if _image_preview != null and _image_preview.visible:
@@ -3191,7 +3684,7 @@ func _notification(what: int) -> void:
 				_clear_reveal_timers()
 				state.clear_revealed_passwords()
 				_show_main_chest()
-			"inventory", "saved", "friends", "profile":
+			"inventory", "saved", "friends", "profile", "permissions_setup":
 				_show_main_chest()
 			"diagnostics":
 				_show_profile()
@@ -3216,6 +3709,8 @@ func _on_app_resumed() -> void:
 	if _resume_inflight:
 		return
 	_resume_inflight = true
+	## Consume notification deep links from warm resume / new intent.
+	await _consume_notification_deeplink()
 	if state.is_online() and state.tokens.has_session():
 		var resumed: Dictionary = await state.revalidate_on_resume()
 		if not bool(resumed.get("ok", false)):
