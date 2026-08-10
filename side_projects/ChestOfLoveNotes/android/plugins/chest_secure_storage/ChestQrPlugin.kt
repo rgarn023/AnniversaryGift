@@ -48,13 +48,13 @@ class ChestQrPlugin(godot: Godot) : GodotPlugin(godot) {
 
 	@UsedByGodot
 	fun has_camera_permission(): Boolean {
-		val ctx = godot.activity ?: return false
+		val ctx = getActivity() ?: return false
 		return ctx.checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
 	}
 
 	@UsedByGodot
 	fun request_camera_permission(): Boolean {
-		val act = godot.activity ?: return false
+		val act = getActivity() ?: return false
 		if (has_camera_permission()) return true
 		act.requestPermissions(arrayOf(Manifest.permission.CAMERA), 0xC01B)
 		return false
@@ -63,7 +63,7 @@ class ChestQrPlugin(godot: Godot) : GodotPlugin(godot) {
 	@UsedByGodot
 	fun open_app_settings(): Boolean {
 		return try {
-			val act = godot.activity ?: return false
+			val act = getActivity() ?: return false
 			val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
 				data = Uri.fromParts("package", act.packageName, null)
 				addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -101,7 +101,7 @@ class ChestQrPlugin(godot: Godot) : GodotPlugin(godot) {
 	@UsedByGodot
 	fun start_qr_scan(): Boolean {
 		return try {
-			val act = godot.activity ?: return false
+			val act = getActivity() ?: return false
 			if (!has_camera_permission()) {
 				emitSignal("qr_scan_error", "camera_permission")
 				return false
