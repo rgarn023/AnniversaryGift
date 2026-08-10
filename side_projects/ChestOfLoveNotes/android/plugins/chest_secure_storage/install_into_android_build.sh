@@ -25,6 +25,7 @@ cp -f "$PLUGIN_DIR/ChestQrPlugin.kt" "$JAVA_DST/ChestQrPlugin.kt"
 cp -f "$PLUGIN_DIR/QrScanActivity.kt" "$JAVA_DST/QrScanActivity.kt"
 cp -f "$PLUGIN_DIR/ActivityLockService.kt" "$JAVA_DST/ActivityLockService.kt"
 cp -f "$PLUGIN_DIR/ScheduledNotifyReceiver.kt" "$JAVA_DST/ScheduledNotifyReceiver.kt"
+cp -f "$PLUGIN_DIR/GeofenceReceiver.kt" "$JAVA_DST/GeofenceReceiver.kt"
 cp -f "$PLUGIN_DIR/backup_rules.xml" "$RES_XML/coln_backup_rules.xml"
 cp -f "$PLUGIN_DIR/data_extraction_rules.xml" "$RES_XML/coln_data_extraction_rules.xml"
 
@@ -128,22 +129,43 @@ service_block = '''
             android:exported="false"
             android:screenOrientation="portrait"
             android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen" />
+        <!-- Chest of Love Notes: opt-in Location Lock geofence -->
+        <receiver
+            android:name="com.charoitegames.chestoflovenotes.securestorage.GeofenceReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="coln.geofence.TRANSITION" />
+            </intent-filter>
+        </receiver>
 '''
 if 'ActivityLockService' not in text:
     text = text.replace('</application>', service_block + '\n    </application>', 1)
-elif 'QrScanActivity' not in text:
-    qr_act = '''
+else:
+    if 'QrScanActivity' not in text:
+        qr_act = '''
         <activity
             android:name="com.charoitegames.chestoflovenotes.securestorage.QrScanActivity"
             android:exported="false"
             android:screenOrientation="portrait"
             android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen" />
 '''
-    text = text.replace('</application>', qr_act + '\n    </application>', 1)
+        text = text.replace('</application>', qr_act + '\n    </application>', 1)
+    if 'GeofenceReceiver' not in text:
+        geo_rx = '''
+        <receiver
+            android:name="com.charoitegames.chestoflovenotes.securestorage.GeofenceReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="coln.geofence.TRANSITION" />
+            </intent-filter>
+        </receiver>
+'''
+        text = text.replace('</application>', geo_rx + '\n    </application>', 1)
 
 for perm, extra in (
     ('android.permission.ACCESS_COARSE_LOCATION', ''),
     ('android.permission.ACCESS_FINE_LOCATION', ''),
+    ('android.permission.ACCESS_BACKGROUND_LOCATION', ''),
     ('android.permission.CAMERA', ''),
     ('android.permission.POST_NOTIFICATIONS', ''),
     ('android.permission.PACKAGE_USAGE_STATS', ' tools:ignore="ProtectedPermissions"'),
@@ -192,25 +214,34 @@ GRADLE
   echo "Patched android/build/build.gradle to strip *.import sidecars"
 fi
 
-# ZXing for QR encode/scan (My Person)
-if [[ -f "$BUILD_GRADLE" ]] && ! grep -q 'zxing:core' "$BUILD_GRADLE"; then
+# ZXing for QR encode/scan (My Person) + Play Services fused location / geofencing
+if [[ -f "$BUILD_GRADLE" ]]; then
   python3 - <<'PY' "$BUILD_GRADLE"
 import pathlib, re, sys
 path = pathlib.Path(sys.argv[1])
 text = path.read_text()
-dep_block = '''
+needed = []
+if 'zxing:core' not in text:
+    needed.append('''
     // Chest of Love Notes: QR encode + camera scan (My Person)
     implementation("com.google.zxing:core:3.5.3")
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
-'''
+''')
+if 'play-services-location' not in text:
+    needed.append('''
+    // Chest of Love Notes: Fused Location + Geofencing
+    implementation("com.google.android.gms:play-services-location:21.3.0")
+''')
+if not needed:
+    print('Location/ZXing dependencies already present')
+    raise SystemExit(0)
 m = re.search(r'dependencies\s*\{', text)
 if m:
-    # insert after first dependencies {
     idx = m.end()
-    text = text[:idx] + dep_block + text[idx:]
+    text = text[:idx] + ''.join(needed) + text[idx:]
     path.write_text(text)
-    print('Added ZXing dependencies to', path)
+    print('Added Android dependencies to', path)
 else:
-    print('WARNING: dependencies block not found; ZXing not added', file=sys.stderr)
+    print('WARNING: dependencies block not found', file=sys.stderr)
 PY
 fi

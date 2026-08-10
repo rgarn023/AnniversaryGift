@@ -1,8 +1,8 @@
 extends RefCounted
 class_name LocationHelper
 ## Battery-conscious device location for Location Lock.
-## Permission is requested only when Compose/Open explicitly needs a GPS fix.
-## Place search does NOT use this helper.
+## Uses Android Fused Location via ChestLocationPlugin when available.
+## Permission is requested only when Compose/Open/permissions-setup explicitly needs it.
 
 const PLUGIN_NAME := "ChestLocation"
 const DEFAULT_RADIUS_M := 500
@@ -13,9 +13,12 @@ const SMALL_RADIUS_WARN_M := 50
 const RADIUS_OPTIONS: Array[int] = [25, 100, 250, 500, 1000]
 const PERM_FINE := "android.permission.ACCESS_FINE_LOCATION"
 const PERM_COARSE := "android.permission.ACCESS_COARSE_LOCATION"
-const MAX_ACCEPTABLE_ACCURACY_M := 200.0
+const MAX_ACCEPTABLE_ACCURACY_M := 250.0
 ## Reject cached fixes older than this for "Use Current Location".
 const MAX_FIX_AGE_MS := 45000
+## ~20s fused acquisition window (matches native timeout).
+const FRESH_POLL_COUNT := 50
+const FRESH_POLL_INTERVAL_SEC := 0.4
 
 ## Desktop / headless mock (never used to falsely unlock online scrolls).
 const MOCK_LAT := 33.4484
@@ -59,6 +62,11 @@ static func _plugin():
 	return null
 
 
+static func _log(msg: String) -> void:
+	if OS.is_debug_build():
+		print("[COLN-LOC] %s" % msg)
+
+
 static func permission_status() -> String:
 	if OS.get_name() != "Android":
 		return "unsupported"
@@ -71,14 +79,35 @@ static func permission_status() -> String:
 	return "denied"
 
 
+static func location_services_enabled() -> bool:
+	if OS.get_name() != "Android":
+		return true
+	var p = _plugin()
+	if p != null and p.has_method("is_location_enabled"):
+		return bool(p.is_location_enabled())
+	return true
+
+
 static func request_permission_if_needed() -> String:
-	## Never call during app launch — only from Location Lock configure / open.
+	## Never call during app launch — only from Location Lock / permissions setup.
 	if OS.get_name() != "Android":
 		return "unsupported"
 	if permission_status() == "granted":
 		return "granted"
-	OS.request_permissions()
+	var p = _plugin()
+	if p != null and p.has_method("request_location_permission"):
+		p.request_location_permission()
+	else:
+		OS.request_permissions()
 	return permission_status()
+
+
+static func dump_diagnostics() -> void:
+	var p = _plugin()
+	if p != null and p.has_method("location_diagnostics"):
+		_log(str(p.location_diagnostics()))
+	else:
+		_log("plugin_missing perm=%s enabled=%s" % [permission_status(), location_services_enabled()])
 
 
 static func _parse_fix_raw(raw: String, require_accuracy: bool, max_age_ms: int = -1) -> Dictionary:
@@ -88,6 +117,7 @@ static func _parse_fix_raw(raw: String, require_accuracy: bool, max_age_ms: int 
 	if parts[0] == "ok" and parts.size() >= 4:
 		var accuracy := float(parts[3])
 		var age_ms := int(parts[4]) if parts.size() >= 5 and str(parts[4]).is_valid_int() else -1
+		var source := str(parts[5]) if parts.size() >= 6 else "device"
 		if max_age_ms >= 0 and age_ms >= 0 and age_ms > max_age_ms:
 			return {
 				"ok": false,
@@ -98,7 +128,7 @@ static func _parse_fix_raw(raw: String, require_accuracy: bool, max_age_ms: int 
 		if require_accuracy and accuracy > 0.0 and accuracy > MAX_ACCEPTABLE_ACCURACY_M:
 			return {
 				"ok": false,
-				"error": "Location accuracy is low. Try again.",
+				"error": "Your location accuracy is too low. Try again.",
 				"inaccurate": true,
 				"accuracy_m": accuracy,
 			}
@@ -109,14 +139,14 @@ static func _parse_fix_raw(raw: String, require_accuracy: bool, max_age_ms: int 
 			"accuracy_m": accuracy,
 			"age_ms": age_ms,
 			"mock": false,
-			"source": "device_gps",
+			"source": source,
 		}
 	var code := str(parts[2]) if parts.size() >= 3 else "unavailable"
 	var msg := str(parts[1]) if parts.size() >= 2 else "We couldn't determine your location. Try again."
 	if code == "disabled":
 		msg = "Turn on Location Services to use your current location."
 	elif code == "denied":
-		msg = "Location permission is needed to use your current location."
+		msg = "Allow Location permission to use your current location."
 	elif code == "timeout":
 		msg = "We couldn't determine your location. Try again."
 	elif code == "pending":
@@ -128,6 +158,7 @@ static func _parse_fix_raw(raw: String, require_accuracy: bool, max_age_ms: int 
 		"disabled": code == "disabled",
 		"pending": code == "pending",
 		"unavailable": code == "unavailable" or code == "timeout",
+		"timeout": code == "timeout",
 	}
 
 
@@ -145,8 +176,14 @@ static func get_current_fix(require_accuracy: bool = true) -> Dictionary:
 	if permission_status() != "granted":
 		return {
 			"ok": false,
-			"error": "Location permission is needed to use your current location.",
+			"error": "Allow Location permission to use your current location.",
 			"denied": true,
+		}
+	if not location_services_enabled():
+		return {
+			"ok": false,
+			"error": "Turn on Location Services to use your current location.",
+			"disabled": true,
 		}
 	var p = _plugin()
 	if p == null or not p.has_method("get_last_known_location"):
@@ -159,51 +196,64 @@ static func get_current_fix(require_accuracy: bool = true) -> Dictionary:
 
 
 static func get_fresh_fix(require_accuracy: bool = true) -> Dictionary:
-	## Obtain a fresh sender GPS fix. Does NOT silently reuse stale last-known.
+	## Obtain a fresh fused location fix. Does NOT silently reuse stale last-known.
 	if OS.get_name() != "Android":
 		return get_current_fix(require_accuracy)
+	dump_diagnostics()
 	if permission_status() != "granted":
+		_log("fresh denied")
 		return {
 			"ok": false,
-			"error": "Location permission is needed to use your current location.",
+			"error": "Allow Location permission to use your current location.",
 			"denied": true,
 		}
-	var p = _plugin()
-	if p == null:
+	if not location_services_enabled():
+		_log("fresh services off")
 		return {
 			"ok": false,
 			"error": "Turn on Location Services to use your current location.",
+			"disabled": true,
+		}
+	var p = _plugin()
+	if p == null:
+		_log("fresh plugin missing")
+		return {
+			"ok": false,
+			"error": "We couldn't determine your location. Try again.",
 			"unavailable": true,
 		}
 	if p.has_method("begin_fresh_location") and p.has_method("poll_fresh_location"):
 		if not bool(p.begin_fresh_location()):
-			## begin failed — often Location Services off.
-			var probe := get_current_fix(false)
-			if bool(probe.get("disabled", false)):
-				return probe
+			_log("begin_fresh_location returned false")
+			if not location_services_enabled():
+				return {
+					"ok": false,
+					"error": "Turn on Location Services to use your current location.",
+					"disabled": true,
+				}
 			return {
 				"ok": false,
-				"error": "Turn on Location Services to use your current location.",
-				"disabled": true,
+				"error": "We couldn't determine your location. Try again.",
+				"unavailable": true,
 			}
 		var tree := Engine.get_main_loop() as SceneTree
-		for _i in range(28):
+		for _i in range(FRESH_POLL_COUNT):
 			if tree != null:
-				await tree.create_timer(0.35).timeout
+				await tree.create_timer(FRESH_POLL_INTERVAL_SEC).timeout
 			var raw := str(p.poll_fresh_location())
 			if raw.begins_with("ok|"):
-				## Fresh listener result — age should be near-zero; still enforce accuracy.
-				return _parse_fix_raw(raw, require_accuracy, MAX_FIX_AGE_MS)
+				var parsed_ok := _parse_fix_raw(raw, require_accuracy, MAX_FIX_AGE_MS)
+				_log("fresh ok source=%s acc=%s" % [str(parsed_ok.get("source")), str(parsed_ok.get("accuracy_m"))])
+				return parsed_ok
 			if raw.contains("|pending"):
 				continue
-			## Non-pending error from poll (timeout / disabled / denied).
 			var parsed := _parse_fix_raw(raw, require_accuracy, MAX_FIX_AGE_MS)
 			if p.has_method("cancel_fresh_location"):
 				p.cancel_fresh_location()
+			_log("fresh poll error: %s" % str(parsed.get("error")))
 			return parsed
 		if p.has_method("cancel_fresh_location"):
 			p.cancel_fresh_location()
-		## Only accept last-known if it is recent enough; never hours-old cache.
 		var last := _parse_fix_raw(
 			str(p.get_last_known_location()) if p.has_method("get_last_known_location") else "",
 			require_accuracy,
@@ -211,11 +261,14 @@ static func get_fresh_fix(require_accuracy: bool = true) -> Dictionary:
 		)
 		if bool(last.get("ok", false)):
 			last["source"] = "recent_cached"
+			_log("fresh fallback recent_cached")
 			return last
+		_log("fresh timeout")
 		return {
 			"ok": false,
 			"error": "We couldn't determine your location. Try again.",
 			"unavailable": true,
+			"timeout": true,
 		}
 	if p.has_method("request_fresh_location"):
 		return _parse_fix_raw(str(p.request_fresh_location()), require_accuracy, MAX_FIX_AGE_MS)
@@ -224,6 +277,41 @@ static func get_fresh_fix(require_accuracy: bool = true) -> Dictionary:
 		"error": "We couldn't determine your location. Try again.",
 		"unavailable": true,
 	}
+
+
+static func register_geofence(scroll_id: String, lat: float, lng: float, radius_m: float) -> bool:
+	var p = _plugin()
+	if p == null or not p.has_method("register_scroll_geofence"):
+		return false
+	return bool(p.register_scroll_geofence(scroll_id, lat, lng, radius_m))
+
+
+static func remove_geofence(scroll_id: String) -> bool:
+	var p = _plugin()
+	if p == null or not p.has_method("remove_scroll_geofence"):
+		return false
+	return bool(p.remove_scroll_geofence(scroll_id))
+
+
+static func clear_all_geofences() -> bool:
+	var p = _plugin()
+	if p == null or not p.has_method("clear_all_geofences"):
+		return false
+	return bool(p.clear_all_geofences())
+
+
+static func has_background_location_permission() -> bool:
+	var p = _plugin()
+	if p != null and p.has_method("has_background_location_permission"):
+		return bool(p.has_background_location_permission())
+	return permission_status() == "granted"
+
+
+static func request_background_location_permission() -> bool:
+	var p = _plugin()
+	if p != null and p.has_method("request_background_location_permission"):
+		return bool(p.request_background_location_permission())
+	return false
 
 
 static func format_lock_summary(location_name: String, has_schedule: bool, schedule_label: String, radius_m: int = DEFAULT_RADIUS_M) -> String:
