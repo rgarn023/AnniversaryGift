@@ -81,11 +81,11 @@ func _run() -> void:
 	_assert(open_ts.contains("focus_locked"), "open-scroll focus")
 
 	## VERSION / APK
-	_assert(BuildFlags.APP_VERSION_CODE >= 23, "versionCode 23+")
-	_assert(preset.contains("version/code=23"), "export versionCode 23")
+	_assert(BuildFlags.APP_VERSION_CODE >= 24, "versionCode 24+")
+	_assert(preset.contains("version/code=24"), "export versionCode 24")
 	var gitignore := FileAccess.get_file_as_string("res://.gitignore")
-	_assert(gitignore.contains("ChestOfLoveNotes-map-currentlocation-schedule-selfsend-fixes-debug.apk"), "APK allowlisted in gitignore")
-	_assert(preset.contains("map-currentlocation-schedule-selfsend-fixes-debug.apk"), "export_path APK name")
+	_assert(gitignore.contains("ChestOfLoveNotes-my-person-qr-notifications-debug.apk"), "APK allowlisted in gitignore")
+	_assert(preset.contains("my-person-qr-notifications-debug.apk"), "export_path APK name")
 
 	## Runtime: schedule display/validation agreement
 	var bias := int(Time.get_time_zone_from_system().get("bias", 0))

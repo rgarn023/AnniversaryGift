@@ -2939,7 +2939,7 @@ func _show_profile() -> void:
 	col.add_child(_settings_long_value_card("Display Name", str(me.get("display_name", "—")), false))
 	col.add_child(_settings_long_value_card("Username", "@" + str(me.get("username", "—")), false))
 	col.add_child(_settings_long_value_card("Email", str(state.tokens.user_email if state.tokens.user_email != "" else "—"), false))
-	col.add_child(_settings_long_value_card("Friend Code", str(me.get("friend_code", "—")), true))
+	col.add_child(_settings_long_value_card(ProductStrings.CONNECTION_CODE, str(me.get("friend_code", "—")), true))
 	var _dev_tap := {"n": 0}
 	if OS.is_debug_build():
 		var tip := Label.new()

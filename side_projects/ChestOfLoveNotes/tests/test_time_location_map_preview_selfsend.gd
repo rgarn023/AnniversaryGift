@@ -75,8 +75,8 @@ func _run() -> void:
 	_assert(scrolls.contains("mark_activity_lock_progress"), "client sync activity")
 	_assert(scrolls.contains("mark_focus_lock_complete"), "client sync focus")
 
-	_assert(BuildFlags.APP_VERSION_CODE >= 23, "versionCode 23+")
-	_assert(preset.contains("version/code=23"), "export 23")
+	_assert(BuildFlags.APP_VERSION_CODE >= 24, "versionCode 24+")
+	_assert(preset.contains("version/code=24"), "export 24")
 	_assert(preset.contains("version/name=\"0.1.23-map-currentlocation-schedule-selfsend\""), "version name 23")
 
 	print("=== Results: %d passed, %d failed ===" % [_passed, _failed])
