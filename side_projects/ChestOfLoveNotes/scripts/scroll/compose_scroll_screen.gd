@@ -6,6 +6,7 @@ class_name ComposeScrollScreen
 signal back_pressed
 signal preview_requested(draft: Dictionary)
 signal send_requested(draft: Dictionary)
+signal go_to_my_person_requested
 
 const MAX_TITLE := 80
 const MAX_MESSAGE := 5000
@@ -25,11 +26,15 @@ const COL_DISABLED := Color(0.28, 0.22, 0.30, 0.85)
 const COL_ERROR := Color(1.0, 0.55, 0.48)
 
 var friends: Array = []
+## Active My Person (0 or 1). Production compose auto-selects this recipient.
+var my_person: Dictionary = {}
 ## Optional current-user profile for debug self-send (real account id).
 var self_profile: Dictionary = {}
 var private_onboarding_label: bool = false
 ## Host sets this so Compose never extends under bottom navigation.
 var bottom_chrome_inset: int = 0
+var _need_person_panel: PanelContainer
+var _go_person_btn: Button
 
 var _safe_margin: MarginContainer
 var _main_vbox: VBoxContainer
@@ -158,19 +163,34 @@ var _body_font: Font
 
 
 func setup(p_friends: Array, show_onboarding_chip: bool = false, draft: Dictionary = {}, p_self_profile: Dictionary = {}) -> void:
-	friends = p_friends
+	## Compat: treat first friend as My Person when present.
+	var person: Dictionary = {}
+	if not p_friends.is_empty() and typeof(p_friends[0]) == TYPE_DICTIONARY:
+		person = p_friends[0]
+	setup_with_person(person, show_onboarding_chip, draft, p_self_profile)
+
+
+func setup_with_person(person: Dictionary, show_onboarding_chip: bool = false, draft: Dictionary = {}, p_self_profile: Dictionary = {}) -> void:
+	my_person = person.duplicate(true) if not person.is_empty() else {}
+	friends = [my_person] if not my_person.is_empty() else []
 	self_profile = p_self_profile.duplicate(true) if not p_self_profile.is_empty() else {}
 	private_onboarding_label = show_onboarding_chip
 	_init_default_schedule()
 	_build_ui()
+	if not my_person.is_empty():
+		_selected_friend = my_person.duplicate(true)
 	if not draft.is_empty():
 		apply_draft(draft)
+		## Production: always force active Person as recipient (ignore stale draft recipient).
+		if not my_person.is_empty() and not bool(_selected_friend.get("is_self_test", false)):
+			_selected_friend = my_person.duplicate(true)
 	else:
 		_refresh_recipient_row()
 		_refresh_schedule_labels()
 		_sync_delivery_visibility()
 		_refresh_summary()
 		_update_validation()
+	_sync_person_gate()
 
 
 func _self_send_enabled() -> bool:
@@ -477,12 +497,20 @@ func _build_recipient_card() -> PanelContainer:
 	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	col.clip_contents = true
 	col.add_child(_section_heading("Send To"))
-	## Bound the recipient row so long "Name · @user" labels cannot widen the page.
+	## Bound the recipient row so long names cannot widen the page.
 	var row_wrap := Control.new()
 	row_wrap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row_wrap.clip_contents = true
 	row_wrap.custom_minimum_size = Vector2(0, MobileUi.font_touch(54))
 	col.add_child(row_wrap)
+	_recipient_label = Label.new()
+	_recipient_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_recipient_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_recipient_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_recipient_label.add_theme_font_size_override("font_size", 19)
+	_recipient_label.add_theme_color_override("font_color", COL_TEXT)
+	row_wrap.add_child(_recipient_label)
+	## Debug self-send still uses a button path; production shows fixed label.
 	_recipient_btn = Button.new()
 	_recipient_btn.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_recipient_btn.custom_minimum_size = Vector2(0, MobileUi.font_touch(54))
@@ -493,9 +521,26 @@ func _build_recipient_card() -> PanelContainer:
 	_recipient_btn.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	_style_row_button(_recipient_btn)
 	_recipient_btn.pressed.connect(_open_friend_picker)
+	_recipient_btn.visible = false
 	row_wrap.add_child(_recipient_btn)
-	_recipient_label = Label.new()
-	_recipient_label.visible = false
+	_need_person_panel = _make_card()
+	var need_col := _card_body(_need_person_panel)
+	var need_lab := Label.new()
+	need_lab.text = ProductStrings.COMPOSE_NEED_PERSON
+	need_lab.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	need_lab.add_theme_font_size_override("font_size", 17)
+	need_lab.add_theme_color_override("font_color", COL_WARN)
+	need_col.add_child(need_lab)
+	_go_person_btn = Button.new()
+	_go_person_btn.text = ProductStrings.GO_TO_MY_PERSON
+	_go_person_btn.focus_mode = Control.FOCUS_NONE
+	_style_primary_button(_go_person_btn)
+	_go_person_btn.pressed.connect(func() -> void:
+		go_to_my_person_requested.emit()
+	)
+	need_col.add_child(_go_person_btn)
+	_need_person_panel.visible = false
+	col.add_child(_need_person_panel)
 	return card
 
 
@@ -2038,21 +2083,45 @@ func _resize_message_box() -> void:
 	_message_edit.custom_minimum_size = Vector2(0, h)
 
 
+func _sync_person_gate() -> void:
+	var has_person := not my_person.is_empty() and not str(my_person.get("id", "")).is_empty()
+	var self_mode := bool(_selected_friend.get("is_self_test", false))
+	if _need_person_panel:
+		_need_person_panel.visible = (not has_person) and (not self_mode)
+	if _send_btn and not has_person and not self_mode:
+		_send_btn.disabled = true
+
+
 func _refresh_recipient_row() -> void:
-	if _recipient_btn == null:
+	if _recipient_label == null and _recipient_btn == null:
 		return
-	## Short label text — ellipsis handles overflow inside the bounded row.
+	## Production: fixed "Sending to X" — no multi-recipient picker.
+	var self_mode := bool(_selected_friend.get("is_self_test", false))
+	if not my_person.is_empty() and not self_mode:
+		_selected_friend = my_person.duplicate(true)
+	if _recipient_btn:
+		_recipient_btn.visible = _self_send_enabled()
 	if _selected_friend.is_empty():
-		_recipient_btn.text = "Choose a friend  ›"
-	elif bool(_selected_friend.get("is_self_test", false)):
-		_recipient_btn.text = "Self (Test)  ›"
+		if _recipient_label:
+			_recipient_label.visible = true
+			_recipient_label.text = ProductStrings.COMPOSE_NEED_PERSON
+		if _recipient_btn and _recipient_btn.visible:
+			_recipient_btn.text = "Send to Myself (Test)  ›"
+	elif self_mode:
+		if _recipient_label:
+			_recipient_label.visible = false
+		if _recipient_btn:
+			_recipient_btn.visible = true
+			_recipient_btn.text = "Self (Test)  ›"
 	else:
-		var name := str(_selected_friend.get("display_name", "Friend"))
-		var user := str(_selected_friend.get("username", ""))
-		if user.is_empty():
-			_recipient_btn.text = "%s  ›" % name
-		else:
-			_recipient_btn.text = "%s · @%s  ›" % [name, user]
+		var name := IdentityHelper.display_name_from_profile(_selected_friend, ProductStrings.PERSON)
+		if _recipient_label:
+			_recipient_label.visible = true
+			_recipient_label.text = ProductStrings.sending_to(name)
+		if _recipient_btn:
+			_recipient_btn.visible = _self_send_enabled()
+			_recipient_btn.text = "Change (Test)  ›"
+	_sync_person_gate()
 
 
 func _refresh_schedule_labels() -> void:
@@ -2207,11 +2276,12 @@ func validate_compose_draft() -> Dictionary:
 	## Single source of truth for Ready Check + Send button.
 	var blockers: PackedStringArray = PackedStringArray()
 	var warnings: PackedStringArray = PackedStringArray()
-	var has_self := _self_send_enabled()
-	if friends.is_empty() and not has_self:
-		blockers.append("Add a friend before composing a scroll.")
+	var has_self := _self_send_enabled() and bool(_selected_friend.get("is_self_test", false))
+	var has_person := not my_person.is_empty() and not str(my_person.get("id", "")).is_empty()
+	if not has_person and not has_self:
+		blockers.append(ProductStrings.COMPOSE_NEED_PERSON)
 	elif _selected_friend.is_empty() or str(_selected_friend.get("id", "")).is_empty():
-		blockers.append("Select a recipient")
+		blockers.append(ProductStrings.COMPOSE_NEED_PERSON)
 	if _message_edit == null or _message_edit.text.strip_edges().is_empty():
 		blockers.append("Enter a message")
 	if _open_immediately == null or not _open_immediately.button_pressed:
@@ -2362,7 +2432,7 @@ func _open_friend_picker() -> void:
 	col.add_theme_constant_override("separation", 12)
 	panel.add_child(col)
 	var title := Label.new()
-	title.text = "Choose a Friend"
+	title.text = "Debug Recipient"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.add_theme_font_size_override("font_size", 26)
 	title.add_theme_color_override("font_color", COL_GOLD)
@@ -2378,6 +2448,22 @@ func _open_friend_picker() -> void:
 	list_scroll.add_child(list)
 	MobileUi.enable_touch_scroll_on_tree(list)
 
+	## Production has no friend picker — only debug self-send + restore My Person.
+	if not my_person.is_empty():
+		var person_row := Button.new()
+		person_row.custom_minimum_size = Vector2(0, 60)
+		person_row.focus_mode = Control.FOCUS_NONE
+		person_row.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		person_row.text = ProductStrings.sending_to(IdentityHelper.display_name_from_profile(my_person))
+		_style_row_button(person_row)
+		person_row.pressed.connect(func() -> void:
+			_selected_friend = my_person.duplicate(true)
+			_refresh_recipient_row()
+			_refresh_summary()
+			_update_validation()
+			_hide_overlay()
+		)
+		list.add_child(person_row)
 	if _self_send_enabled():
 		var self_row := Button.new()
 		self_row.custom_minimum_size = Vector2(0, 60)
@@ -2399,14 +2485,14 @@ func _open_friend_picker() -> void:
 		hint.add_theme_font_size_override("font_size", 14)
 		hint.add_theme_color_override("font_color", COL_SUPPORT)
 		list.add_child(hint)
-	if friends.is_empty() and not _self_send_enabled():
+	if my_person.is_empty() and not _self_send_enabled():
 		var empty := Label.new()
-		empty.text = "No accepted friends yet."
+		empty.text = ProductStrings.COMPOSE_NEED_PERSON
 		empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		empty.add_theme_font_size_override("font_size", 19)
 		empty.add_theme_color_override("font_color", COL_SUPPORT)
 		list.add_child(empty)
-	else:
+	if false:
 		for f in friends:
 			if typeof(f) != TYPE_DICTIONARY:
 				continue

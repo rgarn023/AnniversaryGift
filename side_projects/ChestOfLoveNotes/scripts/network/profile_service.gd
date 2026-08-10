@@ -63,7 +63,7 @@ func fetch_own_profile() -> Dictionary:
 		hydrate_from_cache()
 	profile_state = ProfileState.LOADING
 
-	var q := "select=id,username,display_name,friend_code,avatar_url,bio,created_at&id=eq.%s" % tokens.user_id
+	var q := "select=id,username,display_name,friend_code,public_connection_token,avatar_url,bio,created_at&id=eq.%s" % tokens.user_id
 	var result: Dictionary = await api.rest_get("profiles", q)
 	if not bool(result.get("ok", false)):
 		last_error = str(result.get("error", "Could not load profile."))
@@ -165,6 +165,7 @@ func _public_cache_slice(p: Dictionary) -> Dictionary:
 		"username": str(p.get("username", "")),
 		"display_name": str(p.get("display_name", "")),
 		"friend_code": str(p.get("friend_code", "")),
+		"public_connection_token": str(p.get("public_connection_token", "")),
 		"avatar_url": str(p.get("avatar_url", "")),
 		"bio": str(p.get("bio", "")),
 	}

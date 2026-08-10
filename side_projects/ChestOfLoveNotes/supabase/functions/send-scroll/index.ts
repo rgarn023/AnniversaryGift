@@ -7,6 +7,7 @@ import {
   encryptMessage,
   hashPassword,
 } from "../_shared/crypto.ts";
+import { claimServerNotificationEvent, sendPushToUser } from "../_shared/push.ts";
 
 interface Body {
   recipient_id: string;
@@ -166,12 +167,22 @@ Deno.serve(async (req) => {
     }
 
     if (!isSelfSend) {
+      // Production sends must target the sender's active Person only.
+      const { data: personId } = await service.rpc("get_active_person_id", { p_user: me });
+      if (!personId || String(personId) !== String(body.recipient_id)) {
+        throw new AppError(
+          "not_person",
+          "You can only send scrolls to your Person",
+          403,
+        );
+      }
+
       const { data: friends } = await service.rpc("are_friends", {
         a: me,
         b: body.recipient_id,
       });
       if (!friends) {
-        throw new AppError("not_friends", "You can only send scrolls to friends", 403);
+        throw new AppError("not_friends", "You can only send scrolls to your Person", 403);
       }
 
       const { data: blocked } = await service.rpc("is_blocked", {
@@ -350,6 +361,30 @@ Deno.serve(async (req) => {
           sort_order: row.sort_order,
         });
       }
+    }
+
+    // Recipient push — display name only; never body / password / coordinates.
+    try {
+      const { data: senderProfile } = await service
+        .from("profiles")
+        .select("display_name")
+        .eq("id", me)
+        .maybeSingle();
+      const fromName = String(senderProfile?.display_name ?? "").trim();
+      const eventKey = `new_scroll:${scroll.id}`;
+      if (await claimServerNotificationEvent(String(body.recipient_id), String(scroll.id), eventKey)) {
+        const bodyText = fromName
+          ? `You received a new scroll from ${fromName}.`
+          : "You received a new scroll.";
+        await sendPushToUser(String(body.recipient_id), {
+          title: "New Scroll",
+          body: bodyText,
+          deepLink: `chest:${scroll.id}`,
+          channel: "scrolls",
+        });
+      }
+    } catch (pushErr) {
+      console.error("push_after_send_failed", pushErr);
     }
 
     // Never return ciphertext / password material.

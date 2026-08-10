@@ -121,18 +121,24 @@ func _build_ui() -> void:
 
 	_top_bar = HBoxContainer.new()
 	_top_bar.custom_minimum_size = Vector2(0, 52)
+	_top_bar.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_top_bar.clip_contents = true
 	_shell.add_child(_top_bar)
 	_title_label = Label.new()
-	_title_label.text = "Scroll Preview"
+	_title_label.text = "LOVE NOTE"
 	_title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_title_label.size_flags_stretch_ratio = 1.0
 	_title_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_title_label.add_theme_font_size_override("font_size", 20)
+	_title_label.clip_text = true
+	_title_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_title_label.add_theme_font_size_override("font_size", 18)
 	_title_label.add_theme_color_override("font_color", Color(0.96, 0.9, 0.98))
 	_top_bar.add_child(_title_label)
 	_btn_close = Button.new()
-	_btn_close.text = "✕ Close"
+	_btn_close.text = "Close"
 	_btn_close.focus_mode = Control.FOCUS_NONE
-	_btn_close.custom_minimum_size = Vector2(120, 48)
+	_btn_close.size_flags_horizontal = Control.SIZE_SHRINK_END
+	_btn_close.custom_minimum_size = Vector2(88, 48)
 	_style_chrome_button(_btn_close)
 	_btn_close.pressed.connect(close_viewer)
 	_top_bar.add_child(_btn_close)
@@ -289,14 +295,17 @@ func _compute_safe_insets() -> void:
 	var screen := DisplayServer.screen_get_size()
 	var scale_x := viewport_size.x / float(maxi(screen.x, 1))
 	var scale_y := viewport_size.y / float(maxi(screen.y, 1))
-	var left := maxi(12, int(safe.position.x * scale_x))
-	var top := maxi(12, int(safe.position.y * scale_y))
-	var right := maxi(12, int((screen.x - (safe.position.x + safe.size.x)) * scale_x))
-	var bottom := maxi(12, int((screen.y - (safe.position.y + safe.size.y)) * scale_y))
+	var left := maxi(16, int(safe.position.x * scale_x))
+	var top := maxi(16, int(safe.position.y * scale_y))
+	var right := maxi(16, int((screen.x - (safe.position.x + safe.size.x)) * scale_x))
+	var bottom := maxi(16, int((screen.y - (safe.position.y + safe.size.y)) * scale_y))
 	_safe.add_theme_constant_override("margin_left", left)
 	_safe.add_theme_constant_override("margin_right", right)
 	_safe.add_theme_constant_override("margin_top", top)
 	_safe.add_theme_constant_override("margin_bottom", bottom)
+	## Keep chrome within viewport — never let Close clip off-screen.
+	if _top_bar:
+		_top_bar.custom_minimum_size = Vector2(0, 52)
 
 
 func _fit_parchment() -> void:
@@ -549,6 +558,29 @@ func _set_message_text(plain: String) -> void:
 		_message.text = ""
 		return
 	_message.text = "[center]%s[/center]" % _escape_bbcode(plain)
+	## Short notes: add gentle top spacer so content isn't glued under the roller
+	## with a huge empty parchment below — long notes keep normal scroll.
+	call_deferred("_balance_short_note_layout")
+
+
+func _balance_short_note_layout() -> void:
+	if _content == null or _message_scroll == null:
+		return
+	var plain := _body_text.strip_edges()
+	var short := plain.length() > 0 and plain.length() < 220 and plain.count("\n") < 6
+	## Remove prior spacer if any.
+	if _content.get_child_count() > 0:
+		var first = _content.get_child(0)
+		if first is Control and str(first.name) == "ShortNoteSpacer":
+			first.queue_free()
+	if not short:
+		return
+	var spacer := Control.new()
+	spacer.name = "ShortNoteSpacer"
+	spacer.custom_minimum_size = Vector2(0, 36)
+	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_content.add_child(spacer)
+	_content.move_child(spacer, 0)
 
 
 func _apply_font_sizes() -> void:

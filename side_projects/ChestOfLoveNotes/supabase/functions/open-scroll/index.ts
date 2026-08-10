@@ -244,6 +244,13 @@ Deno.serve(async (req) => {
 
     const stateRow = Array.isArray(updatedState) ? updatedState[0] : updatedState;
 
+    // Resolve sender identity for UI (never force clients to show raw UUID).
+    const { data: senderProfile } = await service
+      .from("profiles")
+      .select("id, username, display_name, avatar_url")
+      .eq("id", scroll.sender_id)
+      .maybeSingle();
+
     // 11. Return message + safe metadata (never ciphertext / hash)
     return jsonResponse({
       scroll: {
@@ -262,6 +269,16 @@ Deno.serve(async (req) => {
         opened_count: Number(stateRow?.opened_count ?? 0),
         is_opened: true,
         opened_at: stateRow?.first_opened_at ?? null,
+        sender: senderProfile
+          ? {
+            id: senderProfile.id,
+            username: senderProfile.username ?? "",
+            display_name: senderProfile.display_name ?? "",
+            avatar_url: senderProfile.avatar_url ?? null,
+          }
+          : null,
+        sender_display_name: String(senderProfile?.display_name ?? ""),
+        sender_username: String(senderProfile?.username ?? ""),
       },
       message,
       ephemeral: Boolean(scroll.has_password),
@@ -270,3 +287,4 @@ Deno.serve(async (req) => {
     return errorResponse(err);
   }
 });
+

@@ -38,6 +38,8 @@ var _dev_force_chest_scroll: bool = false
 var _auth_spinner_tween: Tween
 var _sent_show_hidden: bool = false
 var _pending_hide_sent_id: String = ""
+var _qr_helper: QrHelper = QrHelper.new()
+var _req_notifier: RequirementNotifier = RequirementNotifier.new()
 
 
 func _ready() -> void:
@@ -917,7 +919,7 @@ func _add_bottom_nav(selected: String) -> void:
 	var tabs := [
 		["chest", "▣", "Chest", _show_main_chest],
 		["compose", "✎", "Compose", _show_compose],
-		["friends", "♡", "Friends", _show_friends],
+		["friends", "♡", ProductStrings.MY_PERSON, _show_friends],
 		["sent", "✉", "Sent", _show_sent],
 		["profile", "◎", "Profile", _show_profile],
 	]
@@ -1041,7 +1043,11 @@ func _normalize_online_scroll_item(raw: Dictionary) -> Dictionary:
 	item["activity_target_km"] = float(raw.get("activity_target_km", 0.0))
 	item["focus_lock_enabled"] = bool(raw.get("focus_lock_enabled", false))
 	item["focus_duration_hours"] = int(raw.get("focus_duration_hours", 0))
-	item["sender_display_name"] = str(sender.get("display_name", raw.get("sender_display_name", "Friend")))
+	item["sender_display_name"] = IdentityHelper.display_name_from_profile(
+		sender if typeof(sender) == TYPE_DICTIONARY else {},
+		IdentityHelper.safe_label(str(raw.get("sender_display_name", "")), IdentityHelper.UNKNOWN_SENDER)
+	)
+	item["sender_username"] = IdentityHelper.username_from_profile(sender if typeof(sender) == TYPE_DICTIONARY else {})
 	item["unlock_at_unix"] = unlock_unix
 	item["kind"] = str(raw.get("kind", "love_note"))
 	return item
@@ -1074,6 +1080,9 @@ func _load_online_chest_items(filter: String) -> Array[Dictionary]:
 	## Keep scheduled-ready alarms in sync (works while app later closed).
 	NotificationHelper.ensure_channels()
 	NotificationHelper.sync_scheduled_from_chest(scrolls)
+	## Central requirement-transition notifier (deduped local alerts).
+	if _req_notifier != null:
+		_req_notifier.evaluate_chest_items(scrolls)
 	for s in scrolls:
 		if typeof(s) != TYPE_DICTIONARY:
 			continue
@@ -1584,7 +1593,7 @@ func _show_friend_request(item: Dictionary) -> void:
 	title.add_theme_color_override("font_color", Color(0.85, 0.9, 1.0))
 	box.add_child(title)
 	var body := Label.new()
-	body.text = "%s would like to become your friend." % str(item.get("sender_display_name", "Someone"))
+	body.text = ProductStrings.wants_to_connect(str(item.get("sender_display_name", "Someone")))
 	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	body.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	body.add_theme_font_size_override("font_size", MobileUi.font(MobileUi.SIZE_BODY))
@@ -1729,7 +1738,15 @@ func _open_authorized_scroll(scroll_id: String, magic_password: String, needs_lo
 	state.open_message_plaintext = body
 	var ephemeral := bool(result.get("ephemeral", false))
 	var heading := str(meta.get("title", "A Love Note"))
-	var meta_line := "From %s" % str(meta.get("sender_display_name", meta.get("sender_id", "Friend")))
+	var sender_prof: Dictionary = {}
+	if typeof(meta.get("sender")) == TYPE_DICTIONARY:
+		sender_prof = meta.get("sender")
+	var meta_line := IdentityHelper.format_from(
+		sender_prof,
+		str(meta.get("sender_display_name", "")),
+		str(meta.get("sender_username", "")),
+		str(meta.get("sender_id", ""))
+	)
 	var open_atts: Array = []
 	if state.is_online():
 		var att_res: Dictionary = await state.scrolls.get_scroll_attachments(scroll_id)
@@ -1806,24 +1823,32 @@ func _show_compose() -> void:
 	_current_screen = "compose"
 	_compose_screen = null
 
-	var friends: Array = []
+	var person: Dictionary = {}
 	var fetch_error := ""
 	if state.is_demo():
-		friends = state.demo.get_friends()
+		var demo_friends: Array = state.demo.get_friends()
+		if not demo_friends.is_empty() and typeof(demo_friends[0]) == TYPE_DICTIONARY:
+			person = demo_friends[0]
 	elif state.is_online():
-		if state.cache_is_fresh("friends") and typeof(state.cached_friends.get("friends")) == TYPE_ARRAY:
-			friends = state.cached_friends.get("friends", [])
+		var data: Dictionary = {}
+		if state.cache_is_fresh("friends") and typeof(state.cached_friends) == TYPE_DICTIONARY:
+			data = state.cached_friends
 		else:
-			var fr: Dictionary = await state.friends.get_friends()
+			var fr: Dictionary = await state.friends.get_my_person()
 			if bool(fr.get("ok", false)):
-				var data: Dictionary = fr.get("data", {}) if typeof(fr.get("data")) == TYPE_DICTIONARY else {}
+				data = fr.get("data", {}) if typeof(fr.get("data")) == TYPE_DICTIONARY else {}
 				state.cached_friends = data
 				state.mark_cache_fresh("friends")
-				friends = data.get("friends", []) if typeof(data.get("friends")) == TYPE_ARRAY else []
 			else:
-				fetch_error = str(fr.get("error", "Could not load friends."))
-				if typeof(state.cached_friends.get("friends")) == TYPE_ARRAY:
-					friends = state.cached_friends.get("friends", [])
+				fetch_error = str(fr.get("error", "Could not load My Person."))
+				if typeof(state.cached_friends) == TYPE_DICTIONARY:
+					data = state.cached_friends
+		if typeof(data.get("person")) == TYPE_DICTIONARY:
+			person = data.get("person")
+		elif typeof(data.get("friends")) == TYPE_ARRAY and not (data.get("friends") as Array).is_empty():
+			var arr: Array = data.get("friends")
+			if typeof(arr[0]) == TYPE_DICTIONARY:
+				person = arr[0]
 
 	var draft_to_restore: Dictionary = _compose_draft.duplicate(true)
 	_begin_nav_transition()
@@ -1842,7 +1867,7 @@ func _show_compose() -> void:
 	compose.back_pressed.connect(_show_main_chest)
 	compose.preview_requested.connect(_on_compose_preview)
 	compose.send_requested.connect(_on_compose_send_requested)
-	## Never show "Private Onboarding Build" chip in test APKs.
+	compose.go_to_my_person_requested.connect(_show_friends)
 	var me_profile: Dictionary = {}
 	if state.is_demo():
 		me_profile = state.demo.get_profile()
@@ -1850,7 +1875,7 @@ func _show_compose() -> void:
 		me_profile = state.profiles.profile if typeof(state.profiles.profile) == TYPE_DICTIONARY else {}
 		if me_profile.is_empty() and state.tokens != null and not str(state.tokens.user_id).is_empty():
 			me_profile = {"id": state.tokens.user_id, "display_name": "Me", "username": ""}
-	compose.setup(friends, false, draft_to_restore, me_profile)
+	compose.setup_with_person(person, false, draft_to_restore, me_profile)
 	_add_bottom_nav("compose")
 	_finish_nav_transition()
 	if not fetch_error.is_empty():
@@ -1987,81 +2012,47 @@ func _play_friends_celebration() -> void:
 
 
 func _show_friends() -> void:
+	## My Person — strict one-to-one pairing (no multi-friend list).
 	if not _guard_private_chest():
 		return
 	_current_screen = "friends"
-	var friends: Array = []
+	var person: Dictionary = {}
 	var me: Dictionary = {}
+	var incoming: Array = []
 	var fetch_error := ""
 	if state.is_demo():
-		friends = state.demo.get_friends()
+		var demo_friends: Array = state.demo.get_friends()
+		if not demo_friends.is_empty() and typeof(demo_friends[0]) == TYPE_DICTIONARY:
+			person = demo_friends[0]
 		me = state.demo.get_profile()
 		state.mark_cache_fresh("friends")
 	elif state.is_online():
-		if state.cache_is_fresh("friends") and typeof(state.cached_friends.get("friends")) == TYPE_ARRAY:
-			friends = state.cached_friends.get("friends", [])
+		var data: Dictionary = {}
+		if state.cache_is_fresh("friends") and typeof(state.cached_friends) == TYPE_DICTIONARY and not state.cached_friends.is_empty():
+			data = state.cached_friends
 		else:
-			var fr: Dictionary = await state.friends.get_friends()
+			var fr: Dictionary = await state.friends.get_my_person()
 			if bool(fr.get("ok", false)):
-				var data: Dictionary = fr.get("data", {}) if typeof(fr.get("data")) == TYPE_DICTIONARY else {}
+				data = fr.get("data", {}) if typeof(fr.get("data")) == TYPE_DICTIONARY else {}
 				state.cached_friends = data
 				state.mark_cache_fresh("friends")
-				friends = data.get("friends", []) if typeof(data.get("friends")) == TYPE_ARRAY else []
 			else:
-				fetch_error = str(fr.get("error", "Could not load friends."))
-				if typeof(state.cached_friends.get("friends")) == TYPE_ARRAY:
-					friends = state.cached_friends.get("friends", [])
-		me = state.profiles.profile
+				fetch_error = str(fr.get("error", "Could not load My Person."))
+				if typeof(state.cached_friends) == TYPE_DICTIONARY:
+					data = state.cached_friends
+		if typeof(data.get("person")) == TYPE_DICTIONARY:
+			person = data.get("person")
+		elif typeof(data.get("friends")) == TYPE_ARRAY and not (data.get("friends") as Array).is_empty():
+			person = (data.get("friends") as Array)[0]
+		if typeof(data.get("me")) == TYPE_DICTIONARY:
+			me = data.get("me")
+		else:
+			me = state.profiles.profile if typeof(state.profiles.profile) == TYPE_DICTIONARY else {}
+		incoming = data.get("incoming_requests", []) if typeof(data.get("incoming_requests")) == TYPE_ARRAY else []
 
 	_begin_nav_transition()
 	var root := _make_screen_root(_nav_content_inset())
-	root.add_child(MobileUi.make_page_title("Friends", _title_font()))
-
-	var search := LineEdit.new()
-	search.placeholder_text = "Exact username or friend code"
-	search.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	MobileUi.style_line_edit(search)
-	root.add_child(search)
-	var add_btn := Button.new()
-	add_btn.text = "Add Friend"
-	add_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	MobileUi.style_button(add_btn, MobileUi.TOUCH_PRIMARY_H)
-	add_btn.disabled = true
-	root.add_child(add_btn)
-	var friend_status := Label.new()
-	friend_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	MobileUi.apply_label(friend_status, MobileUi.SIZE_HELPER, MobileUi.COLOR_HELPER)
-	root.add_child(friend_status)
-	var refresh_add := func(_t: String = "") -> void:
-		var q := search.text.strip_edges()
-		add_btn.disabled = q.is_empty() or _friend_action_busy
-	search.text_changed.connect(refresh_add)
-	add_btn.pressed.connect(func() -> void:
-		var q := search.text.strip_edges()
-		if q.is_empty() or _friend_action_busy:
-			return
-		_friend_action_busy = true
-		add_btn.disabled = true
-		friend_status.text = ""
-		var result: Dictionary = {}
-		if state.is_demo():
-			result = state.demo.send_friend_request(q)
-		elif state.is_online():
-			result = await state.friends.send_friend_request_query(q)
-		_friend_action_busy = false
-		refresh_add.call()
-		if bool(result.get("ok", false)):
-			search.text = ""
-			refresh_add.call()
-			_show_toast("Friend request sent.")
-			state.invalidate_cache("friends")
-			_show_friends()
-		else:
-			friend_status.add_theme_color_override("font_color", MobileUi.COLOR_DANGER)
-			friend_status.text = str(result.get("error", "Could not send friend request."))
-	)
-	var kb_pad_f := Control.new()
-	kb_pad_f.custom_minimum_size = Vector2(0, 0)
+	root.add_child(MobileUi.make_page_title(ProductStrings.MY_PERSON, _title_font()))
 
 	var scroll := _wire_scroll(ScrollContainer.new())
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -2071,33 +2062,447 @@ func _show_friends() -> void:
 	list.add_theme_constant_override("separation", MobileUi.GAP_CARDS)
 	scroll.add_child(list)
 	MobileUi.enable_touch_scroll_on_tree(list)
-	root.add_child(kb_pad_f)
-	MobileUi.wire_keyboard_avoidance(root, scroll, kb_pad_f)
 
-	var section := Label.new()
-	section.text = "Accepted friends"
-	MobileUi.apply_label(section, MobileUi.SIZE_SECTION, MobileUi.COLOR_SECONDARY, false)
-	list.add_child(section)
-	for f in friends:
-		if typeof(f) != TYPE_DICTIONARY:
+	## Incoming connection requests
+	for req in incoming:
+		if typeof(req) != TYPE_DICTIONARY:
 			continue
-		var card := _make_card()
-		card.custom_minimum_size.y = MobileUi.font_touch(MobileUi.ROW_H)
-		var row := Label.new()
-		row.text = "%s  ·  @%s  ·  %s" % [
-			str(f.get("display_name", "")),
-			str(f.get("username", "")),
-			str(f.get("friend_code", "")),
-		]
-		row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		MobileUi.apply_label(row, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY, true)
-		card.add_child(row)
-		list.add_child(card)
-	list.add_child(_settings_long_value_card("Your friend code", str(me.get("friend_code", "—")), true))
+		var sender: Dictionary = req.get("sender", {}) if typeof(req.get("sender")) == TYPE_DICTIONARY else {}
+		var sname := IdentityHelper.display_name_from_profile(sender, "Someone")
+		var card_r := _make_card()
+		var col_r := VBoxContainer.new()
+		col_r.add_theme_constant_override("separation", 8)
+		card_r.add_child(col_r)
+		var lab_r := Label.new()
+		lab_r.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		lab_r.text = ProductStrings.wants_to_connect(sname)
+		MobileUi.apply_label(lab_r, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY, true)
+		col_r.add_child(lab_r)
+		var row_r := HBoxContainer.new()
+		row_r.add_theme_constant_override("separation", 10)
+		col_r.add_child(row_r)
+		var accept := Button.new()
+		accept.text = "Accept"
+		accept.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		MobileUi.style_button(accept, MobileUi.TOUCH_PRIMARY_H)
+		var decline := Button.new()
+		decline.text = "Decline"
+		decline.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		MobileUi.style_button(decline, MobileUi.TOUCH_SECONDARY_H)
+		var req_id := str(req.get("id", ""))
+		accept.pressed.connect(func() -> void:
+			if _friend_action_busy:
+				return
+			_friend_action_busy = true
+			var result: Dictionary = await state.friends.respond_to_friend_request(req_id, true)
+			_friend_action_busy = false
+			if bool(result.get("ok", false)):
+				_show_toast("You're now connected with %s." % sname)
+				_play_friends_celebration()
+				state.invalidate_cache("friends")
+				_show_friends()
+			else:
+				_show_toast(str(result.get("error", "Could not accept.")))
+		)
+		decline.pressed.connect(func() -> void:
+			if _friend_action_busy:
+				return
+			_friend_action_busy = true
+			var result: Dictionary = await state.friends.respond_to_friend_request(req_id, false)
+			_friend_action_busy = false
+			state.invalidate_cache("friends")
+			_show_friends()
+			if not bool(result.get("ok", false)):
+				_show_toast(str(result.get("error", "Could not decline.")))
+		)
+		row_r.add_child(accept)
+		row_r.add_child(decline)
+		list.add_child(card_r)
+
+	if person.is_empty():
+		var headline := Label.new()
+		headline.text = ProductStrings.EMPTY_HEADLINE
+		headline.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		MobileUi.apply_label(headline, MobileUi.SIZE_SECTION, MobileUi.COLOR_TITLE, true)
+		list.add_child(headline)
+		var support := Label.new()
+		support.text = ProductStrings.EMPTY_SUPPORT
+		support.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		MobileUi.apply_label(support, MobileUi.SIZE_BODY, MobileUi.COLOR_HELPER, true)
+		list.add_child(support)
+
+		var scan_btn := Button.new()
+		scan_btn.text = ProductStrings.SCAN_PERSON_CODE
+		scan_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		MobileUi.style_button(scan_btn, MobileUi.TOUCH_CTA_H)
+		scan_btn.pressed.connect(_on_scan_person_code)
+		list.add_child(scan_btn)
+
+		var show_btn := Button.new()
+		show_btn.text = ProductStrings.SHOW_MY_CODE
+		show_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		MobileUi.style_button(show_btn, MobileUi.TOUCH_PRIMARY_H)
+		show_btn.pressed.connect(func() -> void:
+			_show_my_connection_code(me)
+		)
+		list.add_child(show_btn)
+
+		var enter_lab := Label.new()
+		enter_lab.text = ProductStrings.ENTER_CODE
+		MobileUi.apply_label(enter_lab, MobileUi.SIZE_HELPER, MobileUi.COLOR_HELPER, false)
+		list.add_child(enter_lab)
+		var search := LineEdit.new()
+		search.placeholder_text = "Username or Connection Code"
+		search.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		MobileUi.style_line_edit(search)
+		list.add_child(search)
+		var connect_btn := Button.new()
+		connect_btn.text = ProductStrings.CONNECT
+		connect_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		MobileUi.style_button(connect_btn, MobileUi.TOUCH_PRIMARY_H)
+		connect_btn.disabled = true
+		list.add_child(connect_btn)
+		var status := Label.new()
+		status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		MobileUi.apply_label(status, MobileUi.SIZE_HELPER, MobileUi.COLOR_HELPER, true)
+		list.add_child(status)
+		search.text_changed.connect(func(_t: String) -> void:
+			connect_btn.disabled = search.text.strip_edges().is_empty() or _friend_action_busy
+		)
+		connect_btn.pressed.connect(func() -> void:
+			var q := search.text.strip_edges()
+			if q.is_empty() or _friend_action_busy:
+				return
+			_friend_action_busy = true
+			connect_btn.disabled = true
+			status.text = ""
+			var result: Dictionary = {}
+			if state.is_demo():
+				result = state.demo.send_friend_request(q)
+			else:
+				result = await state.friends.send_friend_request_query(q)
+			_friend_action_busy = false
+			connect_btn.disabled = search.text.strip_edges().is_empty()
+			if bool(result.get("ok", false)):
+				search.text = ""
+				_show_toast("Connection request sent.")
+				state.invalidate_cache("friends")
+				_show_friends()
+			else:
+				status.add_theme_color_override("font_color", MobileUi.COLOR_DANGER)
+				status.text = str(result.get("error", "Could not send connection request."))
+		)
+	else:
+		var name_l := Label.new()
+		name_l.text = IdentityHelper.display_name_from_profile(person)
+		name_l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		MobileUi.apply_label(name_l, MobileUi.SIZE_SECTION, MobileUi.COLOR_TITLE, true)
+		list.add_child(name_l)
+		var user := IdentityHelper.username_from_profile(person)
+		if not user.is_empty():
+			var user_l := Label.new()
+			user_l.text = "@%s" % user
+			MobileUi.apply_label(user_l, MobileUi.SIZE_BODY, MobileUi.COLOR_SECONDARY, false)
+			list.add_child(user_l)
+		var since := str(person.get("connected_at", ""))
+		if not since.is_empty():
+			var dt := since.substr(0, 10)
+			var since_l := Label.new()
+			since_l.text = ProductStrings.connected_since(dt)
+			MobileUi.apply_label(since_l, MobileUi.SIZE_HELPER, MobileUi.COLOR_HELPER, false)
+			list.add_child(since_l)
+		var disc := Button.new()
+		disc.text = ProductStrings.DISCONNECT
+		disc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		MobileUi.style_button(disc, MobileUi.TOUCH_SECONDARY_H)
+		disc.pressed.connect(func() -> void:
+			_confirm_disconnect_person(person)
+		)
+		list.add_child(disc)
+		var show_mine := Button.new()
+		show_mine.text = ProductStrings.SHOW_MY_CODE
+		show_mine.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		MobileUi.style_button(show_mine, MobileUi.TOUCH_PRIMARY_H)
+		show_mine.pressed.connect(func() -> void:
+			_show_my_connection_code(me)
+		)
+		list.add_child(show_mine)
+
 	_add_bottom_nav("friends")
 	_finish_nav_transition()
 	if not fetch_error.is_empty():
 		_show_toast(fetch_error)
+
+
+func _confirm_disconnect_person(person: Dictionary) -> void:
+	var name := IdentityHelper.display_name_from_profile(person)
+	_clear_overlay()
+	if _overlay == null:
+		return
+	_overlay.visible = true
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.72)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_overlay.add_child(dim)
+	var host := MarginContainer.new()
+	host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	SafeAreaHelper.apply_to_margin(host, 24, 24, 24)
+	_overlay.add_child(host)
+	var panel := PanelContainer.new()
+	host.add_child(panel)
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 14)
+	panel.add_child(col)
+	var body := Label.new()
+	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	body.text = ProductStrings.disconnect_confirm(name)
+	MobileUi.apply_label(body, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY, true)
+	col.add_child(body)
+	var yes := Button.new()
+	yes.text = ProductStrings.DISCONNECT
+	MobileUi.style_button(yes, MobileUi.TOUCH_CTA_H)
+	yes.pressed.connect(func() -> void:
+		_hide_overlay()
+		if state.is_demo():
+			_show_toast("Demo: disconnect not persisted.")
+			return
+		var result: Dictionary = await state.friends.disconnect_person()
+		if bool(result.get("ok", false)):
+			state.invalidate_cache("friends")
+			_show_toast("Disconnected.")
+			_show_friends()
+		else:
+			_show_toast(str(result.get("error", "Could not disconnect.")))
+	)
+	col.add_child(yes)
+	var no := Button.new()
+	no.text = "Cancel"
+	MobileUi.style_button(no, MobileUi.TOUCH_SECONDARY_H)
+	no.pressed.connect(_hide_overlay)
+	col.add_child(no)
+
+
+func _show_my_connection_code(me: Dictionary) -> void:
+	## Show My Code — no camera permission.
+	var token := str(me.get("public_connection_token", "")).strip_edges()
+	if token.is_empty() and state.is_online():
+		var fr: Dictionary = await state.friends.get_my_person()
+		if bool(fr.get("ok", false)):
+			var data: Dictionary = fr.get("data", {}) if typeof(fr.get("data")) == TYPE_DICTIONARY else {}
+			if typeof(data.get("me")) == TYPE_DICTIONARY:
+				me = data.get("me")
+				token = str(me.get("public_connection_token", "")).strip_edges()
+	if token.is_empty():
+		_show_toast("Connection code unavailable.")
+		return
+	var link := QrHelper.deep_link_for_token(token)
+	_clear_overlay()
+	if _overlay == null:
+		return
+	_overlay.visible = true
+	var dim := ColorRect.new()
+	dim.color = Color(0.04, 0.02, 0.08, 0.96)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_overlay.add_child(dim)
+	var host := MarginContainer.new()
+	host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	SafeAreaHelper.apply_to_margin(host, 20, 20, 20)
+	_overlay.add_child(host)
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 12)
+	host.add_child(col)
+	var title := Label.new()
+	title.text = IdentityHelper.display_name_from_profile(me, "You")
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	MobileUi.apply_label(title, MobileUi.SIZE_SECTION, MobileUi.COLOR_TITLE, true)
+	col.add_child(title)
+	var user := IdentityHelper.username_from_profile(me)
+	if not user.is_empty():
+		var ul := Label.new()
+		ul.text = "@%s" % user
+		ul.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		MobileUi.apply_label(ul, MobileUi.SIZE_BODY, MobileUi.COLOR_SECONDARY, false)
+		col.add_child(ul)
+	var help := Label.new()
+	help.text = "Scan this code to send me a connection request."
+	help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	help.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	MobileUi.apply_label(help, MobileUi.SIZE_HELPER, MobileUi.COLOR_HELPER, true)
+	col.add_child(help)
+	var qr_tex := QrHelper.texture_from_base64_png(QrHelper.encode_png_base64(link, 512))
+	if qr_tex != null:
+		var tr := TextureRect.new()
+		tr.texture = qr_tex
+		tr.custom_minimum_size = Vector2(260, 260)
+		tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		tr.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		col.add_child(tr)
+	else:
+		var fallback := Label.new()
+		fallback.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		fallback.text = "QR preview needs the Android QR plugin.\nShare this Connection Code:"
+		fallback.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		MobileUi.apply_label(fallback, MobileUi.SIZE_HELPER, MobileUi.COLOR_HELPER, true)
+		col.add_child(fallback)
+	var code_l := Label.new()
+	code_l.text = token
+	code_l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	code_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	MobileUi.apply_label(code_l, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY, true)
+	col.add_child(code_l)
+	var regen := Button.new()
+	regen.text = ProductStrings.REGENERATE_CODE
+	MobileUi.style_button(regen, MobileUi.TOUCH_SECONDARY_H)
+	regen.pressed.connect(func() -> void:
+		if state.is_demo():
+			_show_toast("Demo: regenerate skipped.")
+			return
+		var conf := true
+		## Simple confirm via toast + immediate regenerate after second tap pattern avoided —
+		## regenerate with inline confirmation label.
+		regen.disabled = true
+		var rr: Dictionary = await state.friends.regenerate_connection_token()
+		regen.disabled = false
+		if bool(rr.get("ok", false)):
+			state.invalidate_cache("friends")
+			_hide_overlay()
+			_show_toast("Connection code regenerated.")
+			_show_friends()
+		else:
+			_show_toast(str(rr.get("error", "Could not regenerate code.")))
+	)
+	col.add_child(regen)
+	var close := Button.new()
+	close.text = "Close"
+	MobileUi.style_button(close, MobileUi.TOUCH_PRIMARY_H)
+	close.pressed.connect(_hide_overlay)
+	col.add_child(close)
+
+
+func _on_scan_person_code() -> void:
+	## Camera permission only here — never at launch.
+	if OS.get_name() != "Android" or not QrHelper.available():
+		_show_toast("QR scanning requires the Android build.")
+		return
+	if not QrHelper.has_camera_permission():
+		_show_toast(ProductStrings.CAMERA_RATIONALE)
+		QrHelper.request_camera_permission()
+		await get_tree().create_timer(0.8).timeout
+		var waits := 0
+		while not QrHelper.has_camera_permission() and waits < 20:
+			await get_tree().create_timer(0.25).timeout
+			waits += 1
+		if not QrHelper.has_camera_permission():
+			_show_toast(ProductStrings.CAMERA_NEEDED)
+			## Offer settings after repeated denial.
+			if waits >= 8:
+				QrHelper.open_app_settings()
+			return
+	_qr_helper.ensure_signals()
+	if not _qr_helper.qr_scanned.is_connected(_on_qr_scanned_payload):
+		_qr_helper.qr_scanned.connect(_on_qr_scanned_payload)
+	if not _qr_helper.qr_scan_cancelled.is_connected(_on_qr_scan_cancelled):
+		_qr_helper.qr_scan_cancelled.connect(_on_qr_scan_cancelled)
+	if not _qr_helper.qr_scan_error.is_connected(_on_qr_scan_error):
+		_qr_helper.qr_scan_error.connect(_on_qr_scan_error)
+	if not _qr_helper.start_scan():
+		_show_toast(ProductStrings.CAMERA_NEEDED)
+
+
+func _on_qr_scan_cancelled() -> void:
+	pass
+
+
+func _on_qr_scan_error(code: String) -> void:
+	if code == "camera_permission":
+		_show_toast(ProductStrings.CAMERA_NEEDED)
+	else:
+		_show_toast(ProductStrings.INVALID_QR)
+
+
+func _on_qr_scanned_payload(raw: String) -> void:
+	if not QrHelper.is_coln_connect_payload(raw):
+		_show_toast(ProductStrings.INVALID_QR)
+		return
+	var token := QrHelper.extract_token(raw)
+	if token.is_empty():
+		_show_toast(ProductStrings.INVALID_QR)
+		return
+	if state.is_demo():
+		_show_toast("Demo: QR connect preview only.")
+		return
+	## Already connected?
+	var cached_person: Dictionary = {}
+	if typeof(state.cached_friends.get("person")) == TYPE_DICTIONARY:
+		cached_person = state.cached_friends.get("person")
+	if not cached_person.is_empty():
+		_show_toast(ProductStrings.ALREADY_CONNECTED_FMT % IdentityHelper.display_name_from_profile(cached_person))
+		_show_toast(ProductStrings.DISCONNECT_FIRST)
+		return
+	var resolved: Dictionary = await state.friends.resolve_connection_token(token)
+	if not bool(resolved.get("ok", false)):
+		var err := str(resolved.get("error", ProductStrings.INVALID_QR))
+		if err.to_lower().contains("own"):
+			_show_toast(ProductStrings.OWN_CODE)
+		else:
+			_show_toast(err)
+		return
+	var data: Dictionary = resolved.get("data", {}) if typeof(resolved.get("data")) == TYPE_DICTIONARY else {}
+	var profile: Dictionary = data.get("profile", {}) if typeof(data.get("profile")) == TYPE_DICTIONARY else {}
+	_confirm_send_connection_from_scan(profile, token)
+
+
+func _confirm_send_connection_from_scan(profile: Dictionary, token: String) -> void:
+	var name := IdentityHelper.display_name_from_profile(profile)
+	var user := IdentityHelper.username_from_profile(profile)
+	_clear_overlay()
+	if _overlay == null:
+		return
+	_overlay.visible = true
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.75)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_overlay.add_child(dim)
+	var host := MarginContainer.new()
+	host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	SafeAreaHelper.apply_to_margin(host, 24, 24, 24)
+	_overlay.add_child(host)
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 12)
+	host.add_child(col)
+	var ask := Label.new()
+	ask.text = ProductStrings.connect_with_confirm(name)
+	ask.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	ask.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	MobileUi.apply_label(ask, MobileUi.SIZE_SECTION, MobileUi.COLOR_TITLE, true)
+	col.add_child(ask)
+	var detail := Label.new()
+	detail.text = name if user.is_empty() else "%s\n@%s" % [name, user]
+	detail.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	MobileUi.apply_label(detail, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY, true)
+	col.add_child(detail)
+	var send_btn := Button.new()
+	send_btn.text = "Send Connection Request"
+	MobileUi.style_button(send_btn, MobileUi.TOUCH_CTA_H)
+	send_btn.pressed.connect(func() -> void:
+		_hide_overlay()
+		var result: Dictionary = await state.friends.send_connection_request({"connection_token": token})
+		if bool(result.get("ok", false)):
+			_show_toast("Connection request sent.")
+			state.invalidate_cache("friends")
+			_show_friends()
+		else:
+			_show_toast(str(result.get("error", "Could not send connection request.")))
+	)
+	col.add_child(send_btn)
+	var cancel := Button.new()
+	cancel.text = "Cancel"
+	MobileUi.style_button(cancel, MobileUi.TOUCH_SECONDARY_H)
+	cancel.pressed.connect(_hide_overlay)
+	col.add_child(cancel)
+
 
 
 func _show_sent() -> void:
@@ -2753,7 +3158,13 @@ func _show_modal_panel(title_text: String, lines: Array, button_text: String, cb
 	box.add_child(_make_button(button_text, cb))
 
 
+func _clear_overlay() -> void:
+	_hide_overlay()
+
+
 func _hide_overlay() -> void:
+	if _overlay == null:
+		return
 	_overlay.visible = false
 	for c in _overlay.get_children():
 		c.queue_free()

@@ -21,6 +21,8 @@ cp -f "$PLUGIN_DIR/ChestLocationPlugin.kt" "$JAVA_DST/ChestLocationPlugin.kt"
 cp -f "$PLUGIN_DIR/ChestMediaPlugin.kt" "$JAVA_DST/ChestMediaPlugin.kt"
 cp -f "$PLUGIN_DIR/ChestFocusPlugin.kt" "$JAVA_DST/ChestFocusPlugin.kt"
 cp -f "$PLUGIN_DIR/ChestNotifyPlugin.kt" "$JAVA_DST/ChestNotifyPlugin.kt"
+cp -f "$PLUGIN_DIR/ChestQrPlugin.kt" "$JAVA_DST/ChestQrPlugin.kt"
+cp -f "$PLUGIN_DIR/QrScanActivity.kt" "$JAVA_DST/QrScanActivity.kt"
 cp -f "$PLUGIN_DIR/ActivityLockService.kt" "$JAVA_DST/ActivityLockService.kt"
 cp -f "$PLUGIN_DIR/ScheduledNotifyReceiver.kt" "$JAVA_DST/ScheduledNotifyReceiver.kt"
 cp -f "$PLUGIN_DIR/backup_rules.xml" "$RES_XML/coln_backup_rules.xml"
@@ -82,6 +84,7 @@ plugins = [
     ('ChestMedia', 'ChestMediaPlugin', 'Android Photo Picker helper'),
     ('ChestFocus', 'ChestFocusPlugin', 'Focus Lock Usage Access helper'),
     ('ChestNotify', 'ChestNotifyPlugin', 'local + scheduled notification helper'),
+    ('ChestQr', 'ChestQrPlugin', 'QR encode + camera scan for My Person pairing'),
 ]
 
 for name, cls, comment in plugins:
@@ -119,13 +122,29 @@ service_block = '''
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
+        <!-- Chest of Love Notes: My Person QR scanner -->
+        <activity
+            android:name="com.charoitegames.chestoflovenotes.securestorage.QrScanActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen" />
 '''
 if 'ActivityLockService' not in text:
     text = text.replace('</application>', service_block + '\n    </application>', 1)
+elif 'QrScanActivity' not in text:
+    qr_act = '''
+        <activity
+            android:name="com.charoitegames.chestoflovenotes.securestorage.QrScanActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen" />
+'''
+    text = text.replace('</application>', qr_act + '\n    </application>', 1)
 
 for perm, extra in (
     ('android.permission.ACCESS_COARSE_LOCATION', ''),
     ('android.permission.ACCESS_FINE_LOCATION', ''),
+    ('android.permission.CAMERA', ''),
     ('android.permission.POST_NOTIFICATIONS', ''),
     ('android.permission.PACKAGE_USAGE_STATS', ' tools:ignore="ProtectedPermissions"'),
     ('android.permission.FOREGROUND_SERVICE', ''),
@@ -171,4 +190,27 @@ tasks.matching { it.name.startsWith("merge") && it.name.contains("Resources") }.
 preBuild.dependsOn("colnStripImportSidecars")
 GRADLE
   echo "Patched android/build/build.gradle to strip *.import sidecars"
+fi
+
+# ZXing for QR encode/scan (My Person)
+if [[ -f "$BUILD_GRADLE" ]] && ! grep -q 'zxing:core' "$BUILD_GRADLE"; then
+  python3 - <<'PY' "$BUILD_GRADLE"
+import pathlib, re, sys
+path = pathlib.Path(sys.argv[1])
+text = path.read_text()
+dep_block = '''
+    // Chest of Love Notes: QR encode + camera scan (My Person)
+    implementation("com.google.zxing:core:3.5.3")
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+'''
+m = re.search(r'dependencies\s*\{', text)
+if m:
+    # insert after first dependencies {
+    idx = m.end()
+    text = text[:idx] + dep_block + text[idx:]
+    path.write_text(text)
+    print('Added ZXing dependencies to', path)
+else:
+    print('WARNING: dependencies block not found; ZXing not added', file=sys.stderr)
+PY
 fi

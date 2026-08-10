@@ -37,6 +37,7 @@ build/*.idsig
 !build/ChestOfLoveNotes-map-preview-selfsend-background-fixes-debug.apk
 !build/ChestOfLoveNotes-time-location-map-preview-selfsend-fixes-debug.apk
 !build/ChestOfLoveNotes-map-currentlocation-schedule-selfsend-fixes-debug.apk
+!build/ChestOfLoveNotes-my-person-qr-notifications-debug.apk
 
 # Android Gradle template
 android/build/
