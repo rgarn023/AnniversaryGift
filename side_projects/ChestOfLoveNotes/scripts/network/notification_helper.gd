@@ -41,6 +41,9 @@ static func request_permission_contextual(force: bool = false) -> void:
 	if not force and bool(ProjectSettings.get_setting(PREF_ASKED, false)):
 		return
 	ProjectSettings.set_setting(PREF_ASKED, true)
+	## Godot native dialog path (declared in export_presets post_notifications).
+	if OS.has_method("request_permission"):
+		OS.request_permission("android.permission.POST_NOTIFICATIONS")
 	var p = _plugin()
 	if p != null and p.has_method("request_notification_permission"):
 		p.request_notification_permission()

@@ -40,6 +40,10 @@ var _sent_show_hidden: bool = false
 var _pending_hide_sent_id: String = ""
 var _qr_helper: QrHelper = QrHelper.new()
 var _req_notifier: RequirementNotifier = RequirementNotifier.new()
+## Permissions Setup / Manage Permissions live UI handles (query Android; never fake state).
+var _perm_setup_status: Dictionary = {} ## kind -> Label
+var _perm_setup_actions: Dictionary = {} ## kind -> Button
+var _perm_manage_live: bool = false
 
 
 func _ready() -> void:
@@ -3220,9 +3224,10 @@ func _show_profile() -> void:
 	perm_sec.text = ProductStrings.PERMISSIONS_SECTION
 	MobileUi.apply_label(perm_sec, MobileUi.SIZE_SECTION, MobileUi.COLOR_TITLE)
 	col.add_child(perm_sec)
-	col.add_child(_settings_row("Notifications", _settings_value_label(PermissionsHelper.status_label(PermissionsHelper.notification_allowed()))))
-	col.add_child(_settings_row("Location", _settings_value_label(PermissionsHelper.status_label(PermissionsHelper.location_allowed()))))
-	col.add_child(_settings_row("Camera", _settings_value_label(PermissionsHelper.status_label(PermissionsHelper.camera_allowed()))))
+	## Full-width status rows — never clip "Not Allowed".
+	col.add_child(_permission_status_row("Notifications", PermissionsHelper.notification_allowed()))
+	col.add_child(_permission_status_row("Location", PermissionsHelper.location_allowed()))
+	col.add_child(_permission_status_row("Camera", PermissionsHelper.camera_allowed()))
 	col.add_child(_make_button("Manage Permissions", func() -> void:
 		_show_permissions_manage_sheet()
 	, Vector2(0, MobileUi.TOUCH_SECONDARY_H)))
@@ -3410,13 +3415,131 @@ func _clear_overlay() -> void:
 func _hide_overlay() -> void:
 	if _overlay == null:
 		return
+	_perm_manage_live = false
 	_overlay.visible = false
 	for c in _overlay.get_children():
 		c.queue_free()
 
 
+func _permission_status_row(label_text: String, allowed: bool) -> PanelContainer:
+	## Compact readable row: "Notifications          Not Allowed" — no clipping.
+	var card := _make_card()
+	var row := HBoxContainer.new()
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.custom_minimum_size.y = MobileUi.font_touch(48)
+	row.add_theme_constant_override("separation", 12)
+	card.add_child(row)
+	var lab := Label.new()
+	lab.text = label_text
+	lab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	lab.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	MobileUi.apply_label(lab, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY, true)
+	row.add_child(lab)
+	var status := Label.new()
+	status.text = PermissionsHelper.status_label(allowed)
+	status.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	status.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	status.size_flags_horizontal = Control.SIZE_SHRINK_END
+	status.custom_minimum_size.x = 120
+	status.autowrap_mode = TextServer.AUTOWRAP_OFF
+	status.clip_text = false
+	status.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
+	MobileUi.apply_label(status, MobileUi.SIZE_BODY, MobileUi.COLOR_TITLE if allowed else MobileUi.COLOR_SECONDARY, false)
+	row.add_child(status)
+	return card
+
+
+func _finish_permissions_setup() -> void:
+	## Only records that the explanation was shown — never fakes permission state.
+	PermissionsHelper.mark_setup_completed()
+	await _show_main_chest()
+	_try_register_push_token()
+	await _consume_notification_deeplink()
+
+
+func _refresh_permissions_setup_ui() -> void:
+	if _current_screen != "permissions_setup":
+		return
+	PermissionsHelper.log_resume_refresh()
+	for kind in ["notifications", "location", "camera"]:
+		var allowed := false
+		match kind:
+			"notifications":
+				allowed = PermissionsHelper.notification_allowed()
+			"location":
+				allowed = PermissionsHelper.location_allowed()
+			"camera":
+				allowed = PermissionsHelper.camera_allowed()
+		var status: Label = _perm_setup_status.get(kind) as Label
+		if status != null and is_instance_valid(status):
+			status.text = "Status: %s" % PermissionsHelper.status_label(allowed)
+		var btn: Button = _perm_setup_actions.get(kind) as Button
+		if btn != null and is_instance_valid(btn):
+			if allowed:
+				btn.text = "Allowed"
+				btn.disabled = true
+			elif PermissionsHelper.needs_settings(kind):
+				btn.text = "Open App Settings"
+				btn.disabled = false
+			else:
+				btn.text = "Allow"
+				btn.disabled = false
+
+
+func _on_permission_allow_tapped(kind: String) -> void:
+	## User-initiated only — one permission at a time.
+	var result: Dictionary = {}
+	match kind:
+		"notifications":
+			if PermissionsHelper.needs_settings(kind):
+				PermissionsHelper.open_app_settings()
+				return
+			result = PermissionsHelper.request_notifications()
+		"location":
+			if PermissionsHelper.needs_settings(kind):
+				PermissionsHelper.open_app_settings()
+				return
+			result = PermissionsHelper.request_location()
+		"camera":
+			if PermissionsHelper.needs_settings(kind):
+				PermissionsHelper.open_app_settings()
+				return
+			result = PermissionsHelper.request_camera()
+		_:
+			return
+	if bool(result.get("needs_settings", false)):
+		_show_toast("Permission must be enabled in Android Settings.")
+		PermissionsHelper.open_app_settings()
+		return
+	## Wait for Android dialog result, then query real state.
+	for _i in range(24):
+		await get_tree().create_timer(0.25).timeout
+		_refresh_permissions_setup_ui()
+		if _perm_manage_live:
+			_rebuild_permissions_manage_content()
+		var granted := false
+		match kind:
+			"notifications":
+				granted = PermissionsHelper.notification_allowed()
+			"location":
+				granted = PermissionsHelper.location_allowed()
+			"camera":
+				granted = PermissionsHelper.camera_allowed()
+		if granted:
+			if OS.is_debug_build():
+				print("[COLN-PERM] permission %s result=true" % kind)
+			return
+	if OS.is_debug_build():
+		print("[COLN-PERM] permission %s result=false" % kind)
+	_refresh_permissions_setup_ui()
+	if _perm_manage_live:
+		_rebuild_permissions_manage_content()
+
+
 func _show_permissions_setup() -> void:
 	_current_screen = "permissions_setup"
+	_perm_setup_status.clear()
+	_perm_setup_actions.clear()
 	_clear_screen()
 	var root := _make_screen_root()
 	var scroll := _wire_scroll(ScrollContainer.new())
@@ -3441,52 +3564,124 @@ func _show_permissions_setup() -> void:
 	MobileUi.apply_label(why, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY, true)
 	col.add_child(why)
 	for row in [
-		["Notifications", ProductStrings.NOTIFY_RATIONALE, func() -> void: PermissionsHelper.request_notifications()],
-		["Location", ProductStrings.LOCATION_RATIONALE, func() -> void: PermissionsHelper.request_location()],
-		["Camera", ProductStrings.CAMERA_SETUP_RATIONALE, func() -> void: PermissionsHelper.request_camera()],
+		["notifications", "Notifications", ProductStrings.NOTIFY_RATIONALE],
+		["location", "Location", ProductStrings.LOCATION_RATIONALE],
+		["camera", "Camera", ProductStrings.CAMERA_SETUP_RATIONALE],
 	]:
+		var kind: String = str(row[0])
 		var card := _make_card()
 		var box := VBoxContainer.new()
 		box.add_theme_constant_override("separation", 8)
 		card.add_child(box)
 		var h := Label.new()
-		h.text = str(row[0])
+		h.text = str(row[1])
 		MobileUi.apply_label(h, MobileUi.SIZE_SECTION, MobileUi.COLOR_TITLE)
 		box.add_child(h)
 		var p := Label.new()
-		p.text = str(row[1])
+		p.text = str(row[2])
 		p.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		MobileUi.apply_label(p, MobileUi.SIZE_SECONDARY, MobileUi.COLOR_SECONDARY, true)
 		box.add_child(p)
-		var allow := _make_button("Allow", row[2], Vector2(0, MobileUi.TOUCH_SECONDARY_H))
+		var status := Label.new()
+		status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		status.clip_text = false
+		MobileUi.apply_label(status, MobileUi.SIZE_BODY, MobileUi.COLOR_TITLE, true)
+		box.add_child(status)
+		_perm_setup_status[kind] = status
+		var allow := _make_button("Allow", func() -> void:
+			await _on_permission_allow_tapped(kind)
+		, Vector2(0, MobileUi.TOUCH_SECONDARY_H))
 		box.add_child(allow)
+		_perm_setup_actions[kind] = allow
 		col.add_child(card)
+	_refresh_permissions_setup_ui()
 	col.add_child(_make_button("Continue", func() -> void:
-		## Always allowed even if some permissions were denied.
-		PermissionsHelper.request_notifications()
-		await get_tree().create_timer(0.15).timeout
-		PermissionsHelper.request_location()
-		await get_tree().create_timer(0.15).timeout
-		PermissionsHelper.request_camera()
-		await get_tree().create_timer(0.2).timeout
-		PermissionsHelper.mark_setup_completed()
-		await _show_main_chest()
-		_try_register_push_token()
-		await _consume_notification_deeplink()
+		## Optional — never trap the user; do not auto-fire three dialogs.
+		await _finish_permissions_setup()
 	, Vector2(0, MobileUi.TOUCH_CTA_H)))
+
+
+func _rebuild_permissions_manage_content() -> void:
+	## Live-refresh manage modal without closing it.
+	if not _overlay.visible or not _perm_manage_live:
+		return
+	var host: VBoxContainer = null
+	for c in _overlay.get_children():
+		if c is VBoxContainer:
+			host = c
+			break
+	if host == null:
+		return
+	## Keep title + rebuild rows below it.
+	while host.get_child_count() > 1:
+		var last := host.get_child(host.get_child_count() - 1)
+		host.remove_child(last)
+		last.queue_free()
+	_fill_permissions_manage_rows(host)
+
+
+func _fill_permissions_manage_rows(box: VBoxContainer) -> void:
+	for row in [
+		["notifications", "Notifications"],
+		["location", "Location"],
+		["camera", "Camera"],
+	]:
+		var kind: String = str(row[0])
+		var allowed := false
+		match kind:
+			"notifications":
+				allowed = PermissionsHelper.notification_allowed()
+			"location":
+				allowed = PermissionsHelper.location_allowed()
+			"camera":
+				allowed = PermissionsHelper.camera_allowed()
+		var lab := Label.new()
+		lab.text = "%s — %s" % [str(row[1]), PermissionsHelper.status_label(allowed)]
+		lab.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		lab.clip_text = false
+		MobileUi.apply_label(lab, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY, true)
+		box.add_child(lab)
+		if allowed:
+			var ok := Label.new()
+			ok.text = "Allowed"
+			MobileUi.apply_label(ok, MobileUi.SIZE_SECONDARY, MobileUi.COLOR_TITLE, false)
+			box.add_child(ok)
+		elif PermissionsHelper.needs_settings(kind):
+			box.add_child(_make_button("Open App Settings", func() -> void:
+				PermissionsHelper.open_app_settings()
+			, Vector2(0, MobileUi.TOUCH_SECONDARY_H)))
+		else:
+			box.add_child(_make_button("Allow %s" % str(row[1]), func() -> void:
+				await _on_permission_allow_tapped(kind)
+			, Vector2(0, MobileUi.TOUCH_SECONDARY_H)))
+	box.add_child(_make_button("Open App Settings", func() -> void:
+		PermissionsHelper.open_app_settings()
+	, Vector2(0, MobileUi.TOUCH_PRIMARY_H)))
+	box.add_child(_make_button("Done", func() -> void:
+		_perm_manage_live = false
+		_hide_overlay()
+		if _current_screen == "profile":
+			_show_profile()
+	))
 
 
 func _show_permissions_manage_sheet() -> void:
 	_overlay.visible = true
+	_perm_manage_live = true
 	for c in _overlay.get_children():
 		c.queue_free()
 	var dim := ColorRect.new()
 	dim.color = Color(0, 0, 0, 0.72)
 	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	dim.gui_input.connect(func(ev: InputEvent) -> void:
+		if ev is InputEventMouseButton and (ev as InputEventMouseButton).pressed:
+			_perm_manage_live = false
+			_hide_overlay()
+	)
 	_overlay.add_child(dim)
 	var box := VBoxContainer.new()
-	var modal_w := 354.0
-	var modal_h := 420.0
+	var modal_w := minf(360.0, get_viewport().get_visible_rect().size.x - 32.0)
+	var modal_h := minf(480.0, get_viewport().get_visible_rect().size.y - 64.0)
 	box.set_anchors_preset(Control.PRESET_CENTER)
 	box.position = Vector2(-modal_w * 0.5, -modal_h * 0.5)
 	box.size = Vector2(modal_w, modal_h)
@@ -3497,26 +3692,7 @@ func _show_permissions_manage_sheet() -> void:
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	MobileUi.apply_label(title, MobileUi.SIZE_SCREEN_TITLE, MobileUi.COLOR_TITLE)
 	box.add_child(title)
-	for row in [
-		["Notifications", PermissionsHelper.notification_allowed(), func() -> void: PermissionsHelper.request_notifications()],
-		["Location", PermissionsHelper.location_allowed(), func() -> void: PermissionsHelper.request_location()],
-		["Camera", PermissionsHelper.camera_allowed(), func() -> void: PermissionsHelper.request_camera()],
-	]:
-		var lab := Label.new()
-		lab.text = "%s — %s" % [str(row[0]), PermissionsHelper.status_label(bool(row[1]))]
-		lab.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		MobileUi.apply_label(lab, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY, true)
-		box.add_child(lab)
-		box.add_child(_make_button("Allow %s" % str(row[0]), row[2], Vector2(0, MobileUi.TOUCH_SECONDARY_H)))
-	box.add_child(_make_button("Open App Settings", func() -> void:
-		PermissionsHelper.open_app_settings()
-	, Vector2(0, MobileUi.TOUCH_PRIMARY_H)))
-	box.add_child(_make_button("Done", func() -> void:
-		_hide_overlay()
-		if _current_screen == "profile":
-			_show_profile()
-	))
-
+	_fill_permissions_manage_rows(box)
 
 func _geofence_cfg() -> ConfigFile:
 	var c := ConfigFile.new()
@@ -3684,7 +3860,10 @@ func _notification(what: int) -> void:
 				_clear_reveal_timers()
 				state.clear_revealed_passwords()
 				_show_main_chest()
-			"inventory", "saved", "friends", "profile", "permissions_setup":
+			"permissions_setup":
+				## Safe exit — mark explanation shown; never fake permission grants.
+				_finish_permissions_setup()
+			"inventory", "saved", "friends", "profile":
 				_show_main_chest()
 			"diagnostics":
 				_show_profile()
@@ -3709,8 +3888,17 @@ func _on_app_resumed() -> void:
 	if _resume_inflight:
 		return
 	_resume_inflight = true
+	## Refresh permission cards after App Settings / system dialogs.
+	_refresh_permissions_setup_ui()
+	if _perm_manage_live:
+		_rebuild_permissions_manage_content()
 	## Consume notification deep links from warm resume / new intent.
 	await _consume_notification_deeplink()
+	## Profile permission rows need a rebuild to show Allowed after Settings return.
+	if _current_screen == "profile" and not _perm_manage_live:
+		_show_profile()
+		_resume_inflight = false
+		return
 	if state.is_online() and state.tokens.has_session():
 		var resumed: Dictionary = await state.revalidate_on_resume()
 		if not bool(resumed.get("ok", false)):

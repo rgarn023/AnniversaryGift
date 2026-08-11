@@ -94,11 +94,13 @@ static func request_permission_if_needed() -> String:
 		return "unsupported"
 	if permission_status() == "granted":
 		return "granted"
+	## Prefer Godot OS.request_permission so the native Android dialog appears.
+	if OS.has_method("request_permission"):
+		OS.request_permission(PERM_FINE)
+		OS.request_permission(PERM_COARSE)
 	var p = _plugin()
 	if p != null and p.has_method("request_location_permission"):
 		p.request_location_permission()
-	else:
-		OS.request_permissions()
 	return permission_status()
 
 

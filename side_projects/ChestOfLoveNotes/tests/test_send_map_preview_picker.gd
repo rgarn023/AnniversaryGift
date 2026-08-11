@@ -57,8 +57,8 @@ func _run() -> void:
 	_assert(install.contains("ChestMediaPlugin.kt"), "install script copies media plugin")
 	_assert(install.contains("ChestMedia") and install.contains("ChestMediaPlugin"), "manifest registers ChestMedia")
 
-	_assert(BuildFlags.APP_VERSION_CODE >= 25, "versionCode 25+")
-	_assert(preset.contains("version/code=25"), "export preset versionCode 25")
+	_assert(BuildFlags.APP_VERSION_CODE >= 26, "versionCode 26+")
+	_assert(preset.contains("version/code=26"), "export preset versionCode 26")
 
 	## Runtime: timezone helper math sanity via Compose unlock conversion contract.
 	var bias := int(Time.get_time_zone_from_system().get("bias", 0))

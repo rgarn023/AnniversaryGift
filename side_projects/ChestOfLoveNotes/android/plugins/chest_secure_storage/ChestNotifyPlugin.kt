@@ -151,13 +151,59 @@ class ChestNotifyPlugin(godot: Godot) : GodotPlugin(godot) {
 	@UsedByGodot
 	fun request_notification_permission(): Boolean {
 		return try {
-			if (Build.VERSION.SDK_INT >= 33) {
-				val act = getActivity() ?: return false
-				act.requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 0xC0F2)
+			if (Build.VERSION.SDK_INT < 33) {
+				Log.i(TAG, "notification permission not runtime-controlled on this API")
+				return has_notification_permission()
 			}
-			true
+			if (has_notification_permission()) return true
+			val act = getActivity() ?: run {
+				Log.w(TAG, "request_notification_permission: activity null")
+				return false
+			}
+			Log.i(TAG, "permission notifications requested")
+			act.runOnUiThread {
+				try {
+					act.requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 0xC0F2)
+				} catch (e: Exception) {
+					Log.w(TAG, "requestPermissions failed: ${e.javaClass.simpleName}")
+				}
+			}
+			false
 		} catch (e: Exception) {
 			Log.w(TAG, "request_notification_permission failed: ${e.javaClass.simpleName}")
+			false
+		}
+	}
+
+	/**
+	 * After a prior denial, true means Android may still show the dialog again.
+	 * False + still denied usually means permanently denied / Don't ask again.
+	 */
+	@UsedByGodot
+	fun can_request_permission(permission: String): Boolean {
+		return try {
+			val act = getActivity() ?: return true
+			if (act.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED) {
+				return false
+			}
+			act.shouldShowRequestPermissionRationale(permission)
+		} catch (_: Exception) {
+			true
+		}
+	}
+
+	@UsedByGodot
+	fun open_app_settings(): Boolean {
+		return try {
+			val act = getActivity() ?: return false
+			val intent = Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+				data = android.net.Uri.fromParts("package", act.packageName, null)
+				addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+			}
+			act.startActivity(intent)
+			true
+		} catch (e: Exception) {
+			Log.w(TAG, "open_app_settings failed: ${e.javaClass.simpleName}")
 			false
 		}
 	}

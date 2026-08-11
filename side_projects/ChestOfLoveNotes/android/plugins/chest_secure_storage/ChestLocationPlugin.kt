@@ -77,15 +77,25 @@ class ChestLocationPlugin(godot: Godot) : GodotPlugin(godot) {
 	@UsedByGodot
 	fun request_location_permission(): Boolean {
 		return try {
-			val act = getActivity() ?: return false
 			if (has_location_permission()) return true
-			act.requestPermissions(
-				arrayOf(
-					Manifest.permission.ACCESS_FINE_LOCATION,
-					Manifest.permission.ACCESS_COARSE_LOCATION,
-				),
-				0xC011,
-			)
+			val act = getActivity() ?: run {
+				Log.w(TAG, "request_location_permission: activity null")
+				return false
+			}
+			Log.i(TAG, "permission location requested")
+			act.runOnUiThread {
+				try {
+					act.requestPermissions(
+						arrayOf(
+							Manifest.permission.ACCESS_FINE_LOCATION,
+							Manifest.permission.ACCESS_COARSE_LOCATION,
+						),
+						0xC011,
+					)
+				} catch (e: Exception) {
+					Log.w(TAG, "requestPermissions failed: ${e.javaClass.simpleName}")
+				}
+			}
 			false
 		} catch (e: Exception) {
 			Log.w(TAG, "request_location_permission failed: ${e.javaClass.simpleName}")

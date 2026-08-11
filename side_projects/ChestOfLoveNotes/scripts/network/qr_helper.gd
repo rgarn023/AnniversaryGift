@@ -50,10 +50,12 @@ static func has_camera_permission() -> bool:
 	var p = _plugin()
 	if p != null and p.has_method("has_camera_permission"):
 		return bool(p.has_camera_permission())
-	return false
+	return OS.get_granted_permissions().has("android.permission.CAMERA")
 
 
 static func request_camera_permission() -> void:
+	if OS.get_name() == "Android" and OS.has_method("request_permission"):
+		OS.request_permission("android.permission.CAMERA")
 	var p = _plugin()
 	if p != null and p.has_method("request_camera_permission"):
 		p.request_camera_permission()

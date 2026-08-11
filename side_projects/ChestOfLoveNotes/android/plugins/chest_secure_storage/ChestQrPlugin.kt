@@ -54,9 +54,19 @@ class ChestQrPlugin(godot: Godot) : GodotPlugin(godot) {
 
 	@UsedByGodot
 	fun request_camera_permission(): Boolean {
-		val act = getActivity() ?: return false
 		if (has_camera_permission()) return true
-		act.requestPermissions(arrayOf(Manifest.permission.CAMERA), 0xC01B)
+		val act = getActivity() ?: run {
+			Log.w(TAG, "request_camera_permission: activity null")
+			return false
+		}
+		Log.i(TAG, "permission camera requested")
+		act.runOnUiThread {
+			try {
+				act.requestPermissions(arrayOf(Manifest.permission.CAMERA), 0xC01B)
+			} catch (e: Exception) {
+				Log.w(TAG, "requestPermissions failed: ${e.javaClass.simpleName}")
+			}
+		}
 		return false
 	}
 
