@@ -22,12 +22,31 @@ Deno.serve(async (req) => {
     const me = callerId(user);
     const service = createServiceClient();
 
-    const { data: states, error } = await service
+    let view = "current";
+    if (req.method === "POST") {
+      try {
+        const body = (await req.json()) as { view?: string };
+        if (body?.view === "hidden") view = "hidden";
+      } catch {
+        view = "current";
+      }
+    } else {
+      const url = new URL(req.url);
+      if (url.searchParams.get("view") === "hidden") view = "hidden";
+    }
+
+    // Permanent deletes excluded always. Hidden view returns only hidden_at rows.
+    let q = service
       .from("scroll_sender_states")
-      .select("scroll_id, sender_id, deleted_at, created_at")
+      .select("scroll_id, sender_id, deleted_at, hidden_at, created_at")
       .eq("sender_id", me)
-      .is("deleted_at", null)
-      .order("created_at", { ascending: false });
+      .is("deleted_at", null);
+    if (view === "hidden") {
+      q = q.not("hidden_at", "is", null);
+    } else {
+      q = q.is("hidden_at", null);
+    }
+    const { data: states, error } = await q.order("created_at", { ascending: false });
 
     if (error) {
       console.error(error);

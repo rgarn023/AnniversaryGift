@@ -1212,7 +1212,8 @@ func _on_use_current_location() -> void:
 			_update_validation()
 			return
 	var preserved_radius := _location_radius_m
-	var fix: Dictionary = await LocationHelper.get_fresh_fix(true)
+	## Canonical Native Location service — same bridge/services checks as Android Diagnostics.
+	var fix: Dictionary = await LocationHelper.request_current_location(true)
 	if not bool(fix.get("ok", false)):
 		var err := str(fix.get("error", "We couldn't determine your location. Try again."))
 		if bool(fix.get("bridge_missing", false)):
@@ -1226,21 +1227,23 @@ func _on_use_current_location() -> void:
 	var lat := float(fix.get("lat", 0.0))
 	var lng := float(fix.get("lng", 0.0))
 	if not is_finite(lat) or not is_finite(lng):
+		## Should be unreachable after ok fix — never clear a prior valid target here.
 		_location_status.text = "We couldn't determine your location. Try again."
 		_finish_current_location_attempt()
 		_update_validation()
 		return
 	## Coordinates succeed immediately — set lock target before optional reverse geocode.
+	## Do NOT require reverse geocoding. Valid lat/lng = Current Location success.
 	_location_radius_m = preserved_radius
 	_apply_resolved_place({
 		"name": "Current Location",
-		"address": "Address unavailable",
+		"address": "Location selected",
 		"lat": lat,
 		"lng": lng,
 		"source": "current",
 	})
 	_location_radius_m = preserved_radius
-	_location_status.text = "Current location selected"
+	_location_status.text = "Current location selected · Location selected"
 	var note := str(fix.get("accuracy_note", "")).strip_edges()
 	if not note.is_empty():
 		_location_status.text = "Current location selected · %s" % note

@@ -31,6 +31,30 @@ const MOCK_LNG := -112.0740
 ## Ignore stale polls/timeouts from a superseded Current Location attempt.
 static var _active_request_token: int = 0
 
+## Canonical Current Location diagnostics (no coordinates). Shared by Compose + Android Diagnostics.
+static var last_request_state: String = "Idle" ## Idle / Requesting / Success / Failed
+static var last_native_request: String = "Not Started" ## Started / Not Started
+static var last_callback: String = "Not Received" ## Received / Not Received
+static var last_failure_stage: String = "None" ## None / Permission / Services / Bridge / Request / Callback / Invalid Fix / Timeout
+
+
+static func reset_request_diagnostics() -> void:
+	last_request_state = "Idle"
+	last_native_request = "Not Started"
+	last_callback = "Not Received"
+	last_failure_stage = "None"
+
+
+static func request_diagnostics_snapshot() -> Dictionary:
+	return {
+		"location_request_state": last_request_state,
+		"last_native_request": last_native_request,
+		"last_callback": last_callback,
+		"last_failure_stage": last_failure_stage,
+		"location_bridge": "Available" if bridge_available() else "Missing",
+		"location_services": "On" if location_services_enabled() else "Off",
+	}
+
 
 static func haversine_m(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
 	var r := 6371000.0
@@ -64,18 +88,47 @@ static func format_distance_away(meters: float) -> String:
 
 
 static func _plugin():
-	if Engine.has_singleton(PLUGIN_NAME):
-		return Engine.get_singleton(PLUGIN_NAME)
-	return null
+	return NativePluginUtil.get_singleton(PLUGIN_NAME)
+
+
+static func _plugin_method(method: String) -> bool:
+	## Canonical capability check — never rely on has_method alone for Android JNI.
+	return NativePluginUtil.method_available(PLUGIN_NAME, method)
+
+
+static func _call_plugin(method: String, args: Array = []) -> Variant:
+	return NativePluginUtil.call_method(PLUGIN_NAME, method, args)
 
 
 static func bridge_available() -> bool:
+	## ONE canonical Location bridge check used by Diagnostics and Compose.
 	var p = _plugin()
 	if p == null:
 		return false
-	if p.has_method("location_plugin_available"):
-		return bool(p.location_plugin_available())
-	return p.has_method("begin_fresh_location") or p.has_method("get_last_known_location")
+	if OS.get_name() == "Android":
+		## Singleton registration proves ChestLocationPlugin is packaged.
+		## Probe a known method when has_method works; otherwise trust the singleton.
+		if p.has_method("location_plugin_available"):
+			return bool(p.call("location_plugin_available"))
+		return true
+	return (
+		_plugin_method("location_plugin_available")
+		or _plugin_method("begin_fresh_location")
+		or _plugin_method("get_last_known_location")
+	)
+
+
+static func is_available() -> bool:
+	return bridge_available()
+
+
+static func services_enabled() -> bool:
+	return location_services_enabled()
+
+
+static func request_current_location(require_accuracy: bool = true) -> Dictionary:
+	## Canonical entry used by Compose Use Current Location.
+	return await get_fresh_fix(require_accuracy)
 
 
 static func _await_plugin_ready(max_waits: int = 12) -> Variant:
@@ -100,6 +153,8 @@ static func _log(msg: String) -> void:
 
 
 static func _bridge_missing_error() -> Dictionary:
+	last_request_state = "Failed"
+	last_failure_stage = "Bridge"
 	_log("LOCATION BRIDGE MISSING")
 	_log("provider_initialized=false")
 	_log("provider_type=missing")
@@ -119,9 +174,10 @@ static func _bridge_missing_error() -> Dictionary:
 static func permission_status() -> String:
 	if OS.get_name() != "Android":
 		return "unsupported"
-	var p = _plugin()
-	if p != null and p.has_method("has_location_permission") and bool(p.has_location_permission()):
-		return "granted"
+	if _plugin_method("has_location_permission"):
+		var ok: Variant = _call_plugin("has_location_permission")
+		if bool(ok):
+			return "granted"
 	var granted := OS.get_granted_permissions()
 	if granted.has(PERM_FINE) or granted.has(PERM_COARSE):
 		return "granted"
@@ -129,11 +185,16 @@ static func permission_status() -> String:
 
 
 static func location_services_enabled() -> bool:
+	## Live Android Location Services query via ChestLocation.is_location_enabled().
+	## Do NOT infer from permission, cache, prior failure, or bridge presence.
 	if OS.get_name() != "Android":
 		return true
 	var p = _plugin()
-	if p != null and p.has_method("is_location_enabled"):
-		return bool(p.is_location_enabled())
+	if p == null:
+		return true
+	if _plugin_method("is_location_enabled"):
+		return bool(_call_plugin("is_location_enabled"))
+	## Plugin present but method unknown — avoid false Off (Diagnostics bug).
 	return true
 
 
@@ -146,16 +207,14 @@ static func request_permission_if_needed() -> String:
 	if OS.has_method("request_permission"):
 		OS.request_permission(PERM_FINE)
 		OS.request_permission(PERM_COARSE)
-	var p = _plugin()
-	if p != null and p.has_method("request_location_permission"):
-		p.request_location_permission()
+	if _plugin_method("request_location_permission"):
+		_call_plugin("request_location_permission")
 	return permission_status()
 
 
 static func dump_diagnostics() -> void:
-	var p = _plugin()
-	if p != null and p.has_method("location_diagnostics"):
-		_log(str(p.location_diagnostics()))
+	if _plugin_method("location_diagnostics"):
+		_log(str(_call_plugin("location_diagnostics")))
 	else:
 		_log("plugin_missing perm=%s enabled=%s" % [permission_status(), location_services_enabled()])
 
@@ -270,31 +329,37 @@ static func get_current_fix(require_accuracy: bool = true) -> Dictionary:
 			"error": "Turn on Location Services to use your current location.",
 			"disabled": true,
 		}
-	var p = _plugin()
-	if p == null or not p.has_method("get_last_known_location"):
+	if not bridge_available() or not _plugin_method("get_last_known_location"):
 		return _bridge_missing_error()
-	return _parse_fix_raw(str(p.get_last_known_location()), require_accuracy)
+	return _parse_fix_raw(str(_call_plugin("get_last_known_location")), require_accuracy)
 
 
 static func get_fresh_fix(require_accuracy: bool = true) -> Dictionary:
 	## Obtain a fresh fused location fix. Coordinates success is independent of reverse geocode.
-	## State: IDLE → REQUESTING → COORDINATES_RECEIVED → SUCCESS | ERROR
+	## State: Idle → Requesting → Success | Failed (diagnostics). Token supersedes stale timeouts.
 	if OS.get_name() != "Android":
+		last_request_state = "Success"
+		last_native_request = "Started"
+		last_callback = "Received"
+		last_failure_stage = "None"
 		return get_current_fix(require_accuracy)
 	_active_request_token += 1
 	var my_token := _active_request_token
-	var phase := "REQUESTING"
+	last_request_state = "Requesting"
+	last_native_request = "Not Started"
+	last_callback = "Not Received"
+	last_failure_stage = "None"
 	_log("current_location_requested")
-	_log("state=%s" % phase)
+	_log("state=Requesting")
 	var p = await _await_plugin_ready()
 	var fine := false
 	var coarse := false
-	if p != null and p.has_method("has_fine_location_permission"):
-		fine = bool(p.has_fine_location_permission())
+	if _plugin_method("has_fine_location_permission"):
+		fine = bool(_call_plugin("has_fine_location_permission"))
 	else:
 		fine = OS.get_granted_permissions().has(PERM_FINE)
-	if p != null and p.has_method("has_coarse_location_permission"):
-		coarse = bool(p.has_coarse_location_permission())
+	if _plugin_method("has_coarse_location_permission"):
+		coarse = bool(_call_plugin("has_coarse_location_permission"))
 	else:
 		coarse = OS.get_granted_permissions().has(PERM_COARSE)
 	_log("permission_fine=%s" % fine)
@@ -303,39 +368,50 @@ static func get_fresh_fix(require_accuracy: bool = true) -> Dictionary:
 	_log("Engine.has_singleton(ChestLocation)=%s" % Engine.has_singleton(PLUGIN_NAME))
 	dump_diagnostics()
 	if permission_status() != "granted":
+		last_request_state = "Failed"
+		last_failure_stage = "Permission"
 		_log("provider_initialized=false")
 		_log("accepted=false")
 		_log("rejection_reason=permission_denied")
-		_log("state=ERROR")
+		_log("state=Failed")
 		return {
 			"ok": false,
 			"error": "Allow Location permission to use your current location.",
 			"denied": true,
 		}
 	if not location_services_enabled():
+		last_request_state = "Failed"
+		last_failure_stage = "Services"
 		_log("provider_initialized=false")
 		_log("accepted=false")
 		_log("rejection_reason=location_services_off")
-		_log("state=ERROR")
+		_log("state=Failed")
 		return {
 			"ok": false,
 			"error": "Turn on Location Services to use your current location.",
 			"disabled": true,
 		}
 	if p == null or not bridge_available():
-		_log("state=ERROR")
+		last_request_state = "Failed"
+		last_failure_stage = "Bridge"
+		_log("state=Failed")
 		return _bridge_missing_error()
 	_log("provider_initialized=true")
 	_log("provider_type=ChestLocation/fused")
 	var settled: Dictionary = {}
 	var success_latched := false
-	if p.has_method("begin_fresh_location") and p.has_method("poll_fresh_location"):
-		if not bool(p.begin_fresh_location()):
+	## begin/poll are always present on packaged ChestLocation — do not gate on has_method.
+	if _plugin_method("begin_fresh_location") and _plugin_method("poll_fresh_location"):
+		if not bool(_call_plugin("begin_fresh_location")):
+			last_request_state = "Failed"
+			last_failure_stage = "Request"
+			last_native_request = "Not Started"
 			_log("location_request_started=false")
 			_log("accepted=false")
 			_log("rejection_reason=begin_failed")
-			_log("state=ERROR")
+			_log("state=Failed")
 			if not location_services_enabled():
+				last_failure_stage = "Services"
 				return {
 					"ok": false,
 					"error": "Turn on Location Services to use your current location.",
@@ -346,33 +422,39 @@ static func get_fresh_fix(require_accuracy: bool = true) -> Dictionary:
 				"error": "We couldn't determine your location. Try again.",
 				"unavailable": true,
 			}
+		last_native_request = "Started"
 		_log("location_request_started")
 		var tree := Engine.get_main_loop() as SceneTree
 		for _i in range(FRESH_POLL_COUNT):
 			if my_token != _active_request_token:
 				_log("accepted=false")
 				_log("rejection_reason=superseded_request")
-				_log("state=ERROR")
+				_log("state=Failed")
 				return {"ok": false, "error": "We couldn't determine your location. Try again.", "unavailable": true}
 			if tree != null:
 				await tree.create_timer(FRESH_POLL_INTERVAL_SEC).timeout
 			if success_latched and bool(settled.get("ok", false)):
+				last_request_state = "Success"
+				last_failure_stage = "None"
 				_log("state=SUCCESS")
 				return settled
-			var raw := str(p.poll_fresh_location())
+			var raw := str(_call_plugin("poll_fresh_location"))
 			if raw.begins_with("ok|"):
+				last_callback = "Received"
 				_log("callback_received")
-				phase = "COORDINATES_RECEIVED"
-				_log("state=%s" % phase)
+				_log("state=COORDINATES_RECEIVED")
 				var parsed_ok := _parse_fix_raw(raw, require_accuracy, MAX_FIX_AGE_MS)
 				if bool(parsed_ok.get("ok", false)):
 					settled = parsed_ok
 					success_latched = true
 					## Cancel native timeout / listeners — stale timeout must not overwrite success.
-					if p.has_method("cancel_fresh_location"):
-						p.cancel_fresh_location()
+					if _plugin_method("cancel_fresh_location"):
+						_call_plugin("cancel_fresh_location")
+					last_request_state = "Success"
+					last_failure_stage = "None"
 					_log("state=SUCCESS")
 					return settled
+				last_failure_stage = "Invalid Fix"
 				## Keep listening for a better/fresher point.
 				continue
 			if raw.contains("|pending"):
@@ -380,33 +462,41 @@ static func get_fresh_fix(require_accuracy: bool = true) -> Dictionary:
 			## Timeout/error from poll — ignore if we already accepted coords.
 			if success_latched:
 				_log("timeout_fired after success — ignored")
+				last_request_state = "Success"
+				last_failure_stage = "None"
 				_log("state=SUCCESS")
 				return settled
 			_log("timeout_fired")
 			break
-		if p.has_method("cancel_fresh_location"):
-			p.cancel_fresh_location()
+		if _plugin_method("cancel_fresh_location"):
+			_call_plugin("cancel_fresh_location")
 		if my_token != _active_request_token:
-			_log("state=ERROR")
+			_log("state=Failed")
 			return {"ok": false, "error": "We couldn't determine your location. Try again.", "unavailable": true}
 		if success_latched and bool(settled.get("ok", false)):
+			last_request_state = "Success"
+			last_failure_stage = "None"
 			_log("state=SUCCESS")
 			return settled
-		var last := _parse_fix_raw(
-			str(p.get_last_known_location()) if p.has_method("get_last_known_location") else "",
-			require_accuracy,
-			MAX_FIX_AGE_MS
-		)
+		var last_raw := ""
+		if _plugin_method("get_last_known_location"):
+			last_raw = str(_call_plugin("get_last_known_location"))
+		var last := _parse_fix_raw(last_raw, require_accuracy, MAX_FIX_AGE_MS)
 		if bool(last.get("ok", false)):
 			last["source"] = "recent_cached"
+			last_callback = "Received"
+			last_request_state = "Success"
+			last_failure_stage = "None"
 			_log("callback_received")
 			_log("accepted=true")
 			_log("rejection_reason=")
 			_log("state=SUCCESS")
 			return last
+		last_request_state = "Failed"
+		last_failure_stage = "Timeout"
 		_log("accepted=false")
 		_log("rejection_reason=timeout_no_fix")
-		_log("state=ERROR")
+		_log("state=Failed")
 		return {
 			"ok": false,
 			"error": "We couldn't determine your location. Try again.",
@@ -414,48 +504,46 @@ static func get_fresh_fix(require_accuracy: bool = true) -> Dictionary:
 			"timeout": true,
 		}
 	## Prefer begin/poll only — do not use blocking request_fresh_location on the UI thread.
+	last_request_state = "Failed"
+	last_failure_stage = "Bridge"
 	_log("accepted=false")
 	_log("rejection_reason=no_fresh_api")
-	_log("state=ERROR")
+	_log("state=Failed")
 	return {
 		"ok": false,
 		"error": "We couldn't determine your location. Try again.",
 		"unavailable": true,
+		"bridge_missing": true,
 	}
 
 
 static func register_geofence(scroll_id: String, lat: float, lng: float, radius_m: float) -> bool:
-	var p = _plugin()
-	if p == null or not p.has_method("register_scroll_geofence"):
+	if not _plugin_method("register_scroll_geofence"):
 		return false
-	return bool(p.register_scroll_geofence(scroll_id, lat, lng, radius_m))
+	return bool(_call_plugin("register_scroll_geofence", [scroll_id, lat, lng, radius_m]))
 
 
 static func remove_geofence(scroll_id: String) -> bool:
-	var p = _plugin()
-	if p == null or not p.has_method("remove_scroll_geofence"):
+	if not _plugin_method("remove_scroll_geofence"):
 		return false
-	return bool(p.remove_scroll_geofence(scroll_id))
+	return bool(_call_plugin("remove_scroll_geofence", [scroll_id]))
 
 
 static func clear_all_geofences() -> bool:
-	var p = _plugin()
-	if p == null or not p.has_method("clear_all_geofences"):
+	if not _plugin_method("clear_all_geofences"):
 		return false
-	return bool(p.clear_all_geofences())
+	return bool(_call_plugin("clear_all_geofences"))
 
 
 static func has_background_location_permission() -> bool:
-	var p = _plugin()
-	if p != null and p.has_method("has_background_location_permission"):
-		return bool(p.has_background_location_permission())
+	if _plugin_method("has_background_location_permission"):
+		return bool(_call_plugin("has_background_location_permission"))
 	return permission_status() == "granted"
 
 
 static func request_background_location_permission() -> bool:
-	var p = _plugin()
-	if p != null and p.has_method("request_background_location_permission"):
-		return bool(p.request_background_location_permission())
+	if _plugin_method("request_background_location_permission"):
+		return bool(_call_plugin("request_background_location_permission"))
 	return false
 
 

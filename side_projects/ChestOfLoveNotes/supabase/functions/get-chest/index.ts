@@ -23,16 +23,34 @@ Deno.serve(async (req) => {
     const me = callerId(user);
     const service = createServiceClient();
 
-    // Current = not deleted by recipient AND not yet saved (opened moves to Saved).
-    const { data: states, error } = await service
+    // Optional view=hidden returns Hidden (recoverable) chest items.
+    let view = "current";
+    if (req.method === "POST") {
+      try {
+        const body = (await req.json()) as { view?: string };
+        if (body?.view === "hidden") view = "hidden";
+      } catch {
+        view = "current";
+      }
+    } else {
+      const url = new URL(req.url);
+      if (url.searchParams.get("view") === "hidden") view = "hidden";
+    }
+
+    // Current = not deleted, not hidden, not yet saved. Hidden view = hidden_at set, not deleted.
+    let q = service
       .from("scroll_recipient_states")
       .select(
-        "scroll_id, recipient_id, is_read, is_saved, is_favorite, first_opened_at, last_opened_at, opened_count, deleted_at",
+        "scroll_id, recipient_id, is_read, is_saved, is_favorite, first_opened_at, last_opened_at, opened_count, deleted_at, hidden_at",
       )
       .eq("recipient_id", me)
-      .is("deleted_at", null)
-      .eq("is_saved", false)
-      .order("created_at", { ascending: false });
+      .is("deleted_at", null);
+    if (view === "hidden") {
+      q = q.not("hidden_at", "is", null);
+    } else {
+      q = q.is("hidden_at", null).eq("is_saved", false);
+    }
+    const { data: states, error } = await q.order("created_at", { ascending: false });
 
     if (error) {
       console.error(error);

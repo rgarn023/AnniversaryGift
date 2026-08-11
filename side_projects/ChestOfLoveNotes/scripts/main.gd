@@ -1118,25 +1118,30 @@ func _normalize_friend_request_item(raw: Dictionary) -> Dictionary:
 
 func _load_online_chest_items(filter: String) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
-	var result: Dictionary = await state.scrolls.get_chest()
+	var view := "hidden" if filter == "hidden" else "current"
+	var result: Dictionary = await state.scrolls.get_chest(view)
 	if not bool(result.get("ok", false)):
 		_show_toast(str(result.get("error", "Could not load chest.")))
 		return out
 	var data: Dictionary = result.get("data", {}) if typeof(result.get("data")) == TYPE_DICTIONARY else {}
-	state.cached_chest = data
+	if view != "hidden":
+		state.cached_chest = data
 	var chest: Dictionary = data.get("chest", {}) if typeof(data.get("chest")) == TYPE_DICTIONARY else {}
 	var scrolls: Array = chest.get("scrolls", []) if typeof(chest.get("scrolls")) == TYPE_ARRAY else []
 	var requests: Array = chest.get("friend_requests", []) if typeof(chest.get("friend_requests")) == TYPE_ARRAY else []
 	## Keep scheduled-ready alarms in sync (works while app later closed).
-	NotificationHelper.ensure_channels()
-	NotificationHelper.sync_scheduled_from_chest(scrolls)
-	## Central requirement-transition notifier (deduped local alerts).
-	if _req_notifier != null:
-		_req_notifier.evaluate_chest_items(scrolls)
+	if view != "hidden":
+		NotificationHelper.ensure_channels()
+		NotificationHelper.sync_scheduled_from_chest(scrolls)
+		## Central requirement-transition notifier (deduped local alerts).
+		if _req_notifier != null:
+			_req_notifier.evaluate_chest_items(scrolls)
 	for s in scrolls:
 		if typeof(s) != TYPE_DICTIONARY:
 			continue
 		var item := _normalize_online_scroll_item(s)
+		if view == "hidden":
+			item["is_hidden"] = true
 		var st := str(item.get("state", ""))
 		if filter == "unread" and st != "unlocked_unread" and st != "password_unlocked_unread":
 			continue
@@ -1272,6 +1277,7 @@ func _show_inventory() -> void:
 		["locked", "Locked", row1],
 		["requests", "Requests", row2],
 		["saved", "Saved", row2],
+		["hidden", "Hidden", row2],
 	]:
 		var fname: String = str(f[0])
 		var parent: HBoxContainer = f[2]
@@ -1285,10 +1291,6 @@ func _show_inventory() -> void:
 		, Vector2(0, chip_h))
 		_style_inventory_filter_chip(chip, _inventory_filter == fname)
 		parent.add_child(chip)
-	## Balance row2 with a spacer so Requests|Saved sit as equal thirds visually.
-	var row2_pad := Control.new()
-	row2_pad.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row2.add_child(row2_pad)
 
 	var scroll := _wire_scroll(ScrollContainer.new())
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -1416,8 +1418,17 @@ func _make_chest_item_row(item: Dictionary) -> PanelContainer:
 		, Vector2(0, btn_h))
 		save_btn.tooltip_text = "Remove from Saved" if fav else "Save this scroll"
 		actions.add_child(save_btn)
+		var is_hidden_item := bool(item.get("is_hidden", false))
+		if is_hidden_item:
+			actions.add_child(_make_button("Unhide", func() -> void:
+				_unhide_received(str(item.id))
+			, Vector2(0, btn_h)))
+		else:
+			actions.add_child(_make_button("Hide", func() -> void:
+				_hide_received(str(item.id))
+			, Vector2(0, btn_h)))
 		actions.add_child(_make_button("Delete", func() -> void:
-			_confirm_delete_received(str(item.id))
+			_confirm_delete_received(str(item.id), item)
 		, Vector2(0, btn_h)))
 	return panel
 
@@ -1545,7 +1556,12 @@ func _toggle_favorite(scroll_id: String, is_favorite: bool) -> void:
 	_show_toast("Backend is not configured.")
 
 
-func _confirm_delete_received(scroll_id: String) -> void:
+func _confirm_delete_received(scroll_id: String, item: Dictionary = {}) -> void:
+	## Permanent per-user Delete — sender keeps their Sent copy.
+	var sender_name := str(item.get("sender_display_name", ""))
+	if sender_name.is_empty():
+		var sender: Dictionary = item.get("sender", {}) if typeof(item.get("sender")) == TYPE_DICTIONARY else {}
+		sender_name = IdentityHelper.display_name_from_profile(sender, "the sender")
 	_overlay.visible = true
 	for c in _overlay.get_children():
 		c.queue_free()
@@ -1555,37 +1571,92 @@ func _confirm_delete_received(scroll_id: String) -> void:
 	_overlay.add_child(dim)
 	var box := VBoxContainer.new()
 	var modal_w := 354.0
-	var modal_h := 280.0
+	var modal_h := 320.0
 	box.set_anchors_preset(Control.PRESET_CENTER)
 	box.position = Vector2(-modal_w * 0.5, -modal_h * 0.5)
 	box.size = Vector2(modal_w, modal_h)
 	box.add_theme_constant_override("separation", MobileUi.GAP_RELATED)
 	_overlay.add_child(box)
 	var title := Label.new()
-	title.text = "Hide this scroll?"
+	title.text = "Delete permanently?"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.add_theme_font_size_override("font_size", MobileUi.font(MobileUi.SIZE_SCREEN_TITLE))
 	title.add_theme_color_override("font_color", Color(0.98, 0.86, 0.45))
 	box.add_child(title)
 	var body := Label.new()
-	body.text = "This hides the note from your Current and Saved views only. It does not erase the sender's history or permanently destroy the message."
+	body.text = "Delete this scroll permanently from your Chest? %s will still keep their Sent copy." % sender_name
 	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	body.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	body.add_theme_font_size_override("font_size", MobileUi.font(MobileUi.SIZE_BODY))
 	body.add_theme_color_override("font_color", Color(0.9, 0.85, 0.95))
 	box.add_child(body)
-	box.add_child(_make_button("Hide from my chest", func() -> void:
+	box.add_child(_make_button("Delete Permanently", func() -> void:
 		_hide_overlay()
 		_delete_received(scroll_id)
 	))
 	box.add_child(_make_button("Cancel", _hide_overlay, Vector2(180, MobileUi.font_touch(MobileUi.TOUCH_SECONDARY_H))))
 
 
+func _hide_received(scroll_id: String) -> void:
+	## Reversible Hide — no scary confirmation.
+	if state.is_demo():
+		var result := state.demo.hide_received_scroll(scroll_id)
+		if bool(result.get("ok", false)):
+			_show_snackbar("Scroll hidden", "Undo", func() -> void:
+				_unhide_received(scroll_id)
+			)
+			if _current_screen == "saved":
+				_show_saved()
+			else:
+				_show_inventory()
+		else:
+			_show_toast(str(result.get("error", "Could not hide.")))
+		return
+	if state.is_online():
+		var result: Dictionary = await state.scrolls.hide_received_scroll(scroll_id)
+		if bool(result.get("ok", false)):
+			state.invalidate_cache("chest")
+			_show_snackbar("Scroll hidden", "Undo", func() -> void:
+				_unhide_received(scroll_id)
+			)
+			if _current_screen == "saved":
+				_show_saved()
+			else:
+				_show_inventory()
+		else:
+			_show_toast(str(result.get("error", "Could not hide.")))
+		return
+	_show_toast("Backend is not configured.")
+
+
+func _unhide_received(scroll_id: String) -> void:
+	if state.is_demo():
+		var result := state.demo.unhide_received_scroll(scroll_id)
+		if bool(result.get("ok", false)):
+			_show_toast("Scroll restored")
+			_show_inventory()
+		else:
+			_show_toast(str(result.get("error", "Could not unhide.")))
+		return
+	if state.is_online():
+		var result: Dictionary = await state.scrolls.unhide_received_scroll(scroll_id)
+		if bool(result.get("ok", false)):
+			state.invalidate_cache("chest")
+			_show_toast("Scroll restored")
+			_show_inventory()
+		else:
+			_show_toast(str(result.get("error", "Could not unhide.")))
+		return
+	_show_toast("Backend is not configured.")
+
+
 func _delete_received(scroll_id: String) -> void:
+	## Permanent per-user delete — cancel local lock work for this user's copy.
 	if state.is_demo():
 		var result := state.demo.delete_received_scroll(scroll_id)
 		if bool(result.get("ok", false)):
-			_show_toast("Scroll hidden from your chest")
+			_cancel_local_work_for_scroll(scroll_id)
+			_show_toast("Scroll deleted from your Chest")
 			if _current_screen == "saved":
 				_show_saved()
 			else:
@@ -1596,7 +1667,9 @@ func _delete_received(scroll_id: String) -> void:
 	if state.is_online():
 		var result: Dictionary = await state.scrolls.delete_received_scroll(scroll_id)
 		if bool(result.get("ok", false)):
-			_show_toast("Scroll hidden from your chest")
+			state.invalidate_cache("chest")
+			_cancel_local_work_for_scroll(scroll_id)
+			_show_toast("Scroll deleted from your Chest")
 			if _current_screen == "saved":
 				_show_saved()
 			else:
@@ -1605,6 +1678,15 @@ func _delete_received(scroll_id: String) -> void:
 			_show_toast(str(result.get("error", "Could not delete.")))
 		return
 	_show_toast("Backend is not configured.")
+
+
+func _cancel_local_work_for_scroll(scroll_id: String) -> void:
+	## Recipient permanently deleted their copy — stop notifying this user only.
+	if scroll_id.is_empty():
+		return
+	LocationHelper.remove_geofence(scroll_id)
+	NotificationHelper.cancel_scheduled_ready(scroll_id)
+	ActivityLockHelper.reset_challenge(scroll_id)
 
 
 func _open_chest_item(item: Dictionary) -> void:
@@ -2123,9 +2205,8 @@ func _show_compose() -> void:
 			state.apply_friends_payload(data)
 			state.mark_cache_fresh("friends")
 			var fresh_person := _person_from_friends_cache()
-			if not fresh_person.is_empty():
-				## Always rebind Compose to the active Person (canonical recipient).
-				_compose_screen.setup_with_person(fresh_person, false, _compose_screen.get_draft(), me_profile)
+			## Always rebind Compose to the active Person (canonical recipient), including empty.
+			_compose_screen.setup_with_person(fresh_person, false, _compose_screen.get_draft(), me_profile)
 		else:
 			var err := str(fr.get("error", "Could not load My Person."))
 			if not err.is_empty() and person.is_empty():
@@ -2277,12 +2358,9 @@ func _show_friends() -> void:
 		me = state.demo.get_profile()
 		state.mark_cache_fresh("friends")
 	elif state.is_online():
-		## Cache-first paint — refresh after finish_nav_transition.
+		## Same canonical active-Person resolver as Compose + Android Diagnostics.
+		person = _person_from_friends_cache()
 		var data: Dictionary = state.cached_friends if typeof(state.cached_friends) == TYPE_DICTIONARY else {}
-		if typeof(data.get("person")) == TYPE_DICTIONARY:
-			person = data.get("person")
-		elif typeof(data.get("friends")) == TYPE_ARRAY and not (data.get("friends") as Array).is_empty():
-			person = (data.get("friends") as Array)[0]
 		if typeof(data.get("me")) == TYPE_DICTIONARY:
 			me = data.get("me")
 		else:
@@ -2644,17 +2722,17 @@ func _show_my_connection_code(me: Dictionary) -> void:
 	MobileUi.apply_label(help, MobileUi.SIZE_HELPER, MobileUi.COLOR_HELPER, true)
 	col.add_child(help)
 	## Encode once at display size. Do NOT re-verify at a different size (v28 discarded valid QR).
+	## Use QrHelper.encoder_available() — never Object.has_method() alone (Android JNI quirk).
 	var qr_tex: Texture2D = null
 	var qr_diag := ""
 	if link.is_empty():
 		qr_diag = "no_public_token"
-	elif not Engine.has_singleton("ChestQr"):
+	elif not QrHelper.available():
 		qr_diag = "ChestQr singleton missing"
 		if OS.is_debug_build():
 			print("[COLN-QR] ChestQr singleton found=false")
 	else:
-		var p = Engine.get_singleton("ChestQr")
-		var has_encode := p != null and p.has_method("encode_qr_png_base64")
+		var has_encode := QrHelper.encoder_available()
 		if OS.is_debug_build():
 			print("[COLN-QR] ChestQr singleton found=true encode_method=%s" % str(has_encode))
 		if not has_encode:
@@ -2756,15 +2834,21 @@ func _on_scan_person_code() -> void:
 	if OS.get_name() != "Android":
 		_show_toast("QR scanning requires the Android build.")
 		return
-	if not Engine.has_singleton("ChestQr") or not QrHelper.scanner_available():
-		_show_toast("Camera scanner couldn't start.")
+	if not QrHelper.available():
+		_show_toast("Camera scanner isn't available in this build.")
 		if OS.is_debug_build():
-			print("[COLN-QR] scan aborted: ChestQr singleton/scanner missing")
+			print("[COLN-QR] scan aborted: ChestQr bridge missing")
+		return
+	if not QrHelper.scanner_available():
+		_show_toast("Camera scanner isn't available in this build.")
+		if OS.is_debug_build():
+			print("[COLN-QR] scan aborted: scanner capability missing")
 		return
 	## Refresh from OS in case user just granted Camera in App Settings.
 	PermissionsHelper.log_resume_refresh()
+	## Live CAMERA permission — when Granted, continue directly (no false permission error).
 	if not QrHelper.has_camera_permission():
-		_show_toast(ProductStrings.CAMERA_RATIONALE)
+		_show_toast("Camera permission is required.")
 		QrHelper.request_camera_permission()
 		await get_tree().create_timer(0.8).timeout
 		var waits := 0
@@ -2772,7 +2856,7 @@ func _on_scan_person_code() -> void:
 			await get_tree().create_timer(0.25).timeout
 			waits += 1
 		if not QrHelper.has_camera_permission():
-			_show_toast(ProductStrings.CAMERA_NEEDED)
+			_show_toast("Camera permission is required.")
 			## Offer settings after repeated denial.
 			if waits >= 8:
 				QrHelper.open_app_settings()
@@ -2796,17 +2880,19 @@ func _on_qr_scan_cancelled() -> void:
 
 
 func _on_qr_scan_error(code: String) -> void:
-	## Separate PERMISSION ERROR from PLUGIN/CAMERA INITIALIZATION ERROR.
+	## Distinct error types — never label every failure as Camera permission.
 	if code == "camera_permission":
 		## Re-check live OS truth — plugin may have lied when Activity was null.
 		if QrHelper.has_camera_permission():
 			_show_toast("Camera scanner couldn't start.")
 		else:
-			_show_toast(ProductStrings.CAMERA_NEEDED)
-	elif code == "unavailable" or code == "start_failed":
+			_show_toast("Camera permission is required.")
+	elif code == "unavailable":
+		_show_toast("Camera scanner isn't available in this build.")
+	elif code == "start_failed":
 		_show_toast("Camera scanner couldn't start.")
 	else:
-		_show_toast(ProductStrings.INVALID_QR)
+		_show_toast("This isn't a valid Chest of Love Notes connection code.")
 
 
 func _show_qr_scan_message(body: String, offer_scan_again: bool = false) -> void:
@@ -2953,26 +3039,17 @@ func _show_sent() -> void:
 	_clear_reveal_timers()
 	state.clear_revealed_passwords()
 	_current_screen = "sent"
-	state.load_hidden_sent()
-	var sent_items: Array = []
-	if state.is_demo():
-		## Include locally-hidden demo scrolls so Hidden tab can restore them.
-		sent_items = _demo_sent_including_hidden()
-	elif state.is_online():
-		## Cache-first; network refresh after paint.
-		if typeof(state.cached_sent.get("sent_scrolls")) == TYPE_ARRAY:
-			sent_items = state.cached_sent.get("sent_scrolls", [])
-
 	var visible_items: Array = []
 	var hidden_items: Array = []
-	for s in sent_items:
-		if typeof(s) != TYPE_DICTIONARY:
-			continue
-		var sid0 := str(s.get("id", ""))
-		if state.is_sent_hidden(sid0):
-			hidden_items.append(s)
-		else:
-			visible_items.append(s)
+	if state.is_demo():
+		visible_items = state.demo.get_sent_scrolls(false)
+		hidden_items = state.demo.get_sent_scrolls(true)
+	elif state.is_online():
+		## Cache-first current list; hidden loaded async / from cache key.
+		if typeof(state.cached_sent.get("sent_scrolls")) == TYPE_ARRAY:
+			visible_items = state.cached_sent.get("sent_scrolls", [])
+		if typeof(state.cached_sent.get("hidden_sent_scrolls")) == TYPE_ARRAY:
+			hidden_items = state.cached_sent.get("hidden_sent_scrolls", [])
 	var showing: Array = hidden_items if _sent_show_hidden else visible_items
 
 	_begin_nav_transition()
@@ -3038,23 +3115,22 @@ func _show_sent() -> void:
 	_finish_nav_transition()
 	_log_nav_paint("sent", nav_t0)
 	if state.is_online() and not state.cache_is_fresh("sent"):
-		var sent_result: Dictionary = await state.scrolls.get_sent_scrolls()
+		var sent_result: Dictionary = await state.scrolls.get_sent_scrolls("current")
+		var hidden_result: Dictionary = await state.scrolls.get_sent_scrolls("hidden")
 		if _current_screen != "sent":
 			return
 		if bool(sent_result.get("ok", false)):
 			var data: Dictionary = sent_result.get("data", {}) if typeof(sent_result.get("data")) == TYPE_DICTIONARY else {}
 			state.cached_sent = data
+			if bool(hidden_result.get("ok", false)):
+				var hdata: Dictionary = hidden_result.get("data", {}) if typeof(hidden_result.get("data")) == TYPE_DICTIONARY else {}
+				state.cached_sent["hidden_sent_scrolls"] = hdata.get("sent_scrolls", [])
 			state.mark_cache_fresh("sent")
 			_show_sent()
-		elif sent_items.is_empty():
+		elif visible_items.is_empty() and hidden_items.is_empty():
 			var err := str(sent_result.get("error", "Could not load sent scrolls."))
 			if not err.is_empty():
 				_show_toast(err)
-
-
-func _demo_sent_including_hidden() -> Array:
-	## Demo get_sent_scrolls filters deleted_at; local hide does not use delete.
-	return state.demo.get_sent_scrolls()
 
 
 func _build_sent_item_card(s: Dictionary, is_hidden_view: bool) -> PanelContainer:
@@ -3064,6 +3140,7 @@ func _build_sent_item_card(s: Dictionary, is_hidden_view: bool) -> PanelContaine
 	col.add_theme_constant_override("separation", MobileUi.GAP_RELATED)
 	panel.add_child(col)
 	var recipient: Dictionary = s.get("recipient", {}) if typeof(s.get("recipient")) == TYPE_DICTIONARY else {}
+	var recip_name := str(s.get("recipient_display_name", recipient.get("display_name", ProductStrings.PERSON)))
 	var unlock_at := str(s.get("unlock_at", ""))
 	var unlock_unix := int(s.get("unlock_at_unix", 0))
 	if unlock_unix == 0 and not unlock_at.is_empty():
@@ -3072,7 +3149,7 @@ func _build_sent_item_card(s: Dictionary, is_hidden_view: bool) -> PanelContaine
 	title_lab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title_lab.text = "%s → %s" % [
 		str(s.get("title", "Love Note")),
-		str(s.get("recipient_display_name", recipient.get("display_name", ProductStrings.PERSON))),
+		recip_name,
 	]
 	MobileUi.apply_label(title_lab, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY, true)
 	col.add_child(title_lab)
@@ -3085,33 +3162,139 @@ func _build_sent_item_card(s: Dictionary, is_hidden_view: bool) -> PanelContaine
 	var has_pw := bool(s.get("has_password", false))
 	if has_pw and not is_hidden_view:
 		col.add_child(_build_sent_password_reveal_row(sid, s))
+	var actions := HBoxContainer.new()
+	actions.add_theme_constant_override("separation", 8)
+	col.add_child(actions)
 	if is_hidden_view:
-		col.add_child(_make_button("Restore", func() -> void:
-			state.unhide_sent_scroll_local(sid)
-			_show_toast("Restored to Sent")
-			_show_sent()
+		actions.add_child(_make_button("Unhide", func() -> void:
+			_unhide_sent(sid)
 		, Vector2(0, MobileUi.TOUCH_SECONDARY_H)))
 	else:
-		col.add_child(_make_button("Hide from Sent", func() -> void:
+		actions.add_child(_make_button("Hide", func() -> void:
 			_hide_sent_with_undo(sid)
 		, Vector2(0, MobileUi.TOUCH_SECONDARY_H)))
+	actions.add_child(_make_button("Delete", func() -> void:
+		_confirm_delete_sent(sid, recip_name)
+	, Vector2(0, MobileUi.TOUCH_SECONDARY_H)))
 	return panel
 
 
 func _hide_sent_with_undo(scroll_id: String) -> void:
-	## Local hide is recoverable — do not soft-delete on the server.
+	## Server-side Hide — recoverable via Unhide. Not permanent Delete.
 	if scroll_id.is_empty():
 		return
-	state.hide_sent_scroll_local(scroll_id)
-	_pending_hide_sent_id = scroll_id
-	_show_snackbar("Hidden from Sent history", "Undo", func() -> void:
-		state.unhide_sent_scroll_local(scroll_id)
-		_pending_hide_sent_id = ""
-		if _current_screen == "sent":
+	if state.is_demo():
+		var dr := state.demo.hide_sent_scroll(scroll_id)
+		if bool(dr.get("ok", false)):
+			_pending_hide_sent_id = scroll_id
+			_show_snackbar("Scroll hidden", "Undo", func() -> void:
+				_unhide_sent(scroll_id)
+			)
+			if _current_screen == "sent":
+				_show_sent()
+		else:
+			_show_toast(str(dr.get("error", "Could not hide.")))
+		return
+	if state.is_online():
+		var result: Dictionary = await state.scrolls.hide_sent_scroll(scroll_id)
+		if bool(result.get("ok", false)):
+			state.invalidate_cache("sent")
+			_pending_hide_sent_id = scroll_id
+			_show_snackbar("Scroll hidden", "Undo", func() -> void:
+				_unhide_sent(scroll_id)
+			)
+			if _current_screen == "sent":
+				_show_sent()
+		else:
+			_show_toast(str(result.get("error", "Could not hide.")))
+		return
+	_show_toast("Backend is not configured.")
+
+
+func _unhide_sent(scroll_id: String) -> void:
+	if scroll_id.is_empty():
+		return
+	if state.is_demo():
+		var dr := state.demo.unhide_sent_scroll(scroll_id)
+		if bool(dr.get("ok", false)):
+			_pending_hide_sent_id = ""
+			_show_toast("Restored to Sent")
 			_show_sent()
+		else:
+			_show_toast(str(dr.get("error", "Could not unhide.")))
+		return
+	if state.is_online():
+		var result: Dictionary = await state.scrolls.unhide_sent_scroll(scroll_id)
+		if bool(result.get("ok", false)):
+			state.invalidate_cache("sent")
+			_pending_hide_sent_id = ""
+			_show_toast("Restored to Sent")
+			_show_sent()
+		else:
+			_show_toast(str(result.get("error", "Could not unhide.")))
+		return
+	_show_toast("Backend is not configured.")
+
+
+func _confirm_delete_sent(scroll_id: String, recipient_name: String) -> void:
+	_overlay.visible = true
+	for c in _overlay.get_children():
+		c.queue_free()
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.75)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_overlay.add_child(dim)
+	var box := VBoxContainer.new()
+	var modal_w := 354.0
+	var modal_h := 320.0
+	box.set_anchors_preset(Control.PRESET_CENTER)
+	box.position = Vector2(-modal_w * 0.5, -modal_h * 0.5)
+	box.size = Vector2(modal_w, modal_h)
+	box.add_theme_constant_override("separation", MobileUi.GAP_RELATED)
+	_overlay.add_child(box)
+	var title := Label.new()
+	title.text = "Delete permanently?"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", MobileUi.font(MobileUi.SIZE_SCREEN_TITLE))
+	title.add_theme_color_override("font_color", Color(0.98, 0.86, 0.45))
+	box.add_child(title)
+	var body := Label.new()
+	body.text = "Delete this scroll permanently from your Sent history? %s will still keep their copy." % (
+		recipient_name if not recipient_name.is_empty() else "Your Person"
 	)
-	if _current_screen == "sent":
-		_show_sent()
+	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	body.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	body.add_theme_font_size_override("font_size", MobileUi.font(MobileUi.SIZE_BODY))
+	body.add_theme_color_override("font_color", Color(0.9, 0.85, 0.95))
+	box.add_child(body)
+	box.add_child(_make_button("Delete Permanently", func() -> void:
+		_hide_overlay()
+		_delete_sent(scroll_id)
+	))
+	box.add_child(_make_button("Cancel", _hide_overlay, Vector2(180, MobileUi.font_touch(MobileUi.TOUCH_SECONDARY_H))))
+
+
+func _delete_sent(scroll_id: String) -> void:
+	if scroll_id.is_empty():
+		return
+	if state.is_demo():
+		var dr := state.demo.delete_sent_scroll(scroll_id)
+		if bool(dr.get("ok", false)):
+			_show_toast("Scroll deleted from your Sent history")
+			_show_sent()
+		else:
+			_show_toast(str(dr.get("error", "Could not delete.")))
+		return
+	if state.is_online():
+		var result: Dictionary = await state.scrolls.delete_sent_scroll(scroll_id)
+		if bool(result.get("ok", false)):
+			state.invalidate_cache("sent")
+			_show_toast("Scroll deleted from your Sent history")
+			_show_sent()
+		else:
+			_show_toast(str(result.get("error", "Could not delete.")))
+		return
+	_show_toast("Backend is not configured.")
 
 
 func _build_sent_password_reveal_row(scroll_id: String, item: Dictionary) -> VBoxContainer:
@@ -3702,6 +3885,10 @@ func _build_android_diagnostics_panel() -> VBoxContainer:
 			+ "Notification permission: %s\n"
 			+ "Location Services: %s\n"
 			+ "Location bridge: %s\n"
+			+ "Location request state: %s\n"
+			+ "Last native request: %s\n"
+			+ "Last callback: %s\n"
+			+ "Last failure stage: %s\n"
 			+ "QR bridge: %s\n"
 			+ "QR encoder: %s\n"
 			+ "QR scanner: %s\n"
@@ -3717,6 +3904,10 @@ func _build_android_diagnostics_panel() -> VBoxContainer:
 			str(snap.get("notification_permission", "Denied")),
 			str(snap.get("location_services", "Off")),
 			str(snap.get("location_bridge", "Missing")),
+			str(snap.get("location_request_state", "Idle")),
+			str(snap.get("last_native_request", "Not Started")),
+			str(snap.get("last_callback", "Not Received")),
+			str(snap.get("last_failure_stage", "None")),
 			str(snap.get("qr_bridge", "Missing")),
 			str(snap.get("qr_encoder", "Missing")),
 			str(snap.get("qr_scanner", "Missing")),

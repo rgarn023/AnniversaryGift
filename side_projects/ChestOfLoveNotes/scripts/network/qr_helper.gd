@@ -1,6 +1,8 @@
 extends RefCounted
 class_name QrHelper
 ## Show-My-Code encoding + Scan Person Code camera bridge.
+## Capability checks use NativePluginUtil — never gate solely on Object.has_method()
+## for Android @UsedByGodot JNI methods (physical Galaxy failure mode).
 
 const PLUGIN_NAME := "ChestQr"
 const DEEP_LINK_PREFIX := "chestoflovenotes://connect/"
@@ -42,17 +44,17 @@ static func is_coln_connect_payload(raw: String) -> bool:
 
 
 static func _plugin():
-	if Engine.has_singleton(PLUGIN_NAME):
-		return Engine.get_singleton(PLUGIN_NAME)
-	return null
+	return NativePluginUtil.get_singleton(PLUGIN_NAME)
 
 
 static func available() -> bool:
-	var p = _plugin()
-	if p == null:
+	## QR bridge = ChestQr singleton registered.
+	if not NativePluginUtil.bridge_available(PLUGIN_NAME):
 		return false
-	if p.has_method("qr_plugin_available"):
-		return bool(p.qr_plugin_available())
+	if NativePluginUtil.method_available(PLUGIN_NAME, "qr_plugin_available"):
+		var v: Variant = NativePluginUtil.call_method(PLUGIN_NAME, "qr_plugin_available")
+		if v != null:
+			return bool(v)
 	return true
 
 
@@ -64,9 +66,8 @@ static func has_camera_permission() -> bool:
 		return true
 	var os_granted := _os_camera_permission_granted()
 	var plugin_granted := false
-	var p = _plugin()
-	if p != null and p.has_method("has_camera_permission"):
-		plugin_granted = bool(p.has_camera_permission())
+	if NativePluginUtil.method_available(PLUGIN_NAME, "has_camera_permission"):
+		plugin_granted = bool(NativePluginUtil.call_method(PLUGIN_NAME, "has_camera_permission"))
 	if os_granted or plugin_granted:
 		return true
 	return false
@@ -88,42 +89,47 @@ static func camera_bridge_available() -> bool:
 
 
 static func encoder_available() -> bool:
-	var p = _plugin()
-	return p != null and p.has_method("encode_qr_png_base64")
+	## Packaged ChestQr always ships encode_qr_png_base64.
+	return NativePluginUtil.method_available(PLUGIN_NAME, "encode_qr_png_base64")
 
 
 static func scanner_available() -> bool:
-	var p = _plugin()
-	return p != null and p.has_method("start_qr_scan")
+	## Packaged ChestQr always ships start_qr_scan (+ camera permission probe).
+	return NativePluginUtil.method_available(PLUGIN_NAME, "start_qr_scan")
+
+
+static func capabilities_snapshot() -> Dictionary:
+	return {
+		"qr_bridge": "Available" if available() else "Missing",
+		"qr_encoder": "Available" if encoder_available() else "Missing",
+		"qr_scanner": "Available" if scanner_available() else "Missing",
+	}
 
 
 static func request_camera_permission() -> void:
 	if OS.get_name() == "Android" and OS.has_method("request_permission"):
 		OS.request_permission("android.permission.CAMERA")
-	var p = _plugin()
-	if p != null and p.has_method("request_camera_permission"):
-		p.request_camera_permission()
+	if NativePluginUtil.method_available(PLUGIN_NAME, "request_camera_permission"):
+		NativePluginUtil.call_method(PLUGIN_NAME, "request_camera_permission")
 
 
 static func open_app_settings() -> void:
-	var p = _plugin()
-	if p != null and p.has_method("open_app_settings"):
-		p.open_app_settings()
+	if NativePluginUtil.method_available(PLUGIN_NAME, "open_app_settings"):
+		NativePluginUtil.call_method(PLUGIN_NAME, "open_app_settings")
 
 
 static func encode_png_base64(payload: String, size_px: int = 512) -> String:
 	## Encode via Android ZXing; returns "" if missing plugin or verify-decode fails.
-	var p = _plugin()
-	if p != null and p.has_method("encode_qr_png_base64"):
-		return str(p.encode_qr_png_base64(payload, size_px))
-	return ""
+	if not encoder_available():
+		return ""
+	var result: Variant = NativePluginUtil.call_method(PLUGIN_NAME, "encode_qr_png_base64", [payload, size_px])
+	return str(result) if result != null else ""
 
 
 static func verify_roundtrip(payload: String, size_px: int = 512) -> bool:
-	var p = _plugin()
-	if p != null and p.has_method("verify_qr_roundtrip"):
-		var raw := str(p.verify_qr_roundtrip(payload, size_px))
-		return raw.begins_with("ok|")
+	if NativePluginUtil.method_available(PLUGIN_NAME, "verify_qr_roundtrip"):
+		var raw: Variant = NativePluginUtil.call_method(PLUGIN_NAME, "verify_qr_roundtrip", [payload, size_px])
+		return str(raw).begins_with("ok|")
 	## Fallback: encode then require non-empty PNG (encode already verify-decodes on Android).
 	return not encode_png_base64(payload, size_px).is_empty()
 
@@ -165,11 +171,11 @@ func ensure_signals() -> void:
 
 func start_scan() -> bool:
 	ensure_signals()
-	var p = _plugin()
-	if p == null or not p.has_method("start_qr_scan"):
+	if not scanner_available():
 		qr_scan_error.emit("unavailable")
 		return false
-	return bool(p.start_qr_scan())
+	var started: Variant = NativePluginUtil.call_method(PLUGIN_NAME, "start_qr_scan")
+	return bool(started)
 
 
 func _on_scanned(text: String) -> void:

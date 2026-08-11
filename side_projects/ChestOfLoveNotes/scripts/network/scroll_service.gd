@@ -10,7 +10,9 @@ func _init(p_api: ApiClient) -> void:
 	api = p_api
 
 
-func get_chest() -> Dictionary:
+func get_chest(view: String = "current") -> Dictionary:
+	if view == "hidden":
+		return await api.call_edge_function("get-chest", {"view": "hidden"}, "POST")
 	return await api.call_edge_function("get-chest", {}, "GET")
 
 
@@ -18,7 +20,9 @@ func get_saved_scrolls(filters: Dictionary = {}) -> Dictionary:
 	return await api.call_edge_function("get-saved-scrolls", filters, "POST")
 
 
-func get_sent_scrolls() -> Dictionary:
+func get_sent_scrolls(view: String = "current") -> Dictionary:
+	if view == "hidden":
+		return await api.call_edge_function("get-sent-scrolls", {"view": "hidden"}, "POST")
 	return await api.call_edge_function("get-sent-scrolls", {}, "GET")
 
 
@@ -99,13 +103,39 @@ func set_scroll_favorite(scroll_id: String, is_favorite: bool) -> Dictionary:
 	}, "POST")
 
 
+func hide_received_scroll(scroll_id: String) -> Dictionary:
+	return await api.call_edge_function("hide-received-scroll", {
+		"scroll_id": scroll_id,
+	}, "POST")
+
+
+func unhide_received_scroll(scroll_id: String) -> Dictionary:
+	return await api.call_edge_function("unhide-received-scroll", {
+		"scroll_id": scroll_id,
+	}, "POST")
+
+
+func hide_sent_scroll(scroll_id: String) -> Dictionary:
+	return await api.call_edge_function("hide-sent-scroll", {
+		"scroll_id": scroll_id,
+	}, "POST")
+
+
+func unhide_sent_scroll(scroll_id: String) -> Dictionary:
+	return await api.call_edge_function("unhide-sent-scroll", {
+		"scroll_id": scroll_id,
+	}, "POST")
+
+
 func delete_received_scroll(scroll_id: String) -> Dictionary:
+	## Permanent per-user delete (recipient copy only).
 	return await api.call_edge_function("delete-received-scroll", {
 		"scroll_id": scroll_id,
 	}, "POST")
 
 
 func delete_sent_scroll(scroll_id: String) -> Dictionary:
+	## Permanent per-user delete (sender copy only).
 	return await api.call_edge_function("delete-sent-scroll", {
 		"scroll_id": scroll_id,
 	}, "POST")

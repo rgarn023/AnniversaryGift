@@ -7,10 +7,7 @@ interface Body {
   scroll_id: string;
 }
 
-/**
- * Permanently deletes the recipient's copy only (per-user).
- * Does not remove sender Sent history. Physical erasure only when both parties deleted.
- */
+/** Sender Unhide — restores to normal Sent list. */
 Deno.serve(async (req) => {
   const cors = handleCors(req);
   if (cors) return cors;
@@ -31,43 +28,36 @@ Deno.serve(async (req) => {
 
     const { data: scroll } = await service
       .from("scrolls")
-      .select("id, recipient_id")
+      .select("id, sender_id")
       .eq("id", body.scroll_id)
       .maybeSingle();
 
     if (!scroll) {
       throw new AppError("not_found", "Scroll not found", 404);
     }
-    if (scroll.recipient_id !== me) {
-      throw new AppError(
-        "forbidden",
-        "Only the recipient can delete their copy",
-        403,
-      );
+    if (scroll.sender_id !== me) {
+      throw new AppError("forbidden", "Only the sender can unhide this sent entry", 403);
     }
 
-    const { data: updated, error } = await userClient.rpc(
-      "soft_delete_recipient_scroll",
-      { p_scroll_id: body.scroll_id },
-    );
+    const { data: updated, error } = await userClient.rpc("unhide_sender_scroll", {
+      p_scroll_id: body.scroll_id,
+    });
 
     if (error || !updated) {
       console.error(error);
-      throw new AppError("delete_failed", "Could not soft-delete received scroll", 400);
+      throw new AppError("unhide_failed", "Could not unhide sent scroll", 400);
     }
 
     const row = Array.isArray(updated) ? updated[0] : updated;
     return jsonResponse({
       ok: true,
-      soft_deleted: true,
-      permanently_deleted_for_user: true,
-      physical_erasure: false,
+      hidden: false,
       scroll_id: body.scroll_id,
-      recipient_state: {
+      sender_state: {
         scroll_id: row.scroll_id,
-        recipient_id: row.recipient_id,
-        deleted_at: row.deleted_at,
-        hidden_at: row.hidden_at ?? null,
+        sender_id: row.sender_id,
+        hidden_at: row.hidden_at,
+        deleted_at: row.deleted_at ?? null,
       },
     });
   } catch (err) {

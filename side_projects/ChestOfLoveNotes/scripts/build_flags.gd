@@ -19,5 +19,5 @@ const SHOW_ONBOARDING_BANNER := false
 const DEV_CHEST_SCROLL_PREVIEW := false
 ## Debug/test builds may offer "Send to Myself (Test)" using the real send path.
 const DEBUG_SELF_SEND := true
-const APP_VERSION_NAME := "0.1.30-backend-location-qr-splash-fix"
-const APP_VERSION_CODE := 30
+const APP_VERSION_NAME := "0.1.31-native-qr-location-delete-fix"
+const APP_VERSION_CODE := 31

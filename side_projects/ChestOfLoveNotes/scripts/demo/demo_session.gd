@@ -135,12 +135,14 @@ func _ensure_party_states(scroll_id: String, sender_id: String, recipient_id: St
 			"last_opened_at": null,
 			"opened_count": 0,
 			"deleted_at": null,
+			"hidden_at": null,
 		}
 	if not sender_states.has(scroll_id):
 		sender_states[scroll_id] = {
 			"scroll_id": scroll_id,
 			"sender_id": sender_id,
 			"deleted_at": null,
+			"hidden_at": null,
 		}
 
 
@@ -191,9 +193,13 @@ func get_friends() -> Array[Dictionary]:
 
 
 func get_chest_items(filter_name: String = "all") -> Array[Dictionary]:
-	## Current Scrolls: not recipient-deleted and not yet saved.
+	## Current Scrolls: not recipient-deleted, not hidden, and not yet saved.
+	## filter_name == "hidden" → Hidden/Archived recoverable view.
 	var items: Array[Dictionary] = []
+	var hidden_view := filter_name == "hidden"
 	for req in friend_requests:
+		if hidden_view:
+			break
 		if str(req.recipient_id) == current_user_id and str(req.status) == "pending":
 			var sender := get_profile(str(req.sender_id))
 			items.append({
@@ -213,13 +219,23 @@ func get_chest_items(filter_name: String = "all") -> Array[Dictionary]:
 			continue
 		if st.get("deleted_at") != null:
 			continue
-		if bool(st.get("is_saved", false)):
-			continue
-		items.append(_public_recipient_item(s, st))
+		var is_hidden := st.get("hidden_at") != null
+		if hidden_view:
+			if not is_hidden:
+				continue
+		else:
+			if is_hidden:
+				continue
+			if bool(st.get("is_saved", false)):
+				continue
+		var pub := _public_recipient_item(s, st)
+		if is_hidden or hidden_view:
+			pub["is_hidden"] = true
+		items.append(pub)
 	items.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
 		return _sort_rank(a) < _sort_rank(b)
 	)
-	if filter_name == "all":
+	if filter_name == "all" or filter_name == "hidden":
 		return items
 	var filtered: Array[Dictionary] = []
 	for item in items:
@@ -249,6 +265,8 @@ func get_saved_scrolls(filters: Dictionary = {}) -> Array[Dictionary]:
 			continue
 		if st.get("deleted_at") != null:
 			continue
+		if st.get("hidden_at") != null:
+			continue
 		if bool(filters.get("favorites_only", false)) and not bool(st.get("is_favorite", false)):
 			continue
 		if bool(filters.get("password_protected_only", false)) and not bool(s.get("has_magic_password", false)):
@@ -264,13 +282,19 @@ func get_saved_scrolls(filters: Dictionary = {}) -> Array[Dictionary]:
 	return out
 
 
-func get_sent_scrolls() -> Array[Dictionary]:
+func get_sent_scrolls(include_hidden: bool = false) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	for s in scrolls:
 		if str(s.sender_id) != current_user_id:
 			continue
 		var sst: Dictionary = sender_states.get(str(s.id), {})
 		if sst.is_empty() or sst.get("deleted_at") != null:
+			continue
+		var is_hidden := sst.get("hidden_at") != null
+		if include_hidden:
+			if not is_hidden:
+				continue
+		elif is_hidden:
 			continue
 		var rst: Dictionary = recipient_states.get(str(s.id), {})
 		var recip := get_profile(str(s.recipient_id))
@@ -512,13 +536,59 @@ func set_scroll_favorite(scroll_id: String, is_favorite: bool) -> Dictionary:
 	return {"ok": true, "recipient_state": st.duplicate(true)}
 
 
+func hide_received_scroll(scroll_id: String) -> Dictionary:
+	var st: Dictionary = recipient_states.get(scroll_id, {})
+	if st.is_empty() or str(st.get("recipient_id", "")) != current_user_id:
+		return {"ok": false, "error": "Not your scroll."}
+	if st.get("deleted_at") != null:
+		return {"ok": false, "error": "This scroll is no longer available."}
+	st["hidden_at"] = _iso(0)
+	recipient_states[scroll_id] = st
+	return {"ok": true, "hidden": true}
+
+
+func unhide_received_scroll(scroll_id: String) -> Dictionary:
+	var st: Dictionary = recipient_states.get(scroll_id, {})
+	if st.is_empty() or str(st.get("recipient_id", "")) != current_user_id:
+		return {"ok": false, "error": "Not your scroll."}
+	if st.get("deleted_at") != null:
+		return {"ok": false, "error": "This scroll is no longer available."}
+	st["hidden_at"] = null
+	recipient_states[scroll_id] = st
+	return {"ok": true, "hidden": false}
+
+
+func hide_sent_scroll(scroll_id: String) -> Dictionary:
+	var st: Dictionary = sender_states.get(scroll_id, {})
+	if st.is_empty() or str(st.get("sender_id", "")) != current_user_id:
+		return {"ok": false, "error": "Not your sent scroll."}
+	if st.get("deleted_at") != null:
+		return {"ok": false, "error": "This scroll is no longer available."}
+	st["hidden_at"] = _iso(0)
+	sender_states[scroll_id] = st
+	return {"ok": true, "hidden": true}
+
+
+func unhide_sent_scroll(scroll_id: String) -> Dictionary:
+	var st: Dictionary = sender_states.get(scroll_id, {})
+	if st.is_empty() or str(st.get("sender_id", "")) != current_user_id:
+		return {"ok": false, "error": "Not your sent scroll."}
+	if st.get("deleted_at") != null:
+		return {"ok": false, "error": "This scroll is no longer available."}
+	st["hidden_at"] = null
+	sender_states[scroll_id] = st
+	return {"ok": true, "hidden": false}
+
+
 func delete_received_scroll(scroll_id: String) -> Dictionary:
 	var st: Dictionary = recipient_states.get(scroll_id, {})
 	if st.is_empty() or str(st.get("recipient_id", "")) != current_user_id:
 		return {"ok": false, "error": "Not your scroll."}
 	st["deleted_at"] = _iso(0)
+	st["hidden_at"] = null
 	recipient_states[scroll_id] = st
-	return {"ok": true, "soft_deleted": true, "physical_erasure": false}
+	_maybe_purge_both_deleted(scroll_id)
+	return {"ok": true, "soft_deleted": true, "permanently_deleted_for_user": true, "physical_erasure": false}
 
 
 func delete_sent_scroll(scroll_id: String) -> Dictionary:
@@ -526,8 +596,24 @@ func delete_sent_scroll(scroll_id: String) -> Dictionary:
 	if st.is_empty() or str(st.get("sender_id", "")) != current_user_id:
 		return {"ok": false, "error": "Not your sent scroll."}
 	st["deleted_at"] = _iso(0)
+	st["hidden_at"] = null
 	sender_states[scroll_id] = st
-	return {"ok": true, "soft_deleted": true, "recalled": false, "physical_erasure": false}
+	_maybe_purge_both_deleted(scroll_id)
+	return {"ok": true, "soft_deleted": true, "permanently_deleted_for_user": true, "recalled": false, "physical_erasure": false}
+
+
+func _maybe_purge_both_deleted(scroll_id: String) -> void:
+	var rst: Dictionary = recipient_states.get(scroll_id, {})
+	var sst: Dictionary = sender_states.get(scroll_id, {})
+	if rst.get("deleted_at") == null or sst.get("deleted_at") == null:
+		return
+	scroll_bodies.erase(scroll_id)
+	recipient_states.erase(scroll_id)
+	sender_states.erase(scroll_id)
+	for i in range(scrolls.size() - 1, -1, -1):
+		if str(scrolls[i].get("id", "")) == scroll_id:
+			scrolls.remove_at(i)
+			break
 
 
 func _password_allowed(scroll_id: String) -> bool:

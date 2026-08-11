@@ -8,8 +8,9 @@ interface Body {
 }
 
 /**
- * Soft-deletes the sender's Sent Scrolls entry only.
- * Does not recall the message, remove the recipient copy, or delete contents.
+ * Permanently deletes the sender's Sent Scrolls entry only (per-user).
+ * Does not recall the message or remove the recipient copy.
+ * Physical erasure only when both parties deleted.
  */
 Deno.serve(async (req) => {
   const cors = handleCors(req);
@@ -60,6 +61,7 @@ Deno.serve(async (req) => {
     return jsonResponse({
       ok: true,
       soft_deleted: true,
+      permanently_deleted_for_user: true,
       recalled: false,
       physical_erasure: false,
       scroll_id: body.scroll_id,
@@ -67,6 +69,7 @@ Deno.serve(async (req) => {
         scroll_id: row.scroll_id,
         sender_id: row.sender_id,
         deleted_at: row.deleted_at,
+        hidden_at: row.hidden_at ?? null,
       },
     });
   } catch (err) {

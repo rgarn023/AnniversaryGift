@@ -49,13 +49,27 @@ Deno.test("open-scroll uses mark_recipient_scroll_opened via user client", async
   );
 });
 
-Deno.test("get-chest uses recipient state and excludes saved/deleted", async () => {
+Deno.test("get-chest uses recipient state and excludes saved/deleted/hidden", async () => {
   const src = await readFn("get-chest");
   assertStringIncludes(src, "scroll_recipient_states");
   assertStringIncludes(src, 'eq("is_saved", false)');
   assertStringIncludes(src, '.is("deleted_at", null)');
+  assertStringIncludes(src, "hidden_at");
   assertStringIncludes(src, "friend_requests");
   assert(!src.includes("ciphertext"));
+});
+
+Deno.test("hide/unhide edge functions call secured hide RPCs", async () => {
+  const hideR = await readFn("hide-received-scroll");
+  const unhideR = await readFn("unhide-received-scroll");
+  const hideS = await readFn("hide-sent-scroll");
+  const unhideS = await readFn("unhide-sent-scroll");
+  assertStringIncludes(hideR, "hide_recipient_scroll");
+  assertStringIncludes(unhideR, "unhide_recipient_scroll");
+  assertStringIncludes(hideS, "hide_sender_scroll");
+  assertStringIncludes(unhideS, "unhide_sender_scroll");
+  assertStringIncludes(hideR, "requirePrivateMember");
+  assertStringIncludes(hideS, "requirePrivateMember");
 });
 
 Deno.test("get-saved-scrolls filters saved recipient state", async () => {

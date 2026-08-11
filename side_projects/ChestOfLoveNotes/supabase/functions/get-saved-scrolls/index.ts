@@ -54,11 +54,12 @@ Deno.serve(async (req) => {
     let query = service
       .from("scroll_recipient_states")
       .select(
-        "scroll_id, recipient_id, is_read, is_saved, is_favorite, first_opened_at, last_opened_at, opened_count, deleted_at, created_at, updated_at",
+        "scroll_id, recipient_id, is_read, is_saved, is_favorite, first_opened_at, last_opened_at, opened_count, deleted_at, hidden_at, created_at, updated_at",
       )
       .eq("recipient_id", me)
       .eq("is_saved", true)
       .is("deleted_at", null)
+      .is("hidden_at", null)
       .order("last_opened_at", { ascending, nullsFirst: false });
 
     if (filters.favorites_only) {
