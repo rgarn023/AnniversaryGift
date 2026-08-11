@@ -520,33 +520,26 @@ func _build_recipient_card() -> PanelContainer:
 	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	col.clip_contents = true
 	col.add_child(_section_heading("Send To"))
-	## Bound the recipient row so long names cannot widen the page.
-	var row_wrap := Control.new()
-	row_wrap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row_wrap.clip_contents = true
-	row_wrap.custom_minimum_size = Vector2(0, MobileUi.font_touch(54))
-	col.add_child(row_wrap)
+	## Production recipient is a fixed label — never covered by a full-rect button.
 	_recipient_label = Label.new()
-	_recipient_label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_recipient_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_recipient_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_recipient_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_recipient_label.add_theme_font_size_override("font_size", 19)
+	_recipient_label.custom_minimum_size = Vector2(0, MobileUi.font_touch(40))
+	_recipient_label.add_theme_font_size_override("font_size", 22)
 	_recipient_label.add_theme_color_override("font_color", COL_TEXT)
-	row_wrap.add_child(_recipient_label)
-	## Debug self-send still uses a button path; production shows fixed label.
+	col.add_child(_recipient_label)
+	## Debug-only self-send sits BELOW the Person label — never overlays or replaces it.
 	_recipient_btn = Button.new()
-	_recipient_btn.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_recipient_btn.custom_minimum_size = Vector2(0, MobileUi.font_touch(54))
+	_recipient_btn.custom_minimum_size = Vector2(0, MobileUi.font_touch(44))
 	_recipient_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_recipient_btn.focus_mode = Control.FOCUS_NONE
-	_recipient_btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	_recipient_btn.alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_recipient_btn.clip_text = true
-	_recipient_btn.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	_style_row_button(_recipient_btn)
-	## Debug-only: tap cycles Myself (Test) ↔ My Person. No recipient modal.
+	_style_secondary_button(_recipient_btn)
 	_recipient_btn.pressed.connect(_toggle_debug_self_send)
 	_recipient_btn.visible = false
-	row_wrap.add_child(_recipient_btn)
+	col.add_child(_recipient_btn)
 	_need_person_panel = _make_card()
 	var need_col := _card_body(_need_person_panel)
 	var need_lab := Label.new()
@@ -1221,7 +1214,12 @@ func _on_use_current_location() -> void:
 	var preserved_radius := _location_radius_m
 	var fix: Dictionary = await LocationHelper.get_fresh_fix(true)
 	if not bool(fix.get("ok", false)):
-		_location_status.text = str(fix.get("error", "We couldn't determine your location. Try again."))
+		var err := str(fix.get("error", "We couldn't determine your location. Try again."))
+		if bool(fix.get("bridge_missing", false)):
+			if OS.is_debug_build():
+				print("[COLN-LOC] LOCATION BRIDGE MISSING")
+				err = "LOCATION BRIDGE MISSING"
+		_location_status.text = err
 		_finish_current_location_attempt()
 		_update_validation()
 		return
@@ -2159,31 +2157,34 @@ func _sync_person_gate() -> void:
 func _refresh_recipient_row() -> void:
 	if _recipient_label == null and _recipient_btn == null:
 		return
-	## Production: fixed "To X" from active Person — no recipient picker.
-	## Debug self-send is a separate control and must not replace/hide Person.
+	## Production: always "To <Person>" from active pairing — no recipient picker.
+	## Debug self-send is a separate control under the label and never hides Person.
 	var self_mode := bool(_selected_friend.get("is_self_test", false))
 	if not my_person.is_empty():
+		## Keep production recipient bound to My Person even while debug self-send is on.
+		if not self_mode:
+			_selected_friend = my_person.duplicate(true)
 		var person_name := IdentityHelper.display_name_from_profile(my_person, ProductStrings.PERSON)
 		if _recipient_label:
 			_recipient_label.visible = true
 			_recipient_label.text = ProductStrings.to_label(person_name)
 		if _recipient_btn:
 			_recipient_btn.visible = _self_send_enabled()
-			_recipient_btn.text = "✓ Test with myself" if self_mode else "Test with myself"
+			_recipient_btn.text = "✓ Send to Myself (Test)" if self_mode else "Send to Myself (Test)"
 	elif self_mode:
 		if _recipient_label:
 			_recipient_label.visible = true
 			_recipient_label.text = ProductStrings.COMPOSE_NEED_PERSON
 		if _recipient_btn:
 			_recipient_btn.visible = _self_send_enabled()
-			_recipient_btn.text = "✓ Test with myself (no Person)"
+			_recipient_btn.text = "✓ Send to Myself (Test)"
 	else:
 		if _recipient_label:
 			_recipient_label.visible = true
 			_recipient_label.text = ProductStrings.COMPOSE_NEED_PERSON
 		if _recipient_btn:
 			_recipient_btn.visible = _self_send_enabled()
-			_recipient_btn.text = "Test with myself"
+			_recipient_btn.text = "Send to Myself (Test)"
 	_sync_person_gate()
 
 

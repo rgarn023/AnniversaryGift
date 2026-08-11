@@ -88,11 +88,11 @@ func _run() -> void:
 	_assert(map.contains("_gesture_layer"), "map gesture layer unchanged")
 
 	## VERSION / APK
-	_assert(flags.contains("APP_VERSION_CODE := 28"), "versionCode 28")
-	_assert(preset.contains("version/code=28"), "export versionCode 28")
-	_assert(preset.contains("current-location-qr-camera-fix-debug.apk"), "export APK name")
-	_assert(gitignore.contains("ChestOfLoveNotes-current-location-qr-camera-fix-debug.apk"), "APK gitignore allow")
-	_assert(BuildFlags.APP_VERSION_CODE >= 28, "BuildFlags >= 28")
+	_assert(flags.contains("APP_VERSION_CODE := 29"), "versionCode 29")
+	_assert(preset.contains("version/code=29"), "export versionCode 29")
+	_assert(preset.contains("android-bridges-compose-qr-fix-debug.apk"), "export APK name")
+	_assert(gitignore.contains("ChestOfLoveNotes-android-bridges-compose-qr-fix-debug.apk"), "APK gitignore allow")
+	_assert(BuildFlags.APP_VERSION_CODE >= 29, "BuildFlags >= 28")
 
 	print("=== Results: %d passed, %d failed ===" % [_passed, _failed])
 	quit(0 if _failed == 0 else 1)

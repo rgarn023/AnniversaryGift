@@ -57,12 +57,44 @@ static func available() -> bool:
 
 
 static func has_camera_permission() -> bool:
+	## Live Android CAMERA truth only — never onboarding/cached booleans.
+	## OR plugin + OS.get_granted_permissions so a null Activity in the plugin
+	## cannot falsely deny when Settings already shows Camera granted.
 	if OS.get_name() != "Android":
-		return false
+		return true
+	var os_granted := _os_camera_permission_granted()
+	var plugin_granted := false
 	var p = _plugin()
 	if p != null and p.has_method("has_camera_permission"):
-		return bool(p.has_camera_permission())
-	return OS.get_granted_permissions().has("android.permission.CAMERA")
+		plugin_granted = bool(p.has_camera_permission())
+	if os_granted or plugin_granted:
+		return true
+	return false
+
+
+static func _os_camera_permission_granted() -> bool:
+	if OS.get_name() != "Android":
+		return true
+	var granted: PackedStringArray = OS.get_granted_permissions()
+	for perm in granted:
+		var s := str(perm)
+		if s == "android.permission.CAMERA" or s.ends_with(".permission.CAMERA") or s.ends_with(".CAMERA") or s == "CAMERA":
+			return true
+	return false
+
+
+static func camera_bridge_available() -> bool:
+	return available() and _plugin() != null
+
+
+static func encoder_available() -> bool:
+	var p = _plugin()
+	return p != null and p.has_method("encode_qr_png_base64")
+
+
+static func scanner_available() -> bool:
+	var p = _plugin()
+	return p != null and p.has_method("start_qr_scan")
 
 
 static func request_camera_permission() -> void:

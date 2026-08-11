@@ -56,3 +56,4 @@ android/build/.cxx/
 !build/ChestOfLoveNotes-android-permissions-fix-debug.apk
 !build/ChestOfLoveNotes-current-location-person-repair-debug.apk
 !build/ChestOfLoveNotes-current-location-qr-camera-fix-debug.apk
+!build/ChestOfLoveNotes-android-bridges-compose-qr-fix-debug.apk

@@ -2041,19 +2041,21 @@ func _person_from_friends_cache() -> Dictionary:
 		var arr: Array = data.get("friends")
 		if typeof(arr[0]) == TYPE_DICTIONARY:
 			person = arr[0]
-	## Pairing existence ≠ profile hydration: enrich pending profiles from disk only.
-	if not person.is_empty() and bool(person.get("profile_pending", false)):
-		var cached2 := state.load_last_person_cache()
-		if str(cached2.get("id", "")) == str(person.get("id", "")):
-			if str(person.get("display_name", "")).is_empty() or str(person.get("display_name")) == "My Person":
-				person["display_name"] = str(cached2.get("display_name", "My Person"))
-			if str(person.get("username", "")).is_empty():
-				person["username"] = str(cached2.get("username", ""))
-	elif person.is_empty() and data.is_empty():
-		## Cold start before first get-friends — optional sticky identity only.
-		var cached := state.load_last_person_cache()
-		if not cached.is_empty():
-			return cached
+	## Pairing existence ≠ profile hydration: enrich pending profiles from disk.
+	if not person.is_empty() and str(person.get("id", "")).is_empty() == false:
+		if bool(person.get("profile_pending", false)):
+			var cached2 := state.load_last_person_cache()
+			if str(cached2.get("id", "")) == str(person.get("id", "")):
+				if str(person.get("display_name", "")).is_empty() or str(person.get("display_name")) == "My Person":
+					person["display_name"] = str(cached2.get("display_name", "My Person"))
+				if str(person.get("username", "")).is_empty():
+					person["username"] = str(cached2.get("username", ""))
+		return person
+	## Empty person in a non-empty payload (or cold start): use sticky identity for Compose.
+	## Cleared explicitly on disconnect via clear_last_person_cache().
+	var cached := state.load_last_person_cache()
+	if not cached.is_empty() and not str(cached.get("id", "")).is_empty():
+		return cached
 	return person
 
 
@@ -2100,7 +2102,11 @@ func _show_compose() -> void:
 	_add_bottom_nav("compose")
 	_finish_nav_transition()
 	_log_nav_paint("compose", nav_t0)
-	if state.is_online() and not state.cache_is_fresh("friends"):
+	## Always refresh when person is empty — do not trust a fresh-but-empty friends cache.
+	var need_person_refresh := state.is_online() and (
+		person.is_empty() or str(person.get("id", "")).is_empty() or not state.cache_is_fresh("friends")
+	)
+	if need_person_refresh:
 		var fr: Dictionary = await state.friends.get_my_person()
 		if _current_screen != "compose" or _compose_screen == null or not is_instance_valid(_compose_screen):
 			return
@@ -2109,7 +2115,8 @@ func _show_compose() -> void:
 			state.apply_friends_payload(data)
 			state.mark_cache_fresh("friends")
 			var fresh_person := _person_from_friends_cache()
-			if not fresh_person.is_empty() and fresh_person.hash() != person.hash():
+			if not fresh_person.is_empty():
+				## Always rebind Compose to the active Person (canonical recipient).
 				_compose_screen.setup_with_person(fresh_person, false, _compose_screen.get_draft(), me_profile)
 		else:
 			var err := str(fr.get("error", "Could not load My Person."))
@@ -2577,16 +2584,20 @@ func _ensure_my_connection_token(me: Dictionary) -> Dictionary:
 
 func _show_my_connection_code(me: Dictionary) -> void:
 	## Show My Code — no camera permission. Must not alter active My Person pairing.
+	## Connection Code text must remain visible even if QR image encoding fails.
 	me = await _ensure_my_connection_token(me)
 	var token := str(me.get("public_connection_token", "")).strip_edges()
-	if token.is_empty():
-		## QR failure must not disturb Mandy / active Person.
+	var friend_code := str(me.get("friend_code", "")).strip_edges()
+	if token.is_empty() and friend_code.is_empty():
+		## Token/code failure must not disturb Mandy / active Person.
 		_show_toast("Connection code unavailable. Your Person connection is unchanged.")
 		return
-	var link := QrHelper.deep_link_for_token(token)
-	if QrHelper.payload_contains_raw_uuid(link):
-		_show_toast("Connection code unavailable. Your Person connection is unchanged.")
-		return
+	var link := ""
+	if not token.is_empty():
+		link = QrHelper.deep_link_for_token(token)
+		if QrHelper.payload_contains_raw_uuid(link):
+			_show_toast("Connection code unavailable. Your Person connection is unchanged.")
+			return
 	_clear_overlay()
 	if _overlay == null:
 		return
@@ -2624,9 +2635,34 @@ func _show_my_connection_code(me: Dictionary) -> void:
 	help.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	MobileUi.apply_label(help, MobileUi.SIZE_HELPER, MobileUi.COLOR_HELPER, true)
 	col.add_child(help)
-	var qr_b64 := QrHelper.encode_png_base64(link, 640)
-	var qr_ok := not qr_b64.is_empty() and QrHelper.verify_roundtrip(link, 320)
-	var qr_tex := QrHelper.texture_from_base64_png(qr_b64) if qr_ok else null
+	## Encode once at display size. Do NOT re-verify at a different size (v28 discarded valid QR).
+	var qr_tex: Texture2D = null
+	var qr_diag := ""
+	if link.is_empty():
+		qr_diag = "no_public_token"
+	elif not Engine.has_singleton("ChestQr"):
+		qr_diag = "ChestQr singleton missing"
+		if OS.is_debug_build():
+			print("[COLN-QR] ChestQr singleton found=false")
+	else:
+		var p = Engine.get_singleton("ChestQr")
+		var has_encode := p != null and p.has_method("encode_qr_png_base64")
+		if OS.is_debug_build():
+			print("[COLN-QR] ChestQr singleton found=true encode_method=%s" % str(has_encode))
+		if not has_encode:
+			qr_diag = "encode method missing"
+		else:
+			var qr_b64 := QrHelper.encode_png_base64(link, 640)
+			if OS.is_debug_build():
+				print("[COLN-QR] encode call result bytes=%d" % (qr_b64.length() if not qr_b64.is_empty() else 0))
+			if qr_b64.is_empty():
+				qr_diag = "encode returned empty"
+			else:
+				qr_tex = QrHelper.texture_from_base64_png(qr_b64)
+				if OS.is_debug_build():
+					print("[COLN-QR] Texture creation success=%s" % str(qr_tex != null))
+				if qr_tex == null:
+					qr_diag = "texture create failed"
 	if qr_tex != null:
 		## High-contrast QR on white plate — no overlays on modules.
 		var plate := PanelContainer.new()
@@ -2644,14 +2680,35 @@ func _show_my_connection_code(me: Dictionary) -> void:
 		tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		plate.add_child(tr)
 	else:
-		var fallback := Label.new()
-		fallback.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		fallback.text = "QR image unavailable on this device build.\nShare this Connection Code:"
-		fallback.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		MobileUi.apply_label(fallback, MobileUi.SIZE_HELPER, MobileUi.COLOR_HELPER, true)
-		col.add_child(fallback)
+		if OS.is_debug_build():
+			var dbg := Label.new()
+			dbg.text = "QR generation unavailable"
+			if not qr_diag.is_empty():
+				dbg.text = "QR generation unavailable (%s)" % qr_diag
+			dbg.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			MobileUi.apply_label(dbg, MobileUi.SIZE_HELPER, MobileUi.COLOR_HELPER, true)
+			col.add_child(dbg)
+		else:
+			var fallback := Label.new()
+			fallback.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			fallback.text = "QR image unavailable on this device.\nShare this Connection Code:"
+			fallback.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			MobileUi.apply_label(fallback, MobileUi.SIZE_HELPER, MobileUi.COLOR_HELPER, true)
+			col.add_child(fallback)
+	## Human-readable Connection Code always visible when present (independent of QR encode).
+	var code_heading := Label.new()
+	code_heading.text = ProductStrings.CONNECTION_CODE
+	code_heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	MobileUi.apply_label(code_heading, MobileUi.SIZE_SECTION, MobileUi.COLOR_TITLE, true)
+	col.add_child(code_heading)
+	var display_code := friend_code if not friend_code.is_empty() else token
+	## Never show a raw UUID as the Connection Code.
+	if QrHelper.payload_contains_raw_uuid(display_code):
+		display_code = friend_code if not friend_code.is_empty() and not QrHelper.payload_contains_raw_uuid(friend_code) else ""
+	if display_code.is_empty():
+		display_code = "Code unavailable"
 	var code_l := Label.new()
-	code_l.text = token
+	code_l.text = display_code
 	code_l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	code_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	MobileUi.apply_label(code_l, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY, true)
@@ -2687,9 +2744,17 @@ func _show_my_connection_code(me: Dictionary) -> void:
 
 func _on_scan_person_code() -> void:
 	## Camera permission only here — never at launch.
-	if OS.get_name() != "Android" or not QrHelper.available():
+	## Query live Android CAMERA state every tap — never a saved boolean.
+	if OS.get_name() != "Android":
 		_show_toast("QR scanning requires the Android build.")
 		return
+	if not Engine.has_singleton("ChestQr") or not QrHelper.scanner_available():
+		_show_toast("Camera scanner couldn't start.")
+		if OS.is_debug_build():
+			print("[COLN-QR] scan aborted: ChestQr singleton/scanner missing")
+		return
+	## Refresh from OS in case user just granted Camera in App Settings.
+	PermissionsHelper.log_resume_refresh()
 	if not QrHelper.has_camera_permission():
 		_show_toast(ProductStrings.CAMERA_RATIONALE)
 		QrHelper.request_camera_permission()
@@ -2712,7 +2777,10 @@ func _on_scan_person_code() -> void:
 	if not _qr_helper.qr_scan_error.is_connected(_on_qr_scan_error):
 		_qr_helper.qr_scan_error.connect(_on_qr_scan_error)
 	if not _qr_helper.start_scan():
-		_show_toast(ProductStrings.CAMERA_NEEDED)
+		## Permission was granted — this is plugin/camera init failure, not a permission error.
+		_show_toast("Camera scanner couldn't start.")
+		if OS.is_debug_build():
+			print("[COLN-QR] start_scan returned false with camera granted")
 
 
 func _on_qr_scan_cancelled() -> void:
@@ -2720,8 +2788,15 @@ func _on_qr_scan_cancelled() -> void:
 
 
 func _on_qr_scan_error(code: String) -> void:
+	## Separate PERMISSION ERROR from PLUGIN/CAMERA INITIALIZATION ERROR.
 	if code == "camera_permission":
-		_show_toast(ProductStrings.CAMERA_NEEDED)
+		## Re-check live OS truth — plugin may have lied when Activity was null.
+		if QrHelper.has_camera_permission():
+			_show_toast("Camera scanner couldn't start.")
+		else:
+			_show_toast(ProductStrings.CAMERA_NEEDED)
+	elif code == "unavailable" or code == "start_failed":
+		_show_toast("Camera scanner couldn't start.")
 	else:
 		_show_toast(ProductStrings.INVALID_QR)
 
@@ -3365,6 +3440,10 @@ func _show_profile() -> void:
 		_show_permissions_manage_sheet()
 	, Vector2(0, MobileUi.TOUCH_SECONDARY_H)))
 
+	## DEBUG-only Android bridge diagnostics for physical Galaxy testing (never in production).
+	if OS.is_debug_build():
+		col.add_child(_build_android_diagnostics_panel())
+
 	## Online Diagnostics is not shown in normal Profile UI (7 silent taps above).
 	col.add_child(_make_button("Sign Out", func() -> void:
 		_clear_reveal_timers()
@@ -3552,6 +3631,76 @@ func _hide_overlay() -> void:
 	_overlay.visible = false
 	for c in _overlay.get_children():
 		c.queue_free()
+
+
+func _android_diagnostics_my_person_label() -> String:
+	var person := _person_from_friends_cache()
+	if person.is_empty() or str(person.get("id", "")).is_empty():
+		return "None"
+	return IdentityHelper.display_name_from_profile(person, ProductStrings.PERSON)
+
+
+func _android_diagnostics_public_token_available() -> bool:
+	var me: Dictionary = {}
+	if typeof(state.cached_friends.get("me")) == TYPE_DICTIONARY:
+		me = state.cached_friends.get("me")
+	if me.is_empty() and not state.profiles.profile.is_empty():
+		me = state.profiles.profile
+	var tok := str(me.get("public_connection_token", "")).strip_edges()
+	var code := str(me.get("friend_code", "")).strip_edges()
+	if not tok.is_empty() and not QrHelper.payload_contains_raw_uuid(tok):
+		return true
+	return not code.is_empty() and not QrHelper.payload_contains_raw_uuid(code)
+
+
+func _build_android_diagnostics_panel() -> VBoxContainer:
+	## DEBUG-build only. Live Android bridge/permission values for Galaxy testing.
+	var wrap := VBoxContainer.new()
+	wrap.add_theme_constant_override("separation", 8)
+	var sec := Label.new()
+	sec.text = "Android Diagnostics"
+	MobileUi.apply_label(sec, MobileUi.SIZE_SECTION, MobileUi.COLOR_TITLE)
+	wrap.add_child(sec)
+	var status := Label.new()
+	status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	MobileUi.apply_label(status, MobileUi.SIZE_HELPER, MobileUi.COLOR_BODY, true)
+	wrap.add_child(status)
+	var refresh := func() -> void:
+		PermissionsHelper.log_resume_refresh()
+		var snap: Dictionary = PermissionsHelper.android_diagnostics_snapshot(
+			_android_diagnostics_my_person_label(),
+			_android_diagnostics_public_token_available()
+		)
+		status.text = (
+			"Location permission: %s\n"
+			+ "Camera permission: %s\n"
+			+ "Notification permission: %s\n"
+			+ "Location Services: %s\n"
+			+ "Location bridge: %s\n"
+			+ "QR bridge: %s\n"
+			+ "QR encoder: %s\n"
+			+ "QR scanner: %s\n"
+			+ "Public connection code: %s\n"
+			+ "Active My Person: %s"
+		) % [
+			str(snap.get("location_permission", "Denied")),
+			str(snap.get("camera_permission", "Denied")),
+			str(snap.get("notification_permission", "Denied")),
+			str(snap.get("location_services", "Off")),
+			str(snap.get("location_bridge", "Missing")),
+			str(snap.get("qr_bridge", "Missing")),
+			str(snap.get("qr_encoder", "Missing")),
+			str(snap.get("qr_scanner", "Missing")),
+			str(snap.get("public_connection_code", "Missing")),
+			str(snap.get("active_my_person", "None")),
+		]
+	refresh.call()
+	var refresh_btn := _make_button("Refresh Diagnostics", func() -> void:
+		refresh.call()
+		_show_toast("Diagnostics refreshed.")
+	, Vector2(0, MobileUi.TOUCH_SECONDARY_H))
+	wrap.add_child(refresh_btn)
+	return wrap
 
 
 func _permission_status_row(label_text: String, allowed: bool) -> PanelContainer:
@@ -4021,13 +4170,15 @@ func _on_app_resumed() -> void:
 	if _resume_inflight:
 		return
 	_resume_inflight = true
-	## Refresh permission cards after App Settings / system dialogs.
+	## Refresh live Android permission truth after App Settings / system dialogs.
+	## Camera grant in Settings must be recognized immediately (no restart).
+	PermissionsHelper.log_resume_refresh()
 	_refresh_permissions_setup_ui()
 	if _perm_manage_live:
 		_rebuild_permissions_manage_content()
 	## Consume notification deep links from warm resume / new intent.
 	await _consume_notification_deeplink()
-	## Profile permission rows need a rebuild to show Allowed after Settings return.
+	## Profile permission rows + Android Diagnostics need a rebuild after Settings return.
 	if _current_screen == "profile" and not _perm_manage_live:
 		_show_profile()
 		_resume_inflight = false

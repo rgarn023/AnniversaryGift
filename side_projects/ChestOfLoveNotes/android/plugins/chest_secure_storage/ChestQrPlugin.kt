@@ -66,10 +66,29 @@ class ChestQrPlugin(godot: Godot) : GodotPlugin(godot) {
 	@UsedByGodot
 	fun qr_plugin_available(): Boolean = true
 
+	private fun appContext(): android.content.Context? {
+		return try {
+			val ctx = godot.context
+			ctx?.applicationContext ?: ctx
+		} catch (_: Exception) {
+			getActivity()?.applicationContext
+		}
+	}
+
 	@UsedByGodot
 	fun has_camera_permission(): Boolean {
-		val ctx = getActivity() ?: return false
-		return ctx.checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+		// Prefer applicationContext so a briefly-null Activity never falsely reports denied
+		// when Android Settings already granted CAMERA (physical Galaxy v28 failure mode).
+		val ctx = appContext()
+		if (ctx != null) {
+			return ctx.checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+		}
+		val act = getActivity()
+		if (act != null) {
+			return act.checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+		}
+		Log.w(TAG, "has_camera_permission: no context yet — defer to Godot OS permissions")
+		return false
 	}
 
 	@UsedByGodot

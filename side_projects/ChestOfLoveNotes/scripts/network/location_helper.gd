@@ -69,10 +69,51 @@ static func _plugin():
 	return null
 
 
+static func bridge_available() -> bool:
+	var p = _plugin()
+	if p == null:
+		return false
+	if p.has_method("location_plugin_available"):
+		return bool(p.location_plugin_available())
+	return p.has_method("begin_fresh_location") or p.has_method("get_last_known_location")
+
+
+static func _await_plugin_ready(max_waits: int = 12) -> Variant:
+	## Runtime registration can lag briefly after resume — wait before declaring missing.
+	var p = _plugin()
+	if p != null:
+		return p
+	var tree := Engine.get_main_loop() as SceneTree
+	for _i in range(max_waits):
+		if tree != null:
+			await tree.create_timer(0.05).timeout
+		p = _plugin()
+		if p != null:
+			return p
+	return null
+
+
 static func _log(msg: String) -> void:
 	## Targeted Current Location diagnostics (debug builds only; not shown in UI).
 	if OS.is_debug_build():
 		print("[COLN-LOC] %s" % msg)
+
+
+static func _bridge_missing_error() -> Dictionary:
+	_log("LOCATION BRIDGE MISSING")
+	_log("provider_initialized=false")
+	_log("provider_type=missing")
+	_log("accepted=false")
+	_log("rejection_reason=LOCATION_BRIDGE_MISSING")
+	var msg := "We couldn't determine your location. Try again."
+	if OS.is_debug_build():
+		msg = "LOCATION BRIDGE MISSING"
+	return {
+		"ok": false,
+		"error": msg,
+		"unavailable": true,
+		"bridge_missing": true,
+	}
 
 
 static func permission_status() -> String:
@@ -206,6 +247,7 @@ static func _parse_fix_raw(raw: String, require_accuracy: bool, max_age_ms: int 
 
 
 static func get_current_fix(require_accuracy: bool = true) -> Dictionary:
+	## Synchronous peek — last-known only. Fresh fused acquisition uses get_fresh_fix().
 	if OS.get_name() != "Android":
 		return {
 			"ok": true,
@@ -230,22 +272,21 @@ static func get_current_fix(require_accuracy: bool = true) -> Dictionary:
 		}
 	var p = _plugin()
 	if p == null or not p.has_method("get_last_known_location"):
-		return {
-			"ok": false,
-			"error": "Turn on Location Services to use your current location.",
-			"unavailable": true,
-		}
+		return _bridge_missing_error()
 	return _parse_fix_raw(str(p.get_last_known_location()), require_accuracy)
 
 
 static func get_fresh_fix(require_accuracy: bool = true) -> Dictionary:
 	## Obtain a fresh fused location fix. Coordinates success is independent of reverse geocode.
+	## State: IDLE → REQUESTING → COORDINATES_RECEIVED → SUCCESS | ERROR
 	if OS.get_name() != "Android":
 		return get_current_fix(require_accuracy)
 	_active_request_token += 1
 	var my_token := _active_request_token
+	var phase := "REQUESTING"
 	_log("current_location_requested")
-	var p = _plugin()
+	_log("state=%s" % phase)
+	var p = await _await_plugin_ready()
 	var fine := false
 	var coarse := false
 	if p != null and p.has_method("has_fine_location_permission"):
@@ -259,11 +300,13 @@ static func get_fresh_fix(require_accuracy: bool = true) -> Dictionary:
 	_log("permission_fine=%s" % fine)
 	_log("permission_coarse=%s" % coarse)
 	_log("location_services=%s" % location_services_enabled())
+	_log("Engine.has_singleton(ChestLocation)=%s" % Engine.has_singleton(PLUGIN_NAME))
 	dump_diagnostics()
 	if permission_status() != "granted":
 		_log("provider_initialized=false")
 		_log("accepted=false")
 		_log("rejection_reason=permission_denied")
+		_log("state=ERROR")
 		return {
 			"ok": false,
 			"error": "Allow Location permission to use your current location.",
@@ -273,29 +316,25 @@ static func get_fresh_fix(require_accuracy: bool = true) -> Dictionary:
 		_log("provider_initialized=false")
 		_log("accepted=false")
 		_log("rejection_reason=location_services_off")
+		_log("state=ERROR")
 		return {
 			"ok": false,
 			"error": "Turn on Location Services to use your current location.",
 			"disabled": true,
 		}
-	if p == null:
-		_log("provider_initialized=false")
-		_log("provider_type=missing")
-		_log("accepted=false")
-		_log("rejection_reason=plugin_not_packaged")
-		return {
-			"ok": false,
-			"error": "We couldn't determine your location. Try again.",
-			"unavailable": true,
-		}
+	if p == null or not bridge_available():
+		_log("state=ERROR")
+		return _bridge_missing_error()
 	_log("provider_initialized=true")
 	_log("provider_type=ChestLocation/fused")
 	var settled: Dictionary = {}
+	var success_latched := false
 	if p.has_method("begin_fresh_location") and p.has_method("poll_fresh_location"):
 		if not bool(p.begin_fresh_location()):
 			_log("location_request_started=false")
 			_log("accepted=false")
 			_log("rejection_reason=begin_failed")
+			_log("state=ERROR")
 			if not location_services_enabled():
 				return {
 					"ok": false,
@@ -313,31 +352,45 @@ static func get_fresh_fix(require_accuracy: bool = true) -> Dictionary:
 			if my_token != _active_request_token:
 				_log("accepted=false")
 				_log("rejection_reason=superseded_request")
+				_log("state=ERROR")
 				return {"ok": false, "error": "We couldn't determine your location. Try again.", "unavailable": true}
 			if tree != null:
 				await tree.create_timer(FRESH_POLL_INTERVAL_SEC).timeout
-			if bool(settled.get("ok", false)):
+			if success_latched and bool(settled.get("ok", false)):
+				_log("state=SUCCESS")
 				return settled
 			var raw := str(p.poll_fresh_location())
 			if raw.begins_with("ok|"):
 				_log("callback_received")
+				phase = "COORDINATES_RECEIVED"
+				_log("state=%s" % phase)
 				var parsed_ok := _parse_fix_raw(raw, require_accuracy, MAX_FIX_AGE_MS)
 				if bool(parsed_ok.get("ok", false)):
 					settled = parsed_ok
+					success_latched = true
+					## Cancel native timeout / listeners — stale timeout must not overwrite success.
 					if p.has_method("cancel_fresh_location"):
 						p.cancel_fresh_location()
+					_log("state=SUCCESS")
 					return settled
 				## Keep listening for a better/fresher point.
 				continue
 			if raw.contains("|pending"):
 				continue
+			## Timeout/error from poll — ignore if we already accepted coords.
+			if success_latched:
+				_log("timeout_fired after success — ignored")
+				_log("state=SUCCESS")
+				return settled
 			_log("timeout_fired")
 			break
 		if p.has_method("cancel_fresh_location"):
 			p.cancel_fresh_location()
 		if my_token != _active_request_token:
+			_log("state=ERROR")
 			return {"ok": false, "error": "We couldn't determine your location. Try again.", "unavailable": true}
-		if bool(settled.get("ok", false)):
+		if success_latched and bool(settled.get("ok", false)):
+			_log("state=SUCCESS")
 			return settled
 		var last := _parse_fix_raw(
 			str(p.get_last_known_location()) if p.has_method("get_last_known_location") else "",
@@ -349,19 +402,21 @@ static func get_fresh_fix(require_accuracy: bool = true) -> Dictionary:
 			_log("callback_received")
 			_log("accepted=true")
 			_log("rejection_reason=")
+			_log("state=SUCCESS")
 			return last
 		_log("accepted=false")
 		_log("rejection_reason=timeout_no_fix")
+		_log("state=ERROR")
 		return {
 			"ok": false,
 			"error": "We couldn't determine your location. Try again.",
 			"unavailable": true,
 			"timeout": true,
 		}
-	if p.has_method("request_fresh_location"):
-		return _parse_fix_raw(str(p.request_fresh_location()), require_accuracy, MAX_FIX_AGE_MS)
+	## Prefer begin/poll only — do not use blocking request_fresh_location on the UI thread.
 	_log("accepted=false")
 	_log("rejection_reason=no_fresh_api")
+	_log("state=ERROR")
 	return {
 		"ok": false,
 		"error": "We couldn't determine your location. Try again.",

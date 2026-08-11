@@ -80,10 +80,10 @@ func _run() -> void:
 
 	## VERSION / APK
 	_assert(BuildFlags.APP_VERSION_CODE >= 26, "versionCode 26+")
-	_assert(preset.contains("version/code=28"), "export versionCode 26")
+	_assert(preset.contains("version/code=29"), "export versionCode 26")
 	var gitignore := FileAccess.get_file_as_string("res://.gitignore")
-	_assert(gitignore.contains("ChestOfLoveNotes-current-location-qr-camera-fix-debug.apk"), "APK allowlisted in gitignore")
-	_assert(preset.contains("current-location-qr-camera-fix-debug.apk"), "export_path APK name")
+	_assert(gitignore.contains("ChestOfLoveNotes-android-bridges-compose-qr-fix-debug.apk"), "APK allowlisted in gitignore")
+	_assert(preset.contains("android-bridges-compose-qr-fix-debug.apk"), "export_path APK name")
 
 	## Runtime: schedule display/validation agreement
 	var bias := int(Time.get_time_zone_from_system().get("bias", 0))

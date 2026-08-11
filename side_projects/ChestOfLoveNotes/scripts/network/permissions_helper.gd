@@ -74,12 +74,23 @@ static func location_allowed() -> bool:
 
 
 static func camera_allowed() -> bool:
+	## Live Android CAMERA truth — never onboarding/cached flags.
+	## OR plugin + OS so a null Activity cannot falsely deny a Settings grant.
 	if OS.get_name() != "Android":
 		return true
+	var os_ok := _android_granted(PERM_CAMERA)
+	if not os_ok:
+		## Godot sometimes returns short names — scan granted list.
+		for perm in OS.get_granted_permissions():
+			var s := str(perm)
+			if s == PERM_CAMERA or s.ends_with(".permission.CAMERA") or s.ends_with(".CAMERA") or s == "CAMERA":
+				os_ok = true
+				break
+	var plugin_ok := false
 	var p = Engine.get_singleton("ChestQr") if Engine.has_singleton("ChestQr") else null
 	if p != null and p.has_method("has_camera_permission"):
-		return bool(p.has_camera_permission())
-	return _android_granted(PERM_CAMERA)
+		plugin_ok = bool(p.has_camera_permission())
+	return os_ok or plugin_ok
 
 
 static func status_label(allowed: bool) -> String:
@@ -212,6 +223,41 @@ static func snapshot() -> Dictionary:
 		"notifications": notification_allowed(),
 		"location": location_allowed(),
 		"camera": camera_allowed(),
+	}
+
+
+## DEBUG diagnostics: live strings only (no UUIDs / secrets / coordinates).
+static func android_diagnostics_snapshot(my_person_label: String = "None", public_token_available: bool = false) -> Dictionary:
+	var loc_bridge := "Missing"
+	if Engine.has_singleton("ChestLocation"):
+		loc_bridge = "Available"
+	var qr_bridge := "Missing"
+	var qr_encoder := "Missing"
+	var qr_scanner := "Missing"
+	if Engine.has_singleton("ChestQr"):
+		qr_bridge = "Available"
+		var p: Object = Engine.get_singleton("ChestQr")
+		if p != null:
+			if p.has_method("encode_qr_png_base64"):
+				qr_encoder = "Available"
+			if p.has_method("start_qr_scan") and p.has_method("has_camera_permission"):
+				qr_scanner = "Available"
+	var services_on := false
+	if Engine.has_singleton("ChestLocation"):
+		var lp: Object = Engine.get_singleton("ChestLocation")
+		if lp != null and lp.has_method("is_location_enabled"):
+			services_on = bool(lp.call("is_location_enabled"))
+	return {
+		"location_permission": "Granted" if location_allowed() else "Denied",
+		"camera_permission": "Granted" if camera_allowed() else "Denied",
+		"notification_permission": "Granted" if notification_allowed() else "Denied",
+		"location_services": "On" if services_on else "Off",
+		"location_bridge": loc_bridge,
+		"qr_bridge": qr_bridge,
+		"qr_encoder": qr_encoder,
+		"qr_scanner": qr_scanner,
+		"public_connection_code": "Available" if public_token_available else "Missing",
+		"active_my_person": my_person_label if not my_person_label.is_empty() else "None",
 	}
 
 
