@@ -71,9 +71,9 @@ func _init() -> void:
 	_assert(main.contains("_add_geofence_opt_in"), "geofence opt-in UI")
 	_assert(FileAccess.file_exists("res://android/plugins/chest_secure_storage/GeofenceReceiver.kt"), "GeofenceReceiver")
 
-	_assert(flags.contains("APP_VERSION_CODE := 29"), "versionCode 26")
-	_assert(export_cfg.contains("version/code=29"), "export 25")
-	_assert(export_cfg.contains("ChestOfLoveNotes-android-bridges-compose-qr-fix-debug.apk"), "APK name")
+	_assert(flags.contains("APP_VERSION_CODE := 30"), "versionCode 26")
+	_assert(export_cfg.contains("version/code=30"), "export 25")
+	_assert(export_cfg.contains("ChestOfLoveNotes-backend-location-qr-splash-fix-debug.apk"), "APK name")
 
 	_assert(main.contains("\"Person\"") or main.contains("Person"), "nav Person label")
 	_assert(not main.contains("Send sealed scrolls to friends"), "welcome friend copy removed")

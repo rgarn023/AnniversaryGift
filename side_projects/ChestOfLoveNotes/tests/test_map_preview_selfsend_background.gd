@@ -103,8 +103,8 @@ func _run() -> void:
 	_assert(act_mig.contains("activity_lock_enabled"), "activity/focus migration present")
 
 	_assert(BuildFlags.APP_VERSION_CODE >= 26, "versionCode 26+")
-	_assert(preset.contains("version/code=29"), "export 24")
-	_assert(preset.contains("ChestOfLoveNotes-android-bridges-compose-qr-fix-debug.apk"), "APK name")
+	_assert(preset.contains("version/code=30"), "export 24")
+	_assert(preset.contains("ChestOfLoveNotes-backend-location-qr-splash-fix-debug.apk"), "APK name")
 
 	## Runtime preview composite clamp (static source checks already cover ZoomPanRoot).
 	_assert(viewer.contains("MAX_COMPOSITE_SCALE: float = 3.0"), "max composite scale is 3x")

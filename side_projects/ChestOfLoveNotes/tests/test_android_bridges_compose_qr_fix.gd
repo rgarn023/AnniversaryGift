@@ -104,11 +104,11 @@ func _run() -> void:
 	_assert(map.contains("_gesture_layer"), "map gesture layer unchanged")
 
 	## VERSION / APK
-	_assert(flags.contains("APP_VERSION_CODE := 29"), "versionCode 29")
-	_assert(preset.contains("version/code=29"), "export 29")
-	_assert(preset.contains("android-bridges-compose-qr-fix-debug.apk"), "APK name")
-	_assert(gitignore.contains("ChestOfLoveNotes-android-bridges-compose-qr-fix-debug.apk"), "gitignore allow")
-	_assert(BuildFlags.APP_VERSION_CODE >= 29, "BuildFlags >= 29")
+	_assert(flags.contains("APP_VERSION_CODE := 30"), "versionCode 30")
+	_assert(preset.contains("version/code=30"), "export 30")
+	_assert(preset.contains("backend-location-qr-splash-fix-debug.apk"), "APK name")
+	_assert(gitignore.contains("ChestOfLoveNotes-backend-location-qr-splash-fix-debug.apk"), "gitignore allow")
+	_assert(BuildFlags.APP_VERSION_CODE >= 30, "BuildFlags >= 29")
 
 	## QrHelper unit: token extract / UUID guard / encode-decode contract (plugin optional)
 	var token := "aabbccddeeff00112233445566778899"

@@ -430,11 +430,19 @@ func _show_welcome() -> void:
 		MobileUi.apply_label(private_note, MobileUi.SIZE_SECONDARY, MobileUi.COLOR_SECONDARY)
 		box.add_child(private_note)
 	else:
+		## UNCONFIGURED: packed client config missing (not an init race — bootstrap is sync).
 		var err := Label.new()
-		err.text = "Backend is not configured.\nAdd config/backend_config.json (see example)."
+		err.text = "Backend is not configured.\nThis build is missing the Supabase client configuration."
 		err.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		MobileUi.apply_label(err, MobileUi.SIZE_BODY, MobileUi.COLOR_DANGER)
 		box.add_child(err)
+		if OS.is_debug_build():
+			var hint := Label.new()
+			hint.text = "Debug: export must pack config/backend_config.json (see tools/export_android_apk.sh)."
+			hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			MobileUi.apply_label(hint, MobileUi.SIZE_HELPER, MobileUi.COLOR_HELPER)
+			box.add_child(hint)
 
 
 func _enter_demo() -> void:
@@ -3667,12 +3675,29 @@ func _build_android_diagnostics_panel() -> VBoxContainer:
 	wrap.add_child(status)
 	var refresh := func() -> void:
 		PermissionsHelper.log_resume_refresh()
+		var backend_ok := state != null and state.config != null and state.config.is_configured()
+		var client_ok := backend_ok and state.api != null
+		var session_ok := state != null and state.tokens != null and state.tokens.has_session()
+		var token_svc := "Error"
+		if not backend_ok:
+			token_svc = "Error"
+		elif state.friends != null:
+			token_svc = "Available"
 		var snap: Dictionary = PermissionsHelper.android_diagnostics_snapshot(
 			_android_diagnostics_my_person_label(),
-			_android_diagnostics_public_token_available()
+			_android_diagnostics_public_token_available(),
+			backend_ok,
+			client_ok,
+			session_ok,
+			token_svc
 		)
 		status.text = (
-			"Location permission: %s\n"
+			"Backend configured: %s\n"
+			+ "Supabase client: %s\n"
+			+ "Authenticated session: %s\n"
+			+ "Connection-token service: %s\n"
+			+ "Public connection code: %s\n"
+			+ "Location permission: %s\n"
 			+ "Camera permission: %s\n"
 			+ "Notification permission: %s\n"
 			+ "Location Services: %s\n"
@@ -3680,9 +3705,13 @@ func _build_android_diagnostics_panel() -> VBoxContainer:
 			+ "QR bridge: %s\n"
 			+ "QR encoder: %s\n"
 			+ "QR scanner: %s\n"
-			+ "Public connection code: %s\n"
 			+ "Active My Person: %s"
 		) % [
+			str(snap.get("backend_configured", "No")),
+			str(snap.get("supabase_client", "Not Initialized")),
+			str(snap.get("authenticated_session", "Missing")),
+			str(snap.get("connection_token_service", "Error")),
+			str(snap.get("public_connection_code", "Missing")),
 			str(snap.get("location_permission", "Denied")),
 			str(snap.get("camera_permission", "Denied")),
 			str(snap.get("notification_permission", "Denied")),
@@ -3691,7 +3720,6 @@ func _build_android_diagnostics_panel() -> VBoxContainer:
 			str(snap.get("qr_bridge", "Missing")),
 			str(snap.get("qr_encoder", "Missing")),
 			str(snap.get("qr_scanner", "Missing")),
-			str(snap.get("public_connection_code", "Missing")),
 			str(snap.get("active_my_person", "None")),
 		]
 	refresh.call()

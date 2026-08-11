@@ -1,14 +1,24 @@
 # Branding assets
 
-- `charoite_games_cg_logo.png` — OFFICIAL Charoite Games CG monogram (source of truth).
-  Exact provided artwork; do not redraw, regenerate, recolor, resize, or recompress.
-  CharoiteBoot loads these raw bytes for the ≥5s studio presentation (single logo only).
-- `charoite_games_cg_logo_splash_derived.png` — derived square mark for Android launcher /
-  system-splash icon paths only. Generated from the official logo; never replaces the source.
-- `charoite_system_splash_dark.png` — dark cosmic / black plane for the engine boot_splash
-  image (no text, no chest, not a second studio presentation).
-- `charoite_dark_square.png` — solid dark square helper.
-- `android_splash_mark_interim.png` — legacy interim mark (superseded by CG-derived splash).
+## Approved animated splash (source of truth)
 
-CharoiteBoot shows ONE official CG logo against black. No "Presents" label, no wordmark
-duplicate, and no chest graphic during startup.
+- `154659_cursor_under4mb.gif` — APPROVED Charoite Games CG splash animation
+  (optimized under Cursor’s 4 MB upload limit).
+  **Do not redraw, regenerate, AI-recreate, recolor, or embellish.**
+
+Derived at build time by `tools/prepare_charoite_splash_from_gif.py` (lossless PNG frames,
+original frame order + timing preserved):
+
+- `splash_frames/frame_XXXX.png` — animation frames for CharoiteBoot
+- `splash_still.png` — representative first frame for Android/native boot_splash
+- `splash_frames_meta.json` — frame count + durations
+
+## Other marks
+
+- `charoite_games_cg_logo.png` — legacy still CG monogram (fallback if GIF frames absent).
+- `charoite_games_cg_logo_splash_derived.png` — derived square for launcher/system paths only.
+  Never replace the app launcher icon with the CG splash mark automatically.
+- `charoite_system_splash_dark.png` — black plane helper for engine boot_splash if still frame absent.
+
+CharoiteBoot shows ONE CG mark against black. No "Presents" label, no wordmark duplicate,
+no chest graphic, no starfield behind the studio splash.

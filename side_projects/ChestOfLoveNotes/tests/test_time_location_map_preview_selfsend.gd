@@ -76,8 +76,8 @@ func _run() -> void:
 	_assert(scrolls.contains("mark_focus_lock_complete"), "client sync focus")
 
 	_assert(BuildFlags.APP_VERSION_CODE >= 26, "versionCode 26+")
-	_assert(preset.contains("version/code=29"), "export 24")
-	_assert(preset.contains("version/name=\"0.1.29-android-bridges-compose-qr-fix\""), "version name 27")
+	_assert(preset.contains("version/code=30"), "export 24")
+	_assert(preset.contains("version/name=\"0.1.30-backend-location-qr-splash-fix\""), "version name 27")
 
 	print("=== Results: %d passed, %d failed ===" % [_passed, _failed])
 	quit(0 if _failed == 0 else 1)

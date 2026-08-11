@@ -57,3 +57,10 @@ android/build/.cxx/
 !build/ChestOfLoveNotes-current-location-person-repair-debug.apk
 !build/ChestOfLoveNotes-current-location-qr-camera-fix-debug.apk
 !build/ChestOfLoveNotes-android-bridges-compose-qr-fix-debug.apk
+!build/ChestOfLoveNotes-backend-location-qr-splash-fix-debug.apk
+# Derived splash frames from approved GIF (source GIF is tracked when present)
+!assets/branding/splash_frames/
+!assets/branding/splash_frames/**
+!assets/branding/splash_still.png
+!assets/branding/splash_frames_meta.json
+!assets/branding/154659_cursor_under4mb.gif

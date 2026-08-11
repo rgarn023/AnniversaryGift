@@ -142,5 +142,5 @@ func _test_search_architecture() -> void:
 func _test_version() -> void:
 	_assert(BuildFlags.APP_VERSION_CODE >= 26, "versionCode >= 24")
 	var preset := FileAccess.get_file_as_string("res://export_presets.cfg")
-	_assert(preset.contains("ChestOfLoveNotes-android-bridges-compose-qr-fix-debug.apk"), "APK name")
-	_assert(preset.contains("version/code=29"), "export 24")
+	_assert(preset.contains("ChestOfLoveNotes-backend-location-qr-splash-fix-debug.apk"), "APK name")
+	_assert(preset.contains("version/code=30"), "export 24")

@@ -62,10 +62,10 @@ func _init() -> void:
 	_assert(preset.contains("permissions/access_fine_location=true"), "export fine location")
 	_assert(preset.contains("permissions/access_coarse_location=true"), "export coarse location")
 	_assert(preset.contains("permissions/camera=true"), "export camera")
-	_assert(flags.contains("APP_VERSION_CODE := 29"), "versionCode 26")
-	_assert(preset.contains("version/code=29"), "export 26")
-	_assert(preset.contains("android-bridges-compose-qr-fix-debug.apk"), "APK name")
-	_assert(gitignore.contains("ChestOfLoveNotes-android-bridges-compose-qr-fix-debug.apk") or true, "gitignore note")
+	_assert(flags.contains("APP_VERSION_CODE := 30"), "versionCode 26")
+	_assert(preset.contains("version/code=30"), "export 26")
+	_assert(preset.contains("backend-location-qr-splash-fix-debug.apk"), "APK name")
+	_assert(gitignore.contains("ChestOfLoveNotes-backend-location-qr-splash-fix-debug.apk") or true, "gitignore note")
 
 	## Map must remain untouched in this pass — verify map picker not referenced as changed via absence of accidental delete.
 	_assert(FileAccess.file_exists("res://scripts/ui/map_location_picker.gd"), "map picker preserved")

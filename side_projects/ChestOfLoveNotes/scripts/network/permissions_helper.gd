@@ -226,8 +226,15 @@ static func snapshot() -> Dictionary:
 	}
 
 
-## DEBUG diagnostics: live strings only (no UUIDs / secrets / coordinates).
-static func android_diagnostics_snapshot(my_person_label: String = "None", public_token_available: bool = false) -> Dictionary:
+## DEBUG diagnostics: live strings only (no UUIDs / secrets / coordinates / API keys).
+static func android_diagnostics_snapshot(
+	my_person_label: String = "None",
+	public_token_available: bool = false,
+	backend_configured: bool = false,
+	supabase_client_ready: bool = false,
+	authenticated_session: bool = false,
+	connection_token_service: String = "Error"
+) -> Dictionary:
 	var loc_bridge := "Missing"
 	if Engine.has_singleton("ChestLocation"):
 		loc_bridge = "Available"
@@ -256,6 +263,10 @@ static func android_diagnostics_snapshot(my_person_label: String = "None", publi
 		"qr_bridge": qr_bridge,
 		"qr_encoder": qr_encoder,
 		"qr_scanner": qr_scanner,
+		"backend_configured": "Yes" if backend_configured else "No",
+		"supabase_client": "Initialized" if supabase_client_ready else "Not Initialized",
+		"authenticated_session": "Available" if authenticated_session else "Missing",
+		"connection_token_service": connection_token_service,
 		"public_connection_code": "Available" if public_token_available else "Missing",
 		"active_my_person": my_person_label if not my_person_label.is_empty() else "None",
 	}
