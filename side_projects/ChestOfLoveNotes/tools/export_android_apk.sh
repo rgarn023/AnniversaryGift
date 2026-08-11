@@ -51,16 +51,29 @@ if [[ ! -f "$OUT" ]]; then
 fi
 
 echo "== Post-export: confirm backend_config packed (no secret print) =="
-if ! unzip -l "$OUT" | grep -q 'assets/config/backend_config.json'; then
+# Avoid `grep -q` under pipefail (SIGPIPE from early close can false-fail).
+PACK_LIST="$(unzip -Z1 "$OUT")"
+if ! grep -F 'assets/config/backend_config.json' <<<"$PACK_LIST" >/dev/null; then
   echo "ERROR: backend_config.json missing from APK — would show Backend is not configured on device" >&2
   exit 1
 fi
-CFG_SIZE=$(unzip -l "$OUT" | awk '/assets\/config\/backend_config.json/ {print $1}')
+if grep -F 'assets/config/backend_config.example.json' <<<"$PACK_LIST" >/dev/null \
+  && ! grep -F 'assets/config/backend_config.json' <<<"$PACK_LIST" >/dev/null; then
+  echo "ERROR: only example backend config packed" >&2
+  exit 1
+fi
+CFG_SIZE=$(unzip -l "$OUT" | awk '/assets\/config\/backend_config\.json$/ {print $1; exit}')
 if [[ "${CFG_SIZE:-0}" -lt 80 ]]; then
   echo "ERROR: packed backend_config.json looks too small (${CFG_SIZE})" >&2
   exit 1
 fi
-echo "OK: packed backend_config.json bytes=${CFG_SIZE}"
+# Example is 137 bytes; live config must differ (presence of real URL length).
+EXAMPLE_SIZE=$(unzip -l "$OUT" | awk '/assets\/config\/backend_config\.example\.json$/ {print $1; exit}')
+if [[ -n "${EXAMPLE_SIZE:-}" && "${CFG_SIZE}" -eq "${EXAMPLE_SIZE}" ]]; then
+  echo "ERROR: packed backend_config.json size matches example — likely placeholder" >&2
+  exit 1
+fi
+echo "OK: packed backend_config.json bytes=${CFG_SIZE} (example=${EXAMPLE_SIZE:-n/a})"
 
 echo "== Copy persistent artifacts =="
 mkdir -p /opt/cursor/artifacts
