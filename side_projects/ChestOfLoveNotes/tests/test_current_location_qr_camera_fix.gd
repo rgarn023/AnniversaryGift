@@ -65,7 +65,9 @@ func _run() -> void:
 	_assert(main.contains("_show_my_connection_code"), "Show My Code screen")
 	_assert(main.contains("_ensure_my_connection_token"), "token backfill helper")
 	_assert(main.contains("ProductStrings.SHOW_MY_CODE_HELP"), "instruction copy")
-	_assert(main.contains("verify_roundtrip"), "QR verify decodable")
+	## v29+: encode once at display size; dual-size verify_roundtrip discarded valid QR on Galaxy.
+	_assert(main.contains("encode_png_base64") or main.contains("QrHelper.encode_png_base64"), "QR encode for Show My Code")
+	_assert(main.contains("Do NOT re-verify at a different size") or qr.contains("verify_roundtrip"), "encode/decode contract retained")
 	_assert(main.contains("payload_contains_raw_uuid"), "reject UUID payload")
 	_assert(qr.contains("verify_roundtrip"), "QrHelper verify")
 	_assert(qr_kt.contains("EncodeHintType.MARGIN"), "quiet zone margin")
