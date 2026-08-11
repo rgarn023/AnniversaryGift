@@ -2435,14 +2435,6 @@ func _show_friends() -> void:
 			since_l.text = ProductStrings.connected_since(dt)
 			MobileUi.apply_label(since_l, MobileUi.SIZE_HELPER, MobileUi.COLOR_HELPER, false)
 			list.add_child(since_l)
-		var disc := Button.new()
-		disc.text = ProductStrings.DISCONNECT
-		disc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		MobileUi.style_button(disc, MobileUi.TOUCH_SECONDARY_H)
-		disc.pressed.connect(func() -> void:
-			_confirm_disconnect_person(person)
-		)
-		list.add_child(disc)
 		var show_mine := Button.new()
 		show_mine.text = ProductStrings.SHOW_MY_CODE
 		show_mine.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -2451,6 +2443,21 @@ func _show_friends() -> void:
 			_show_my_connection_code(me)
 		)
 		list.add_child(show_mine)
+		## Scan remains visible even when already paired; one-Person rule blocks a second connection.
+		var scan_paired := Button.new()
+		scan_paired.text = ProductStrings.SCAN_PERSON_CODE
+		scan_paired.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		MobileUi.style_button(scan_paired, MobileUi.TOUCH_SECONDARY_H)
+		scan_paired.pressed.connect(_on_scan_person_code)
+		list.add_child(scan_paired)
+		var disc := Button.new()
+		disc.text = ProductStrings.DISCONNECT
+		disc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		MobileUi.style_button(disc, MobileUi.TOUCH_SECONDARY_H)
+		disc.pressed.connect(func() -> void:
+			_confirm_disconnect_person(person)
+		)
+		list.add_child(disc)
 
 	_add_bottom_nav("friends")
 	_finish_nav_transition()
@@ -2521,20 +2528,65 @@ func _confirm_disconnect_person(person: Dictionary) -> void:
 	col.add_child(no)
 
 
-func _show_my_connection_code(me: Dictionary) -> void:
-	## Show My Code — no camera permission.
+func _ensure_my_connection_token(me: Dictionary) -> Dictionary:
+	## Load / backfill public_connection_token without touching active My Person pairing.
 	var token := str(me.get("public_connection_token", "")).strip_edges()
-	if token.is_empty() and state.is_online():
-		var fr: Dictionary = await state.friends.get_my_person()
-		if bool(fr.get("ok", false)):
-			var data: Dictionary = fr.get("data", {}) if typeof(fr.get("data")) == TYPE_DICTIONARY else {}
-			if typeof(data.get("me")) == TYPE_DICTIONARY:
-				me = data.get("me")
-				token = str(me.get("public_connection_token", "")).strip_edges()
+	if not token.is_empty():
+		return me
+	if not state.is_online():
+		return me
+	var fr: Dictionary = await state.friends.get_my_person()
+	if bool(fr.get("ok", false)):
+		var data: Dictionary = fr.get("data", {}) if typeof(fr.get("data")) == TYPE_DICTIONARY else {}
+		## Never clear / replace active Person from a QR token lookup.
+		if typeof(data.get("person")) == TYPE_DICTIONARY:
+			var person_keep: Dictionary = data.get("person")
+			if typeof(state.cached_friends) != TYPE_DICTIONARY:
+				state.cached_friends = {}
+			if typeof(state.cached_friends.get("person")) != TYPE_DICTIONARY and not person_keep.is_empty():
+				state.cached_friends["person"] = person_keep
+		if typeof(data.get("me")) == TYPE_DICTIONARY:
+			me = (data.get("me") as Dictionary).duplicate(true)
+			token = str(me.get("public_connection_token", "")).strip_edges()
 	if token.is_empty():
-		_show_toast("Connection code unavailable.")
+		## Older accounts: generate via intended RPC — does not alter friendships.
+		var rr: Dictionary = await state.friends.regenerate_connection_token()
+		if bool(rr.get("ok", false)):
+			var rd: Variant = rr.get("data")
+			if typeof(rd) == TYPE_STRING and not str(rd).is_empty():
+				me["public_connection_token"] = str(rd)
+			elif typeof(rd) == TYPE_DICTIONARY:
+				var tok2 := str((rd as Dictionary).get("public_connection_token", (rd as Dictionary).get("token", "")))
+				if tok2.is_empty():
+					## RPC may return bare token string nested.
+					for k in (rd as Dictionary).keys():
+						var v := str((rd as Dictionary).get(k, ""))
+						if v.length() >= 16 and v.find("-") < 0:
+							tok2 = v
+							break
+				if not tok2.is_empty():
+					me["public_connection_token"] = tok2
+			state.invalidate_cache("friends")
+			var fr2: Dictionary = await state.friends.get_my_person()
+			if bool(fr2.get("ok", false)):
+				var data2: Dictionary = fr2.get("data", {}) if typeof(fr2.get("data")) == TYPE_DICTIONARY else {}
+				if typeof(data2.get("me")) == TYPE_DICTIONARY:
+					me = (data2.get("me") as Dictionary).duplicate(true)
+	return me
+
+
+func _show_my_connection_code(me: Dictionary) -> void:
+	## Show My Code — no camera permission. Must not alter active My Person pairing.
+	me = await _ensure_my_connection_token(me)
+	var token := str(me.get("public_connection_token", "")).strip_edges()
+	if token.is_empty():
+		## QR failure must not disturb Mandy / active Person.
+		_show_toast("Connection code unavailable. Your Person connection is unchanged.")
 		return
 	var link := QrHelper.deep_link_for_token(token)
+	if QrHelper.payload_contains_raw_uuid(link):
+		_show_toast("Connection code unavailable. Your Person connection is unchanged.")
+		return
 	_clear_overlay()
 	if _overlay == null:
 		return
@@ -2547,9 +2599,13 @@ func _show_my_connection_code(me: Dictionary) -> void:
 	host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	SafeAreaHelper.apply_to_margin(host, 20, 20, 20)
 	_overlay.add_child(host)
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	host.add_child(scroll)
 	var col := VBoxContainer.new()
+	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	col.add_theme_constant_override("separation", 12)
-	host.add_child(col)
+	scroll.add_child(col)
 	var title := Label.new()
 	title.text = IdentityHelper.display_name_from_profile(me, "You")
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -2563,24 +2619,34 @@ func _show_my_connection_code(me: Dictionary) -> void:
 		MobileUi.apply_label(ul, MobileUi.SIZE_BODY, MobileUi.COLOR_SECONDARY, false)
 		col.add_child(ul)
 	var help := Label.new()
-	help.text = "Scan this code to send me a connection request."
+	help.text = ProductStrings.SHOW_MY_CODE_HELP
 	help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	help.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	MobileUi.apply_label(help, MobileUi.SIZE_HELPER, MobileUi.COLOR_HELPER, true)
 	col.add_child(help)
-	var qr_tex := QrHelper.texture_from_base64_png(QrHelper.encode_png_base64(link, 512))
+	var qr_b64 := QrHelper.encode_png_base64(link, 640)
+	var qr_ok := not qr_b64.is_empty() and QrHelper.verify_roundtrip(link, 320)
+	var qr_tex := QrHelper.texture_from_base64_png(qr_b64) if qr_ok else null
 	if qr_tex != null:
+		## High-contrast QR on white plate — no overlays on modules.
+		var plate := PanelContainer.new()
+		plate.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		var plate_style := StyleBoxFlat.new()
+		plate_style.bg_color = Color(1, 1, 1, 1)
+		plate_style.set_content_margin_all(16)
+		plate.add_theme_stylebox_override("panel", plate_style)
+		col.add_child(plate)
 		var tr := TextureRect.new()
 		tr.texture = qr_tex
-		tr.custom_minimum_size = Vector2(260, 260)
+		tr.custom_minimum_size = Vector2(280, 280)
 		tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		tr.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-		col.add_child(tr)
+		tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		plate.add_child(tr)
 	else:
 		var fallback := Label.new()
 		fallback.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		fallback.text = "QR preview needs the Android QR plugin.\nShare this Connection Code:"
+		fallback.text = "QR image unavailable on this device build.\nShare this Connection Code:"
 		fallback.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		MobileUi.apply_label(fallback, MobileUi.SIZE_HELPER, MobileUi.COLOR_HELPER, true)
 		col.add_child(fallback)
@@ -2597,9 +2663,6 @@ func _show_my_connection_code(me: Dictionary) -> void:
 		if state.is_demo():
 			_show_toast("Demo: regenerate skipped.")
 			return
-		var conf := true
-		## Simple confirm via toast + immediate regenerate after second tap pattern avoided —
-		## regenerate with inline confirmation label.
 		regen.disabled = true
 		var rr: Dictionary = await state.friends.regenerate_connection_token()
 		regen.disabled = false
@@ -2607,7 +2670,10 @@ func _show_my_connection_code(me: Dictionary) -> void:
 			state.invalidate_cache("friends")
 			_hide_overlay()
 			_show_toast("Connection code regenerated.")
-			_show_friends()
+			## Re-open with the new code (pairing unchanged).
+			var fresh_me: Dictionary = me.duplicate(true)
+			fresh_me.erase("public_connection_token")
+			_show_my_connection_code(fresh_me)
 		else:
 			_show_toast(str(rr.get("error", "Could not regenerate code.")))
 	)
@@ -2660,35 +2726,87 @@ func _on_qr_scan_error(code: String) -> void:
 		_show_toast(ProductStrings.INVALID_QR)
 
 
+func _show_qr_scan_message(body: String, offer_scan_again: bool = false) -> void:
+	_clear_overlay()
+	if _overlay == null:
+		return
+	_overlay.visible = true
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.75)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_overlay.add_child(dim)
+	var host := MarginContainer.new()
+	host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	SafeAreaHelper.apply_to_margin(host, 24, 24, 24)
+	_overlay.add_child(host)
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 14)
+	host.add_child(col)
+	var lab := Label.new()
+	lab.text = body
+	lab.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	lab.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	MobileUi.apply_label(lab, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY, true)
+	col.add_child(lab)
+	if offer_scan_again:
+		var again := Button.new()
+		again.text = ProductStrings.SCAN_AGAIN
+		MobileUi.style_button(again, MobileUi.TOUCH_CTA_H)
+		again.pressed.connect(func() -> void:
+			_hide_overlay()
+			_on_scan_person_code()
+		)
+		col.add_child(again)
+	var close := Button.new()
+	close.text = "Close"
+	MobileUi.style_button(close, MobileUi.TOUCH_SECONDARY_H)
+	close.pressed.connect(_hide_overlay)
+	col.add_child(close)
+
+
 func _on_qr_scanned_payload(raw: String) -> void:
 	if not QrHelper.is_coln_connect_payload(raw):
-		_show_toast(ProductStrings.INVALID_QR)
+		_show_qr_scan_message(ProductStrings.INVALID_QR, true)
 		return
 	var token := QrHelper.extract_token(raw)
-	if token.is_empty():
-		_show_toast(ProductStrings.INVALID_QR)
+	if token.is_empty() or token.length() < 16:
+		_show_qr_scan_message(ProductStrings.INVALID_QR, true)
 		return
 	if state.is_demo():
 		_show_toast("Demo: QR connect preview only.")
 		return
-	## Already connected?
-	var cached_person: Dictionary = {}
-	if typeof(state.cached_friends.get("person")) == TYPE_DICTIONARY:
-		cached_person = state.cached_friends.get("person")
-	if not cached_person.is_empty():
-		_show_toast(ProductStrings.ALREADY_CONNECTED_FMT % IdentityHelper.display_name_from_profile(cached_person))
-		_show_toast(ProductStrings.DISCONNECT_FIRST)
+	## Own code — never create a self-pair. Active Person (Mandy) stays untouched.
+	var my_tok := ""
+	if typeof(state.cached_friends.get("me")) == TYPE_DICTIONARY:
+		my_tok = str((state.cached_friends.get("me") as Dictionary).get("public_connection_token", "")).strip_edges().to_lower()
+	if not my_tok.is_empty() and token == my_tok:
+		_show_qr_scan_message(ProductStrings.OWN_CODE, true)
+		return
+	## Already connected — block new pairing; do not disconnect or replace Mandy.
+	var cached_person: Dictionary = _person_from_friends_cache()
+	if not cached_person.is_empty() and not str(cached_person.get("id", "")).is_empty():
+		var pname := IdentityHelper.display_name_from_profile(cached_person)
+		_show_qr_scan_message(
+			"%s\n\n%s" % [
+				ProductStrings.ALREADY_CONNECTED_FMT % pname,
+				ProductStrings.DISCONNECT_FIRST,
+			],
+			false
+		)
 		return
 	var resolved: Dictionary = await state.friends.resolve_connection_token(token)
 	if not bool(resolved.get("ok", false)):
 		var err := str(resolved.get("error", ProductStrings.INVALID_QR))
 		if err.to_lower().contains("own"):
-			_show_toast(ProductStrings.OWN_CODE)
+			_show_qr_scan_message(ProductStrings.OWN_CODE, true)
 		else:
-			_show_toast(err)
+			_show_qr_scan_message(ProductStrings.INVALID_QR if err.is_empty() else err, true)
 		return
 	var data: Dictionary = resolved.get("data", {}) if typeof(resolved.get("data")) == TYPE_DICTIONARY else {}
 	var profile: Dictionary = data.get("profile", {}) if typeof(data.get("profile")) == TYPE_DICTIONARY else {}
+	if profile.is_empty():
+		_show_qr_scan_message(ProductStrings.INVALID_QR, true)
+		return
 	_confirm_send_connection_from_scan(profile, token)
 
 

@@ -31,7 +31,14 @@ static func extract_token(raw: String) -> String:
 
 
 static func is_coln_connect_payload(raw: String) -> bool:
-	return not extract_token(raw).is_empty()
+	var tok := extract_token(raw)
+	if tok.is_empty() or tok.length() < 16:
+		return false
+	## Must be our deep link or bare token — never open arbitrary URLs.
+	var lower := raw.strip_edges().to_lower()
+	if lower.begins_with("http://") or lower.begins_with("https://"):
+		return lower.find("chestoflovenotes") >= 0 or lower.find("/connect/") >= 0
+	return true
 
 
 static func _plugin():
@@ -41,7 +48,12 @@ static func _plugin():
 
 
 static func available() -> bool:
-	return _plugin() != null
+	var p = _plugin()
+	if p == null:
+		return false
+	if p.has_method("qr_plugin_available"):
+		return bool(p.qr_plugin_available())
+	return true
 
 
 static func has_camera_permission() -> bool:
@@ -68,10 +80,28 @@ static func open_app_settings() -> void:
 
 
 static func encode_png_base64(payload: String, size_px: int = 512) -> String:
+	## Encode via Android ZXing; returns "" if missing plugin or verify-decode fails.
 	var p = _plugin()
 	if p != null and p.has_method("encode_qr_png_base64"):
 		return str(p.encode_qr_png_base64(payload, size_px))
 	return ""
+
+
+static func verify_roundtrip(payload: String, size_px: int = 512) -> bool:
+	var p = _plugin()
+	if p != null and p.has_method("verify_qr_roundtrip"):
+		var raw := str(p.verify_qr_roundtrip(payload, size_px))
+		return raw.begins_with("ok|")
+	## Fallback: encode then require non-empty PNG (encode already verify-decodes on Android).
+	return not encode_png_base64(payload, size_px).is_empty()
+
+
+static func payload_contains_raw_uuid(payload: String) -> bool:
+	## Guard: QR must never encode a raw UUID.
+	var lower := payload.to_lower()
+	var uuid_re := RegEx.new()
+	uuid_re.compile("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+	return uuid_re.search(lower) != null
 
 
 static func texture_from_base64_png(b64: String) -> Texture2D:

@@ -1250,12 +1250,13 @@ func _on_use_current_location() -> void:
 	_update_validation()
 	var token := _location_search_service.next_token()
 	var rev: Dictionary = await _location_search_service.reverse_geocode(lat, lng, token)
+	var rev_ok := bool(rev.get("ok", false)) and typeof(rev.get("place")) == TYPE_DICTIONARY
 	if OS.is_debug_build():
-		print("[COLN-LOC] reverse-geocode ok=%s" % str(rev.get("ok", false)))
+		print("[COLN-LOC] reverse_geocode_success=%s" % str(rev_ok))
 	if not is_inside_tree():
 		return
 	## Only polish the label — never fail or clear the lock target if reverse geocode fails.
-	if bool(rev.get("ok", false)) and typeof(rev.get("place")) == TYPE_DICTIONARY:
+	if rev_ok:
 		var place: Dictionary = (rev.get("place") as Dictionary).duplicate(true)
 		place["lat"] = lat
 		place["lng"] = lng

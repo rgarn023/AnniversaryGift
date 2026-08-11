@@ -4,20 +4,22 @@ import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.ResultPoint
 import com.journeyapps.barcodescanner.BarcodeCallback
 import com.journeyapps.barcodescanner.BarcodeResult
 import com.journeyapps.barcodescanner.DecoratedBarcodeView
-import com.google.zxing.BarcodeFormat
-import com.google.zxing.ResultPoint
 import com.journeyapps.barcodescanner.DefaultDecoderFactory
 
 /**
- * Portrait QR scanner for My Person pairing. Released on finish.
+ * Portrait QR scanner for My Person pairing.
+ * Camera is released on pause / finish / destroy / back.
  */
 class QrScanActivity : Activity() {
 
@@ -27,6 +29,7 @@ class QrScanActivity : Activity() {
 
 	private var barcodeView: DecoratedBarcodeView? = null
 	private var handled = false
+	private var torchOn = false
 
 	override fun onCreate(savedInstanceState: Bundle?) {
 		super.onCreate(savedInstanceState)
@@ -56,12 +59,14 @@ class QrScanActivity : Activity() {
 		}
 		val view = DecoratedBarcodeView(this)
 		view.barcodeView.decoderFactory = DefaultDecoderFactory(listOf(BarcodeFormat.QR_CODE))
-		view.statusView.text = ""
+		view.statusView.text = "Align the code inside the frame"
 		view.decodeContinuous(object : BarcodeCallback {
 			override fun barcodeResult(result: BarcodeResult?) {
 				val text = result?.text?.trim().orEmpty()
 				if (handled || text.isEmpty()) return
 				handled = true
+				view.pause()
+				ChestQrPlugin.deliverScanResult(text)
 				val data = Intent().putExtra(EXTRA_RESULT, text)
 				setResult(RESULT_OK, data)
 				finish()
@@ -78,14 +83,20 @@ class QrScanActivity : Activity() {
 		}
 		val torch = Button(this).apply {
 			text = "Flashlight"
-			setOnClickListener { barcodeView?.setTorchOn() }
+			setOnClickListener {
+				torchOn = !torchOn
+				if (torchOn) {
+					barcodeView?.setTorchOn()
+					text = "Flashlight Off"
+				} else {
+					barcodeView?.setTorchOff()
+					text = "Flashlight"
+				}
+			}
 		}
 		val cancel = Button(this).apply {
 			text = "Cancel"
-			setOnClickListener {
-				setResult(RESULT_CANCELED)
-				finish()
-			}
+			setOnClickListener { cancelAndFinish() }
 		}
 		actions.addView(torch, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
 		actions.addView(cancel, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
@@ -93,19 +104,55 @@ class QrScanActivity : Activity() {
 		setContentView(root)
 	}
 
+	private fun releaseCamera() {
+		try {
+			barcodeView?.setTorchOff()
+		} catch (_: Exception) {
+		}
+		torchOn = false
+		try {
+			barcodeView?.pause()
+		} catch (_: Exception) {
+		}
+	}
+
+	private fun cancelAndFinish() {
+		if (handled) return
+		handled = true
+		releaseCamera()
+		ChestQrPlugin.deliverScanCancelled()
+		setResult(RESULT_CANCELED)
+		finish()
+	}
+
 	override fun onResume() {
 		super.onResume()
-		barcodeView?.resume()
+		if (!handled) {
+			barcodeView?.resume()
+		}
 	}
 
 	override fun onPause() {
-		barcodeView?.pause()
+		releaseCamera()
 		super.onPause()
+	}
+
+	override fun onDestroy() {
+		releaseCamera()
+		barcodeView = null
+		super.onDestroy()
 	}
 
 	@Deprecated("Deprecated in Java")
 	override fun onBackPressed() {
-		setResult(RESULT_CANCELED)
-		finish()
+		cancelAndFinish()
+	}
+
+	override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+		if (keyCode == KeyEvent.KEYCODE_BACK) {
+			cancelAndFinish()
+			return true
+		}
+		return barcodeView?.onKeyDown(keyCode, event) ?: super.onKeyDown(keyCode, event)
 	}
 }

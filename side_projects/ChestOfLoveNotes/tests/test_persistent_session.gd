@@ -256,8 +256,8 @@ func _test_demo_disabled_online_build() -> void:
 	var flags := FileAccess.get_file_as_string("res://scripts/build_flags.gd")
 	_assert(flags.contains("PRIVATE_ONBOARDING_BUILD := true"), "Local Demo Mode remains disabled in online test build")
 	var preset := FileAccess.get_file_as_string("res://export_presets.cfg")
-	_assert(preset.contains("ChestOfLoveNotes-current-location-person-repair-debug.apk") or preset.contains("preview-radius-attachments") or preset.contains("chest-location-lock") or preset.contains("secure-session"), "export targets COLN APK")
-	_assert(preset.contains("version/code=27") or preset.contains("version/code=20") or preset.contains("version/code=17") or preset.contains("version/code=15"), "versionCode bumped")
+	_assert(preset.contains("ChestOfLoveNotes-current-location-qr-camera-fix-debug.apk") or preset.contains("preview-radius-attachments") or preset.contains("chest-location-lock") or preset.contains("secure-session"), "export targets COLN APK")
+	_assert(preset.contains("version/code=28") or preset.contains("version/code=20") or preset.contains("version/code=17") or preset.contains("version/code=15"), "versionCode bumped")
 	_assert(preset.contains("com.charoitegames.chestoflovenotes"), "COLN package retained")
 	_assert(preset.contains("user_data_backup/allow=false"), "export backup disabled")
 
