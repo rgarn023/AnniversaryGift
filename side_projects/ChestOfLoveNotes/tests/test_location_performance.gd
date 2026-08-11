@@ -102,7 +102,7 @@ func _test_chest_lid_animation() -> void:
 
 func _test_ui_polish() -> void:
 	var main := FileAccess.get_file_as_string("res://scripts/main.gd")
-	_assert(main.contains('make_page_title("Friends"'), "Friends header standardized")
+	_assert(main.contains("ProductStrings.MY_PERSON") or main.contains('make_page_title("My Person"'), "My Person header standardized")
 	_assert(main.contains('make_page_title("Sent"'), "Sent header standardized")
 	_assert(main.contains('make_page_title("Profile"'), "Profile title in scroll")
 	_assert(main.contains('make_page_title("Chest"'), "Chest header standardized")
@@ -135,6 +135,6 @@ func _test_performance_contracts() -> void:
 func _test_version() -> void:
 	_assert(BuildFlags.APP_VERSION_CODE >= 26, "versionCode >= 24")
 	var preset := FileAccess.get_file_as_string("res://export_presets.cfg")
-	_assert(preset.contains("ChestOfLoveNotes-android-permissions-fix-debug.apk"), "APK filename")
-	_assert(preset.contains("version/code=26"), "export versionCode 26")
+	_assert(preset.contains("ChestOfLoveNotes-current-location-person-repair-debug.apk"), "APK filename")
+	_assert(preset.contains("version/code=27"), "export versionCode 26")
 	_assert(preset.contains("access_fine_location=true"), "fine location permission enabled")

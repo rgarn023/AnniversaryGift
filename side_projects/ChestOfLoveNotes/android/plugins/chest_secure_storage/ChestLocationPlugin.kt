@@ -20,28 +20,38 @@ import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
+import com.google.android.gms.tasks.CancellationTokenSource
+import com.google.android.gms.tasks.Tasks
 import org.godotengine.godot.Godot
 import org.godotengine.godot.plugin.GodotPlugin
 import org.godotengine.godot.plugin.UsedByGodot
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Fused location for "Use Current Location" + Activity Lock + optional Location Lock geofences.
  * Prefer Play Services fused provider (GPS + Wi‑Fi/network) over raw GPS-only listens.
+ *
+ * Success = valid lat/lng. Reverse geocode is GDScript/display polish only.
  */
 class ChestLocationPlugin(godot: Godot) : GodotPlugin(godot) {
 
 	companion object {
 		private const val TAG = "ChestLocation"
 		private const val PLUGIN_NAME = "ChestLocation"
-		private const val FRESH_TIMEOUT_MS = 20_000L
-		private const val ACCEPTABLE_CACHED_AGE_MS = 45_000L
+		/** Practical window for a fused/current fix on mid-range phones. */
+		private const val FRESH_TIMEOUT_MS = 45_000L
+		/** Accept recent cached fused fixes for Compose selection (not unlock). */
+		private const val ACCEPTABLE_CACHED_AGE_MS = 120_000L
 		private const val GEOFENCE_REQ = 0xC0FE
 	}
 
 	private val freshFix = AtomicReference<Location?>(null)
+	private val fixAccepted = AtomicBoolean(false)
 	private var freshListening = false
 	private var fusedCallback: LocationCallback? = null
+	private var currentLocationCts: CancellationTokenSource? = null
 	private val mainHandler = Handler(Looper.getMainLooper())
 	private var timeoutRunnable: Runnable? = null
 
@@ -150,6 +160,36 @@ class ChestLocationPlugin(godot: Godot) : GodotPlugin(godot) {
 		return "ok|${loc.latitude}|${loc.longitude}|$accuracy|$ageMs|$source"
 	}
 
+	private fun considerFix(loc: Location?, source: String): Boolean {
+		if (loc == null) return false
+		if (!loc.latitude.isFinite() || !loc.longitude.isFinite()) {
+			Log.i(TAG, "reject invalid coords source=$source")
+			return false
+		}
+		if (loc.latitude == 0.0 && loc.longitude == 0.0) {
+			Log.i(TAG, "reject 0,0 source=$source")
+			return false
+		}
+		val prev = freshFix.get()
+		val better = prev == null ||
+			(loc.hasAccuracy() && prev.hasAccuracy() && loc.accuracy < prev.accuracy - 1f) ||
+			loc.time > prev.time
+		if (better) {
+			freshFix.set(loc)
+			fixAccepted.set(true)
+			Log.i(
+				TAG,
+				"accepted source=$source acc=${if (loc.hasAccuracy()) loc.accuracy else -1f} ageMs=${System.currentTimeMillis() - loc.time}",
+			)
+			// Cancel timeout as soon as we have a usable fix so a late timeout cannot race.
+			timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
+			timeoutRunnable = null
+			return true
+		}
+		Log.i(TAG, "kept prior fix; ignored weaker source=$source")
+		return false
+	}
+
 	@UsedByGodot
 	fun location_diagnostics(): String {
 		return try {
@@ -166,9 +206,9 @@ class ChestLocationPlugin(godot: Godot) : GodotPlugin(godot) {
 			val acc = last?.let { if (it.hasAccuracy()) it.accuracy else -1f } ?: -1f
 			Log.i(
 				TAG,
-				"diag perm=$perm enabled=$enabled providers=$providers lastAge=$age lastAcc=$acc listening=$freshListening",
+				"diag perm=$perm enabled=$enabled providers=$providers lastAge=$age lastAcc=$acc listening=$freshListening accepted=${fixAccepted.get()}",
 			)
-			"perm=$perm|enabled=$enabled|providers=$providers|lastAgeMs=$age|lastAcc=$acc|listening=$freshListening"
+			"perm=$perm|enabled=$enabled|providers=$providers|lastAgeMs=$age|lastAcc=$acc|listening=$freshListening|accepted=${fixAccepted.get()}"
 		} catch (e: Exception) {
 			"error|${e.javaClass.simpleName}"
 		}
@@ -180,7 +220,12 @@ class ChestLocationPlugin(godot: Godot) : GodotPlugin(godot) {
 		var best: Location? = null
 		try {
 			val fused = LocationServices.getFusedLocationProviderClient(appContext())
-			// getLastLocation is async; also probe LocationManager synchronically for diagnostics/fallback.
+			try {
+				val loc = Tasks.await(fused.lastLocation, 1500L, TimeUnit.MILLISECONDS)
+				if (loc != null) best = loc
+			} catch (e: Exception) {
+				Log.i(TAG, "fused lastLocation await: ${e.javaClass.simpleName}")
+			}
 		} catch (_: Exception) {
 		}
 		try {
@@ -228,52 +273,87 @@ class ChestLocationPlugin(godot: Godot) : GodotPlugin(godot) {
 	@UsedByGodot
 	fun begin_fresh_location(): Boolean {
 		return try {
-			Log.i(TAG, "begin_fresh_location perm=${has_location_permission()} enabled=${is_location_enabled()}")
-			if (!has_location_permission()) return false
-			if (!is_location_enabled()) return false
-			stopFreshListen()
+			Log.i(
+				TAG,
+				"begin_fresh_location tapped/start perm=${has_location_permission()} enabled=${is_location_enabled()}",
+			)
+			if (!has_location_permission()) {
+				Log.i(TAG, "begin rejected: permission")
+				return false
+			}
+			if (!is_location_enabled()) {
+				Log.i(TAG, "begin rejected: location services off")
+				return false
+			}
+			stopFreshListen(clearFix = true)
 			freshFix.set(null)
+			fixAccepted.set(false)
 			freshListening = true
 			val client = LocationServices.getFusedLocationProviderClient(appContext())
+			Log.i(TAG, "provider initialized: FusedLocationProviderClient")
 
-			// Prefer a recent fused last-location immediately when fresh enough.
-			client.lastLocation
-				.addOnSuccessListener { loc ->
-					if (loc == null) return@addOnSuccessListener
-					val age = System.currentTimeMillis() - loc.time
-					Log.i(TAG, "fused lastLocation ageMs=$age acc=${if (loc.hasAccuracy()) loc.accuracy else -1f}")
+			// 1) Recent fused last-location (await briefly — Galaxy often has this when GPS is cold).
+			try {
+				val last = Tasks.await(client.lastLocation, 1500L, TimeUnit.MILLISECONDS)
+				if (last != null) {
+					val age = System.currentTimeMillis() - last.time
+					Log.i(
+						TAG,
+						"fused lastLocation ageMs=$age acc=${if (last.hasAccuracy()) last.accuracy else -1f}",
+					)
 					if (age in 0..ACCEPTABLE_CACHED_AGE_MS) {
-						freshFix.compareAndSet(null, loc)
+						considerFix(last, "fused_last")
+					} else {
+						Log.i(TAG, "fused lastLocation too old ageMs=$age — still requesting fresh")
 					}
+				} else {
+					Log.i(TAG, "fused lastLocation null")
+				}
+			} catch (e: Exception) {
+				Log.i(TAG, "fused lastLocation await failed: ${e.javaClass.simpleName}")
+			}
+
+			// 2) One-shot current location (network/Wi‑Fi/GPS fused — does not require satellite-only).
+			val cts = CancellationTokenSource()
+			currentLocationCts = cts
+			client.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, cts.token)
+				.addOnSuccessListener { loc ->
+					Log.i(TAG, "getCurrentLocation callback received null=${loc == null}")
+					considerFix(loc, "fused_current")
 				}
 				.addOnFailureListener { e ->
-					Log.w(TAG, "fused lastLocation failed: ${e.javaClass.simpleName}")
+					Log.w(TAG, "getCurrentLocation failed: ${e.javaClass.simpleName}")
 				}
 
+			// 3) Streaming fused updates for a better/fresher point while we wait.
 			val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 1000L)
 				.setMinUpdateIntervalMillis(500L)
-				.setMaxUpdates(8)
+				.setMaxUpdates(12)
 				.setWaitForAccurateLocation(false)
+				.setDurationMillis(FRESH_TIMEOUT_MS)
 				.build()
 			val callback = object : LocationCallback() {
 				override fun onLocationResult(result: LocationResult) {
 					val location = result.lastLocation ?: return
-					val prev = freshFix.get()
-					if (
-						prev == null ||
-						(location.hasAccuracy() && prev.hasAccuracy() && location.accuracy < prev.accuracy) ||
-						location.time >= prev.time
-					) {
-						freshFix.set(location)
-						Log.i(TAG, "fused callback acc=${if (location.hasAccuracy()) location.accuracy else -1f}")
-					}
+					Log.i(
+						TAG,
+						"requestLocationUpdates callback acc=${if (location.hasAccuracy()) location.accuracy else -1f} ageMs=${System.currentTimeMillis() - location.time}",
+					)
+					considerFix(location, "fused_update")
 				}
 			}
 			fusedCallback = callback
 			client.requestLocationUpdates(request, callback, Looper.getMainLooper())
+			Log.i(TAG, "request started timeoutMs=$FRESH_TIMEOUT_MS")
+
 			val timeout = Runnable {
-				Log.i(TAG, "fresh location timeout")
-				stopFreshListen()
+				if (fixAccepted.get()) {
+					Log.i(TAG, "timeout fired after success — ignored (no overwrite)")
+					stopFreshListen(clearFix = false)
+					return@Runnable
+				}
+				Log.i(TAG, "timeout fired — no accepted fix yet")
+				stopFreshListen(clearFix = false)
 			}
 			timeoutRunnable = timeout
 			mainHandler.postDelayed(timeout, FRESH_TIMEOUT_MS)
@@ -288,11 +368,21 @@ class ChestLocationPlugin(godot: Godot) : GodotPlugin(godot) {
 	@UsedByGodot
 	fun poll_fresh_location(): String {
 		val loc = freshFix.get()
-		if (loc != null) {
-			stopFreshListen()
+		if (loc != null && fixAccepted.get()) {
+			Log.i(TAG, "poll returning accepted fix")
+			stopFreshListen(clearFix = false)
 			return encodeLocation(loc, "fused")
 		}
 		if (!freshListening) {
+			// Timeout path: still return a usable last-known if present (GDScript also falls back).
+			val last = peekBestLastKnown()
+			if (last != null) {
+				val age = System.currentTimeMillis() - last.time
+				Log.i(TAG, "poll after stop — lastKnown ageMs=$age")
+				if (age in 0..ACCEPTABLE_CACHED_AGE_MS) {
+					return encodeLocation(last, "last_known")
+				}
+			}
 			Log.i(TAG, "poll_fresh timeout/no fix")
 			return "error|We couldn't determine your location. Try again.|timeout"
 		}
@@ -301,7 +391,7 @@ class ChestLocationPlugin(godot: Godot) : GodotPlugin(godot) {
 
 	@UsedByGodot
 	fun cancel_fresh_location(): Boolean {
-		stopFreshListen()
+		stopFreshListen(clearFix = true)
 		return true
 	}
 
@@ -320,8 +410,8 @@ class ChestLocationPlugin(godot: Godot) : GodotPlugin(godot) {
 			val deadline = System.currentTimeMillis() + FRESH_TIMEOUT_MS
 			while (System.currentTimeMillis() < deadline) {
 				val loc = freshFix.get()
-				if (loc != null) {
-					stopFreshListen()
+				if (loc != null && fixAccepted.get()) {
+					stopFreshListen(clearFix = false)
 					return encodeLocation(loc, "fused")
 				}
 				try {
@@ -330,7 +420,11 @@ class ChestLocationPlugin(godot: Godot) : GodotPlugin(godot) {
 					break
 				}
 			}
-			stopFreshListen()
+			stopFreshListen(clearFix = false)
+			val settled = freshFix.get()
+			if (settled != null) {
+				return encodeLocation(settled, "fused")
+			}
 			val last = get_last_known_location()
 			if (last.startsWith("ok|")) {
 				val parts = last.split("|")
@@ -346,10 +440,12 @@ class ChestLocationPlugin(godot: Godot) : GodotPlugin(godot) {
 		}
 	}
 
-	private fun stopFreshListen() {
+	private fun stopFreshListen(clearFix: Boolean = false) {
 		freshListening = false
 		timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
 		timeoutRunnable = null
+		currentLocationCts?.cancel()
+		currentLocationCts = null
 		val callback = fusedCallback
 		fusedCallback = null
 		if (callback != null) {
@@ -358,6 +454,10 @@ class ChestLocationPlugin(godot: Godot) : GodotPlugin(godot) {
 					.removeLocationUpdates(callback)
 			} catch (_: Exception) {
 			}
+		}
+		if (clearFix) {
+			freshFix.set(null)
+			fixAccepted.set(false)
 		}
 	}
 

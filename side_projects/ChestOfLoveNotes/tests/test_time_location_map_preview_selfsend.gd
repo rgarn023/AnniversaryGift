@@ -64,7 +64,7 @@ func _run() -> void:
 	_assert(viewer.contains("MAX_COMPOSITE_SCALE"), "3x max zoom")
 
 	## SELF-SEND / BACKEND
-	_assert(compose.contains("Send to Myself (Test)"), "debug self-send")
+	_assert(compose.contains("Test with myself"), "debug self-send")
 	_assert(send_ts.contains("isSelfSend"), "send-scroll self-send")
 	_assert(self_mig.contains("scrolls_no_self"), "self-send migration")
 	_assert(af_mig.contains("activity_lock_enabled"), "activity/focus schema migration")
@@ -76,7 +76,7 @@ func _run() -> void:
 	_assert(scrolls.contains("mark_focus_lock_complete"), "client sync focus")
 
 	_assert(BuildFlags.APP_VERSION_CODE >= 26, "versionCode 26+")
-	_assert(preset.contains("version/code=26"), "export 24")
+	_assert(preset.contains("version/code=27"), "export 24")
 	_assert(preset.contains("version/name=\"0.1.23-map-currentlocation-schedule-selfsend\""), "version name 23")
 
 	print("=== Results: %d passed, %d failed ===" % [_passed, _failed])

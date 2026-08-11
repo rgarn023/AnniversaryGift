@@ -3,6 +3,9 @@ class_name LocationHelper
 ## Battery-conscious device location for Location Lock.
 ## Uses Android Fused Location via ChestLocationPlugin when available.
 ## Permission is requested only when Compose/Open/permissions-setup explicitly needs it.
+##
+## Success for "Use Current Location" = valid latitude/longitude.
+## Reverse geocoding is optional display polish (handled by Compose).
 
 const PLUGIN_NAME := "ChestLocation"
 const DEFAULT_RADIUS_M := 500
@@ -13,11 +16,13 @@ const SMALL_RADIUS_WARN_M := 50
 const RADIUS_OPTIONS: Array[int] = [25, 100, 250, 500, 1000]
 const PERM_FINE := "android.permission.ACCESS_FINE_LOCATION"
 const PERM_COARSE := "android.permission.ACCESS_COARSE_LOCATION"
-const MAX_ACCEPTABLE_ACCURACY_M := 250.0
-## Reject cached fixes older than this for "Use Current Location".
-const MAX_FIX_AGE_MS := 45000
-## ~20s fused acquisition window (matches native timeout).
-const FRESH_POLL_COUNT := 50
+## Sensible threshold for Location Lock *selection* — not unlock evaluation.
+## Mediocre (~30–100 m) fused fixes are accepted; unlock still checks radius separately.
+const MAX_ACCEPTABLE_ACCURACY_M := 500.0
+## Accept recent fused/cached fixes for selection (native uses 120s).
+const MAX_FIX_AGE_MS := 120000
+## ~45s fused acquisition window (matches native FRESH_TIMEOUT_MS).
+const FRESH_POLL_COUNT := 120
 const FRESH_POLL_INTERVAL_SEC := 0.4
 
 ## Desktop / headless mock (never used to falsely unlock online scrolls).
@@ -112,36 +117,65 @@ static func dump_diagnostics() -> void:
 		_log("plugin_missing perm=%s enabled=%s" % [permission_status(), location_services_enabled()])
 
 
+static func _coords_valid(lat: float, lng: float) -> bool:
+	if not is_finite(lat) or not is_finite(lng):
+		return false
+	if is_equal_approx(lat, 0.0) and is_equal_approx(lng, 0.0):
+		return false
+	if lat < -90.0 or lat > 90.0 or lng < -180.0 or lng > 180.0:
+		return false
+	return true
+
+
 static func _parse_fix_raw(raw: String, require_accuracy: bool, max_age_ms: int = -1) -> Dictionary:
 	var parts := raw.split("|")
 	if parts.is_empty():
 		return {"ok": false, "error": "We couldn't determine your location. Try again.", "unavailable": true}
 	if parts[0] == "ok" and parts.size() >= 4:
+		var lat := float(parts[1])
+		var lng := float(parts[2])
 		var accuracy := float(parts[3])
 		var age_ms := int(parts[4]) if parts.size() >= 5 and str(parts[4]).is_valid_int() else -1
 		var source := str(parts[5]) if parts.size() >= 6 else "device"
+		if not _coords_valid(lat, lng):
+			_log("rejected: invalid coords lat=%s lng=%s" % [lat, lng])
+			return {
+				"ok": false,
+				"error": "We couldn't determine your location. Try again.",
+				"unavailable": true,
+			}
 		if max_age_ms >= 0 and age_ms >= 0 and age_ms > max_age_ms:
+			_log("rejected: stale age_ms=%s max=%s" % [age_ms, max_age_ms])
 			return {
 				"ok": false,
 				"error": "We couldn't determine your location. Try again.",
 				"stale": true,
 				"age_ms": age_ms,
 			}
+		## Selection path: never hard-fail mediocre accuracy — accept usable phone positions.
+		var accuracy_note := ""
+		if accuracy > 0.0 and accuracy > 25.0:
+			accuracy_note = "Location accuracy: approximately %d m" % int(round(accuracy))
 		if require_accuracy and accuracy > 0.0 and accuracy > MAX_ACCEPTABLE_ACCURACY_M:
+			_log("rejected: accuracy_m=%s threshold=%s" % [accuracy, MAX_ACCEPTABLE_ACCURACY_M])
 			return {
 				"ok": false,
 				"error": "Your location accuracy is too low. Try again.",
 				"inaccurate": true,
 				"accuracy_m": accuracy,
 			}
+		_log(
+			"accepted lat/lng valid acc=%s age_ms=%s source=%s" % [accuracy, age_ms, source]
+		)
 		return {
 			"ok": true,
-			"lat": float(parts[1]),
-			"lng": float(parts[2]),
+			"lat": lat,
+			"lng": lng,
 			"accuracy_m": accuracy,
 			"age_ms": age_ms,
 			"mock": false,
 			"source": source,
+			"accuracy_note": accuracy_note,
 		}
 	var code := str(parts[2]) if parts.size() >= 3 else "unavailable"
 	var msg := str(parts[1]) if parts.size() >= 2 else "We couldn't determine your location. Try again."
@@ -198,9 +232,11 @@ static func get_current_fix(require_accuracy: bool = true) -> Dictionary:
 
 
 static func get_fresh_fix(require_accuracy: bool = true) -> Dictionary:
-	## Obtain a fresh fused location fix. Does NOT silently reuse stale last-known.
+	## Obtain a fresh fused location fix. Coordinates success is independent of reverse geocode.
 	if OS.get_name() != "Android":
 		return get_current_fix(require_accuracy)
+	_log("Use Current Location tapped → get_fresh_fix")
+	_log("permission_state=%s location_services=%s" % [permission_status(), location_services_enabled()])
 	dump_diagnostics()
 	if permission_status() != "granted":
 		_log("fresh denied")
@@ -218,12 +254,15 @@ static func get_fresh_fix(require_accuracy: bool = true) -> Dictionary:
 		}
 	var p = _plugin()
 	if p == null:
-		_log("fresh plugin missing")
+		_log("fresh plugin missing — provider not packaged/initialized")
 		return {
 			"ok": false,
 			"error": "We couldn't determine your location. Try again.",
 			"unavailable": true,
 		}
+	if p.has_method("location_plugin_available"):
+		_log("provider packaged: ChestLocation available=%s" % str(p.location_plugin_available()))
+	var settled: Dictionary = {}
 	if p.has_method("begin_fresh_location") and p.has_method("poll_fresh_location"):
 		if not bool(p.begin_fresh_location()):
 			_log("begin_fresh_location returned false")
@@ -238,24 +277,44 @@ static func get_fresh_fix(require_accuracy: bool = true) -> Dictionary:
 				"error": "We couldn't determine your location. Try again.",
 				"unavailable": true,
 			}
+		_log("request started — polling")
 		var tree := Engine.get_main_loop() as SceneTree
 		for _i in range(FRESH_POLL_COUNT):
 			if tree != null:
 				await tree.create_timer(FRESH_POLL_INTERVAL_SEC).timeout
+			## If we already accepted a fix, never let a later timeout overwrite it.
+			if bool(settled.get("ok", false)):
+				_log("keeping settled success — ignoring later poll")
+				return settled
 			var raw := str(p.poll_fresh_location())
 			if raw.begins_with("ok|"):
+				_log("callback/poll received ok raw_len=%d" % raw.length())
 				var parsed_ok := _parse_fix_raw(raw, require_accuracy, MAX_FIX_AGE_MS)
-				_log("fresh ok source=%s acc=%s" % [str(parsed_ok.get("source")), str(parsed_ok.get("accuracy_m"))])
-				return parsed_ok
+				if bool(parsed_ok.get("ok", false)):
+					settled = parsed_ok
+					if p.has_method("cancel_fresh_location"):
+						p.cancel_fresh_location()
+					_log(
+						"fresh ok source=%s acc=%s age=%s" % [
+							str(parsed_ok.get("source")),
+							str(parsed_ok.get("accuracy_m")),
+							str(parsed_ok.get("age_ms")),
+						]
+					)
+					return settled
+				_log("ok| rejected by parser: %s" % str(parsed_ok.get("error")))
+				## Keep listening for a better/fresher point; do not hard-fail yet.
+				continue
 			if raw.contains("|pending"):
 				continue
-			var parsed := _parse_fix_raw(raw, require_accuracy, MAX_FIX_AGE_MS)
-			if p.has_method("cancel_fresh_location"):
-				p.cancel_fresh_location()
-			_log("fresh poll error: %s" % str(parsed.get("error")))
-			return parsed
+			## timeout / unavailable from native — try last-known before failing.
+			_log("poll non-ok: %s — trying last-known fallback" % raw)
+			break
 		if p.has_method("cancel_fresh_location"):
 			p.cancel_fresh_location()
+		if bool(settled.get("ok", false)):
+			_log("timeout after success — returning settled (no overwrite)")
+			return settled
 		var last := _parse_fix_raw(
 			str(p.get_last_known_location()) if p.has_method("get_last_known_location") else "",
 			require_accuracy,
@@ -263,9 +322,9 @@ static func get_fresh_fix(require_accuracy: bool = true) -> Dictionary:
 		)
 		if bool(last.get("ok", false)):
 			last["source"] = "recent_cached"
-			_log("fresh fallback recent_cached")
+			_log("fresh fallback recent_cached acc=%s age=%s" % [str(last.get("accuracy_m")), str(last.get("age_ms"))])
 			return last
-		_log("fresh timeout")
+		_log("timeout fired — no usable fix")
 		return {
 			"ok": false,
 			"error": "We couldn't determine your location. Try again.",

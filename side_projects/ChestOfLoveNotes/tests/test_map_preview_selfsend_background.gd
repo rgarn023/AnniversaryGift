@@ -58,7 +58,7 @@ func _run() -> void:
 	_assert(viewer.contains("Font changes must NOT touch ZoomPanRoot"), "A+ does not alter composite")
 
 	## SELF-SEND
-	_assert(compose.contains("Send to Myself (Test)"), "debug self-send UI")
+	_assert(compose.contains("Test with myself"), "debug self-send UI")
 	_assert(compose.contains("_self_send_enabled"), "self-send gated")
 	_assert(compose.contains("DEBUG_SELF_SEND") or compose.contains("BuildFlags.DEBUG_SELF_SEND"), "uses build flag")
 	_assert(main.contains("me_profile"), "compose gets current profile")
@@ -103,8 +103,8 @@ func _run() -> void:
 	_assert(act_mig.contains("activity_lock_enabled"), "activity/focus migration present")
 
 	_assert(BuildFlags.APP_VERSION_CODE >= 26, "versionCode 26+")
-	_assert(preset.contains("version/code=26"), "export 24")
-	_assert(preset.contains("ChestOfLoveNotes-android-permissions-fix-debug.apk"), "APK name")
+	_assert(preset.contains("version/code=27"), "export 24")
+	_assert(preset.contains("ChestOfLoveNotes-current-location-person-repair-debug.apk"), "APK name")
 
 	## Runtime preview composite clamp (static source checks already cover ZoomPanRoot).
 	_assert(viewer.contains("MAX_COMPOSITE_SCALE: float = 3.0"), "max composite scale is 3x")

@@ -177,19 +177,26 @@ func setup_with_person(person: Dictionary, show_onboarding_chip: bool = false, d
 	private_onboarding_label = show_onboarding_chip
 	_init_default_schedule()
 	_build_ui()
+	## Production recipient is always the active Person when present.
+	## Debug self-send is a separate flag and must not hide/replace Person identity.
+	var want_self_test := false
+	if not draft.is_empty():
+		want_self_test = _self_send_enabled() and (
+			bool(draft.get("is_self_test", false))
+			or str(draft.get("recipient_id", "")) == str(self_profile.get("id", ""))
+		)
+		apply_draft(draft)
 	if not my_person.is_empty():
 		_selected_friend = my_person.duplicate(true)
-	if not draft.is_empty():
-		apply_draft(draft)
-		## Production: always force active Person as recipient (ignore stale draft recipient).
-		if not my_person.is_empty() and not bool(_selected_friend.get("is_self_test", false)):
-			_selected_friend = my_person.duplicate(true)
-	else:
-		_refresh_recipient_row()
-		_refresh_schedule_labels()
-		_sync_delivery_visibility()
-		_refresh_summary()
-		_update_validation()
+		if want_self_test:
+			_selected_friend = _self_recipient_dict()
+	elif want_self_test:
+		_selected_friend = _self_recipient_dict()
+	_refresh_recipient_row()
+	_refresh_schedule_labels()
+	_sync_delivery_visibility()
+	_refresh_summary()
+	_update_validation()
 	_sync_person_gate()
 
 
@@ -219,10 +226,26 @@ func _notification(what: int) -> void:
 
 
 func get_draft() -> Dictionary:
+	var self_mode := bool(_selected_friend.get("is_self_test", false))
+	## Production identity stays My Person; debug self-send only changes the send target id.
+	var recipient: Dictionary = {}
+	if self_mode:
+		recipient = _selected_friend.duplicate(true)
+	elif not my_person.is_empty():
+		recipient = my_person.duplicate(true)
+	else:
+		recipient = _selected_friend.duplicate(true)
+	var display_name := str(recipient.get("display_name", ""))
+	var username := str(recipient.get("username", ""))
+	if not my_person.is_empty():
+		## Keep Person name/username visible even while debug self-send is active.
+		display_name = str(my_person.get("display_name", display_name))
+		username = str(my_person.get("username", username))
 	return {
-		"recipient_id": str(_selected_friend.get("id", "")),
-		"recipient_display_name": str(_selected_friend.get("display_name", "")),
-		"recipient_username": str(_selected_friend.get("username", "")),
+		"recipient_id": str(recipient.get("id", "")),
+		"recipient_display_name": display_name,
+		"recipient_username": username,
+		"is_self_test": self_mode,
 		"title": _title_edit.text.strip_edges() if _title_edit else "",
 		"message": _message_edit.text if _message_edit else "",
 		"open_immediately": _open_immediately.button_pressed if _open_immediately else true,
@@ -1162,6 +1185,7 @@ func _finish_current_location_attempt() -> void:
 
 func _on_use_current_location() -> void:
 	## Must use the sender phone's actual current position (fresh fused fix), not map center / last search.
+	## Success = valid coordinates become the Location Lock target. Reverse geocode is optional polish.
 	if _location_use_btn == null:
 		return
 	if _location_use_btn.disabled:
@@ -1171,6 +1195,8 @@ func _on_use_current_location() -> void:
 	## Clear any prior embedded error immediately.
 	_location_status.text = "Getting your location…"
 	_location_status.visible = true
+	if OS.is_debug_build():
+		print("[COLN-LOC] Use Current Location tapped")
 	if OS.get_name() == "Android":
 		if LocationHelper.permission_status() != "granted":
 			LocationHelper.request_permission_if_needed()
@@ -1192,6 +1218,7 @@ func _on_use_current_location() -> void:
 			_finish_current_location_attempt()
 			_update_validation()
 			return
+	var preserved_radius := _location_radius_m
 	var fix: Dictionary = await LocationHelper.get_fresh_fix(true)
 	if not bool(fix.get("ok", false)):
 		_location_status.text = str(fix.get("error", "We couldn't determine your location. Try again."))
@@ -1205,25 +1232,52 @@ func _on_use_current_location() -> void:
 		_finish_current_location_attempt()
 		_update_validation()
 		return
-	_location_status.text = "Resolving place…"
+	## Coordinates succeed immediately — set lock target before optional reverse geocode.
+	_location_radius_m = preserved_radius
+	_apply_resolved_place({
+		"name": "Current Location",
+		"address": "Address unavailable",
+		"lat": lat,
+		"lng": lng,
+		"source": "current",
+	})
+	_location_radius_m = preserved_radius
+	_location_status.text = "Current location selected"
+	var note := str(fix.get("accuracy_note", "")).strip_edges()
+	if not note.is_empty():
+		_location_status.text = "Current location selected · %s" % note
+	_finish_current_location_attempt()
+	_update_validation()
 	var token := _location_search_service.next_token()
 	var rev: Dictionary = await _location_search_service.reverse_geocode(lat, lng, token)
-	_finish_current_location_attempt()
+	if OS.is_debug_build():
+		print("[COLN-LOC] reverse-geocode ok=%s" % str(rev.get("ok", false)))
+	if not is_inside_tree():
+		return
+	## Only polish the label — never fail or clear the lock target if reverse geocode fails.
 	if bool(rev.get("ok", false)) and typeof(rev.get("place")) == TYPE_DICTIONARY:
 		var place: Dictionary = (rev.get("place") as Dictionary).duplicate(true)
 		place["lat"] = lat
 		place["lng"] = lng
 		place["source"] = "current"
+		_location_radius_m = preserved_radius
 		_apply_resolved_place(place)
+		_location_radius_m = preserved_radius
+		_location_status.text = "Current location selected"
+		if not note.is_empty():
+			_location_status.text = "Current location selected · %s" % note
 	else:
-		_apply_resolved_place({
-			"name": "Current Location",
-			"address": "%.5f, %.5f" % [lat, lng],
-			"lat": lat,
-			"lng": lng,
-			"source": "current",
-		})
-	_location_status.text = "Current location selected"
+		## Keep coordinates; show friendly fallback (not the failure string).
+		_location_name = "Current Location"
+		if _location_address.is_empty() or _location_address.contains(","):
+			_location_address = "Address unavailable"
+		_refresh_location_summary()
+		_refresh_optional_summaries()
+		_refresh_summary()
+		_location_status.text = "Current location selected"
+		if not note.is_empty():
+			_location_status.text = "Current location selected · %s" % note
+	_update_validation()
 
 
 func _build_password_card() -> PanelContainer:
@@ -2104,34 +2158,31 @@ func _sync_person_gate() -> void:
 func _refresh_recipient_row() -> void:
 	if _recipient_label == null and _recipient_btn == null:
 		return
-	## Production: fixed "To X" — no recipient modal / friend picker.
+	## Production: fixed "To X" from active Person — no recipient picker.
+	## Debug self-send is a separate control and must not replace/hide Person.
 	var self_mode := bool(_selected_friend.get("is_self_test", false))
-	if not my_person.is_empty() and not self_mode:
-		_selected_friend = my_person.duplicate(true)
-	if _selected_friend.is_empty():
+	if not my_person.is_empty():
+		var person_name := IdentityHelper.display_name_from_profile(my_person, ProductStrings.PERSON)
+		if _recipient_label:
+			_recipient_label.visible = true
+			_recipient_label.text = ProductStrings.to_label(person_name)
+		if _recipient_btn:
+			_recipient_btn.visible = _self_send_enabled()
+			_recipient_btn.text = "✓ Test with myself" if self_mode else "Test with myself"
+	elif self_mode:
 		if _recipient_label:
 			_recipient_label.visible = true
 			_recipient_label.text = ProductStrings.COMPOSE_NEED_PERSON
 		if _recipient_btn:
 			_recipient_btn.visible = _self_send_enabled()
-			_recipient_btn.text = "Test recipient: Myself"
-	elif self_mode:
-		var self_name := IdentityHelper.display_name_from_profile(_selected_friend, "Me")
-		if _recipient_label:
-			_recipient_label.visible = true
-			_recipient_label.text = "To %s (Test)" % self_name
-		if _recipient_btn:
-			_recipient_btn.visible = _self_send_enabled()
-			_recipient_btn.text = "Send to Myself (Test) · tap to restore Person"
+			_recipient_btn.text = "✓ Test with myself (no Person)"
 	else:
-		var name := IdentityHelper.display_name_from_profile(_selected_friend, ProductStrings.PERSON)
 		if _recipient_label:
 			_recipient_label.visible = true
-			_recipient_label.text = ProductStrings.to_label(name)
+			_recipient_label.text = ProductStrings.COMPOSE_NEED_PERSON
 		if _recipient_btn:
-			## Unobtrusive debug control under the recipient label, not a giant modal.
 			_recipient_btn.visible = _self_send_enabled()
-			_recipient_btn.text = "Send to Myself (Test)"
+			_recipient_btn.text = "Test with myself"
 	_sync_person_gate()
 
 

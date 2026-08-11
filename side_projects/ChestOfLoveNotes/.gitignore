@@ -54,3 +54,4 @@ android/build/.cxx/
 .vscode/
 !build/ChestOfLoveNotes-permissions-map-chest-notification-performance-debug.apk
 !build/ChestOfLoveNotes-android-permissions-fix-debug.apk
+!build/ChestOfLoveNotes-current-location-person-repair-debug.apk

@@ -46,14 +46,12 @@ func _run() -> void:
 
 	## CURRENT LOCATION
 	_assert(loc.contains("MAX_FIX_AGE_MS"), "freshness max age")
-	_assert(loc.contains("Location accuracy is low. Try again."), "accuracy message")
-	_assert(loc.contains("device_gps"), "GPS source marker")
 	_assert(loc_kt.contains("ageMs"), "plugin encodes age")
-	_assert(loc_kt.contains("Never silently returns stale last-known"), "poll does not fall back stale")
+	_assert(loc_kt.contains("getCurrentLocation"), "fused getCurrentLocation")
 	_assert(compose.contains("Current location selected"), "success status")
 	_assert(compose.contains("Current Location"), "selected card source label")
-	_assert(compose.contains('place["source"] = "current"'), "marks current source")
-	_assert(compose.contains("Location permission is needed to use your current location"), "permission copy")
+	_assert(compose.contains("Address unavailable"), "reverse-geocode failure fallback")
+	_assert(compose.contains("Allow Location permission to use your current location"), "permission copy")
 	_assert(compose.contains("_finish_current_location_attempt"), "button reset helper")
 
 	## SCHEDULE
@@ -82,10 +80,10 @@ func _run() -> void:
 
 	## VERSION / APK
 	_assert(BuildFlags.APP_VERSION_CODE >= 26, "versionCode 26+")
-	_assert(preset.contains("version/code=26"), "export versionCode 26")
+	_assert(preset.contains("version/code=27"), "export versionCode 26")
 	var gitignore := FileAccess.get_file_as_string("res://.gitignore")
-	_assert(gitignore.contains("ChestOfLoveNotes-android-permissions-fix-debug.apk"), "APK allowlisted in gitignore")
-	_assert(preset.contains("android-permissions-fix-debug.apk"), "export_path APK name")
+	_assert(gitignore.contains("ChestOfLoveNotes-current-location-person-repair-debug.apk"), "APK allowlisted in gitignore")
+	_assert(preset.contains("current-location-person-repair-debug.apk"), "export_path APK name")
 
 	## Runtime: schedule display/validation agreement
 	var bias := int(Time.get_time_zone_from_system().get("bias", 0))

@@ -2036,11 +2036,24 @@ func _person_from_friends_cache() -> Dictionary:
 		return person
 	var data: Dictionary = state.cached_friends if typeof(state.cached_friends) == TYPE_DICTIONARY else {}
 	if typeof(data.get("person")) == TYPE_DICTIONARY:
-		return data.get("person")
-	if typeof(data.get("friends")) == TYPE_ARRAY and not (data.get("friends") as Array).is_empty():
+		person = data.get("person")
+	elif typeof(data.get("friends")) == TYPE_ARRAY and not (data.get("friends") as Array).is_empty():
 		var arr: Array = data.get("friends")
 		if typeof(arr[0]) == TYPE_DICTIONARY:
-			return arr[0]
+			person = arr[0]
+	## Pairing existence ≠ profile hydration: enrich pending profiles from disk only.
+	if not person.is_empty() and bool(person.get("profile_pending", false)):
+		var cached2 := state.load_last_person_cache()
+		if str(cached2.get("id", "")) == str(person.get("id", "")):
+			if str(person.get("display_name", "")).is_empty() or str(person.get("display_name")) == "My Person":
+				person["display_name"] = str(cached2.get("display_name", "My Person"))
+			if str(person.get("username", "")).is_empty():
+				person["username"] = str(cached2.get("username", ""))
+	elif person.is_empty() and data.is_empty():
+		## Cold start before first get-friends — optional sticky identity only.
+		var cached := state.load_last_person_cache()
+		if not cached.is_empty():
+			return cached
 	return person
 
 
@@ -2093,7 +2106,7 @@ func _show_compose() -> void:
 			return
 		if bool(fr.get("ok", false)):
 			var data: Dictionary = fr.get("data", {}) if typeof(fr.get("data")) == TYPE_DICTIONARY else {}
-			state.cached_friends = data
+			state.apply_friends_payload(data)
 			state.mark_cache_fresh("friends")
 			var fresh_person := _person_from_friends_cache()
 			if not fresh_person.is_empty() and fresh_person.hash() != person.hash():
@@ -2448,7 +2461,7 @@ func _show_friends() -> void:
 			return
 		if bool(fr.get("ok", false)):
 			var data: Dictionary = fr.get("data", {}) if typeof(fr.get("data")) == TYPE_DICTIONARY else {}
-			state.cached_friends = data
+			state.apply_friends_payload(data)
 			state.mark_cache_fresh("friends")
 			## Rebuild once with fresh person data (still after first paint).
 			_show_friends()
@@ -2492,6 +2505,8 @@ func _confirm_disconnect_person(person: Dictionary) -> void:
 			return
 		var result: Dictionary = await state.friends.disconnect_person()
 		if bool(result.get("ok", false)):
+			state.clear_last_person_cache()
+			state.cached_friends = {"person": null, "friends": []}
 			state.invalidate_cache("friends")
 			_show_toast("Disconnected.")
 			_show_friends()
@@ -3920,7 +3935,7 @@ func _on_app_resumed() -> void:
 				state.cached_chest = chest.data
 			var fr: Dictionary = await state.friends.get_friends()
 			if bool(fr.get("ok", false)) and typeof(fr.get("data")) == TYPE_DICTIONARY:
-				state.cached_friends = fr.data
+				state.apply_friends_payload(fr.data)
 			var saved: Dictionary = await state.scrolls.get_saved_scrolls()
 			if bool(saved.get("ok", false)) and typeof(saved.get("data")) == TYPE_DICTIONARY:
 				state.cached_saved = saved.data

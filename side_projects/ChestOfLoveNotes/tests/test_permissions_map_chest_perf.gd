@@ -61,7 +61,7 @@ func _init() -> void:
 	_assert(main.contains("Requests") and main.contains("Saved"), "chest secondary categories")
 
 	_assert(compose.contains("_toggle_debug_self_send"), "Debug Recipient modal removed / toggle used")
-	_assert(compose.contains("Send to Myself (Test)"), "self-send retained")
+	_assert(compose.contains("Test with myself"), "self-send retained")
 	_assert(compose.contains("Require your Person"), "location lock Person copy")
 	_assert(compose.contains("VBoxContainer.new()") and compose.contains("Use Current Location"), "stacked location buttons")
 
@@ -71,9 +71,9 @@ func _init() -> void:
 	_assert(main.contains("_add_geofence_opt_in"), "geofence opt-in UI")
 	_assert(FileAccess.file_exists("res://android/plugins/chest_secure_storage/GeofenceReceiver.kt"), "GeofenceReceiver")
 
-	_assert(flags.contains("APP_VERSION_CODE := 26"), "versionCode 26")
-	_assert(export_cfg.contains("version/code=26"), "export 25")
-	_assert(export_cfg.contains("ChestOfLoveNotes-android-permissions-fix-debug.apk"), "APK name")
+	_assert(flags.contains("APP_VERSION_CODE := 27"), "versionCode 26")
+	_assert(export_cfg.contains("version/code=27"), "export 25")
+	_assert(export_cfg.contains("ChestOfLoveNotes-current-location-person-repair-debug.apk"), "APK name")
 
 	_assert(main.contains("\"Person\"") or main.contains("Person"), "nav Person label")
 	_assert(not main.contains("Send sealed scrolls to friends"), "welcome friend copy removed")

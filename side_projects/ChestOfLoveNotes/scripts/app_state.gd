@@ -25,6 +25,8 @@ var cached_friends: Dictionary = {}
 ## Soft-refresh timestamps (unix) — avoid refetching on every tab tap.
 var cache_fetched_at: Dictionary = {"chest": 0, "friends": 0, "sent": 0, "profile": 0}
 const CACHE_SOFT_TTL_SEC := 45
+## Last-known My Person identity (survives brief profile lookup failures).
+const LAST_PERSON_PATH := "user://coln_last_person.json"
 
 ## Local hide list for Sent history (recoverable; not permanent deletion).
 const SENT_HIDDEN_PATH := "user://coln_sent_hidden.json"
@@ -98,6 +100,76 @@ func clear_private_caches() -> void:
 	cached_friends.clear()
 	hidden_sent_ids.clear()
 	cache_fetched_at = {"chest": 0, "friends": 0, "sent": 0, "profile": 0}
+	clear_last_person_cache()
+
+
+func remember_person(person: Dictionary) -> void:
+	## Persist pairing identity separately from soft cache / profile hydration.
+	if person.is_empty() or str(person.get("id", "")).is_empty():
+		return
+	var payload := {
+		"id": str(person.get("id", "")),
+		"display_name": str(person.get("display_name", "")),
+		"username": str(person.get("username", "")),
+		"friend_code": str(person.get("friend_code", "")),
+		"connected_at": str(person.get("connected_at", "")),
+		"pairing_id": str(person.get("pairing_id", "")),
+		"saved_at": int(Time.get_unix_time_from_system()),
+	}
+	var f := FileAccess.open(LAST_PERSON_PATH, FileAccess.WRITE)
+	if f == null:
+		return
+	f.store_string(JSON.stringify(payload))
+	f.close()
+
+
+func load_last_person_cache() -> Dictionary:
+	if not FileAccess.file_exists(LAST_PERSON_PATH):
+		return {}
+	var raw := FileAccess.get_file_as_string(LAST_PERSON_PATH)
+	if raw.is_empty():
+		return {}
+	var parsed: Variant = JSON.parse_string(raw)
+	if typeof(parsed) != TYPE_DICTIONARY:
+		return {}
+	var d: Dictionary = parsed
+	if str(d.get("id", "")).is_empty():
+		return {}
+	return d
+
+
+func clear_last_person_cache() -> void:
+	if FileAccess.file_exists(LAST_PERSON_PATH):
+		DirAccess.remove_absolute(LAST_PERSON_PATH)
+
+
+func apply_friends_payload(data: Dictionary) -> void:
+	## Merge get-friends payload; keep last-known Person if profile hydration is pending/missing.
+	## Never invent a pairing when the server reports none.
+	cached_friends = data.duplicate(true) if not data.is_empty() else {}
+	var person: Dictionary = {}
+	if typeof(cached_friends.get("person")) == TYPE_DICTIONARY:
+		person = cached_friends.get("person")
+	elif typeof(cached_friends.get("friends")) == TYPE_ARRAY and not (cached_friends.get("friends") as Array).is_empty():
+		var arr: Array = cached_friends.get("friends")
+		if typeof(arr[0]) == TYPE_DICTIONARY:
+			person = arr[0]
+	if not person.is_empty() and str(person.get("id", "")).is_empty() == false:
+		if bool(person.get("profile_pending", false)):
+			var cached := load_last_person_cache()
+			if str(cached.get("id", "")) == str(person.get("id", "")):
+				if str(person.get("display_name", "")).is_empty() or str(person.get("display_name")) == "My Person":
+					person["display_name"] = str(cached.get("display_name", person.get("display_name")))
+				if str(person.get("username", "")).is_empty():
+					person["username"] = str(cached.get("username", ""))
+				cached_friends["person"] = person
+				cached_friends["friends"] = [person]
+		remember_person(person)
+		return
+	## Server says no Person — clear sticky identity so Compose/My Person stay empty.
+	clear_last_person_cache()
+	cached_friends["person"] = null
+	cached_friends["friends"] = []
 
 
 func cache_is_fresh(key: String) -> bool:
