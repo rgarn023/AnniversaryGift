@@ -11,12 +11,14 @@ Outputs:
   assets/art/chest/scroll_rolled.png   (clean parchment-only scroll layer)
   assets/art/chest/chest_front_rim.png (thin front-lip occlusion for scroll rise)
 
-v44 polish:
+v45 polish:
   - empty + unread share glowing-sheet opening geometry (one chest family)
-  - scroll rise uses high-res scroll_rolled parchment donor — never magical-sheet chest pixels
+  - scroll rise uses ONE upright vertical love-note (rotated high-res rolled parchment)
+  - never stacked horizontal rollers / white plank slabs
+  - never magical-sheet chest pixels in the scroll layer
   - runtime prefers separate scroll + rim layers over baked late frames
   - normalize body exposure across opening poses
-  - stronger rim-occluded peek → rise → final reward stages
+  - rim-occluded peek → rise → final reward stages
   - normalize lower-body visual scale across poses (foot-locked)
   - preserve absolute foot lock (BASE_Y) and canvas center
   - reject top-sheared source cells
@@ -56,12 +58,27 @@ def cell_at(rgb: np.ndarray, index: int, cols: int = 6, rows: int = 4) -> np.nda
 
 
 def bg_mask(arr: np.ndarray) -> np.ndarray:
-	"""Strict sheet-background mask — removes dark cell fill without eating glow."""
-	lum = arr.astype(np.float32).mean(axis=2)
+	"""Sheet-background mask — removes black cell fill WITHOUT eating dark wood.
+
+	Prior bug: aggressive luminance cuts punched holes through mahogany panels.
+	Keep any warm/dark wood or gold; only drop true near-corner black matte.
+	"""
+	rgb = arr.astype(np.float32)
+	lum = rgb.mean(axis=2)
 	corners = np.stack([arr[1, 1], arr[1, -2], arr[-2, 1], arr[-2, -2]]).astype(np.float32)
 	bg = corners.mean(axis=0)
-	diff = np.abs(arr.astype(np.float32) - bg).sum(axis=2)
-	return (lum < 30) | (diff < 42)
+	diff = np.abs(rgb - bg).sum(axis=2)
+	r = rgb[:, :, 0]
+	g = rgb[:, :, 1]
+	b = rgb[:, :, 2]
+	## Broad chest-material keep: warm browns, mahogany, gold — even when dark.
+	warm_wood = (r >= b) & (r > 12) & (g >= b * 0.35) & ((r - b) > 2)
+	goldish = (r > 70) & (g > 40) & ((r - b) > 12)
+	chestish = warm_wood | goldish
+	## True sheet matte only: extremely close to corner bg AND not chest material.
+	near_bg = (diff < 22) & (~chestish)
+	black_matte = (lum < 12) & (diff < 40) & (~chestish)
+	return near_bg | black_matte
 
 
 def crop_bleed(arr: np.ndarray) -> tuple[np.ndarray, int]:
@@ -178,6 +195,14 @@ def harden_chest_opacity(rgba: np.ndarray) -> np.ndarray:
 	opaque = out[:, :, 3] >= 250
 	fill = _dilate(opaque, 1) & present & (out[:, :, 3] >= 40) & (out[:, :, 3] < 250) & (lum >= 16)
 	out[fill, 3] = 255
+	## Lower planted body: any visible pixel must be fully opaque (no beach bleed).
+	ys, xs = np.where(out[:, :, 3] > 18)
+	if len(ys):
+		chest_top, chest_bot = int(ys.min()), int(ys.max())
+		body_cut = int(chest_top + (chest_bot - chest_top) * 0.48)
+		yy = np.arange(out.shape[0])[:, None]
+		lower = (yy >= body_cut) & (out[:, :, 3] > 24) & (lum >= 12)
+		out[lower, 3] = 255
 	return out
 
 
@@ -218,10 +243,9 @@ def fill_internal_holes(rgba: np.ndarray) -> np.ndarray:
 			if 0 <= ny < h and 0 <= nx < w and (not exterior[ny, nx]) and (not present[ny, nx]):
 				exterior[ny, nx] = True
 				q.append((ny, nx))
-	holes = (~present) & (~exterior)
-	## Restrict to lower body + small components only.
 	yy = np.arange(h)[:, None]
-	holes = holes & (yy >= body_cut)
+	## Fully transparent holes + near-transparent speckles inside lower body.
+	holes = ((~present) | ((a > 0) & (a < 90))) & (~exterior) & (yy >= body_cut)
 	if not holes.any():
 		return rgba
 	## Drop large hole components (open cavities) — keep speckles/cracks.
@@ -532,11 +556,115 @@ def _clean_scroll_donor_rgba() -> np.ndarray:
 	raise RuntimeError("No clean scroll donor found under assets/art/scroll/")
 
 
-def build_clean_scroll_layer(open_placed: np.ndarray) -> np.ndarray:
-	"""Place a clean parchment-only scroll into the open chest cavity.
+def _opaque_force(scroll: np.ndarray) -> np.ndarray:
+	"""Keep parchment/wood/gold crisp — no soft mid-alpha wash on the scroll body."""
+	out = scroll.copy()
+	a = out[:, :, 3]
+	body = a > 40
+	out[:, :, 3] = np.where(body, 255, 0).astype(np.uint8)
+	return out
 
-	Builds a thicker rolled reward scroll from high-res top/bottom rollers +
-	rolled parchment — never magical-sheet chest pixels. Guarantees one chest.
+
+def _strip_black_matte(rgba: np.ndarray) -> np.ndarray:
+	out = rgba.copy()
+	lum = out[:, :, :3].astype(np.float32).mean(axis=2)
+	a = out[:, :, 3].astype(np.float32)
+	a[lum < 14] = 0
+	out[:, :, 3] = a.astype(np.uint8)
+	return out
+
+
+def build_vertical_love_note(target_w: int, target_h: int) -> np.ndarray:
+	"""Build one crisp vertical love-note scroll from parchment + rollers.
+
+	Classic reading-scroll silhouette (top roller / parchment / bottom roller)
+	narrow enough for the chest cavity — never a wide horizontal white plank.
+	"""
+	parch_path = ROOT / "assets" / "art" / "scroll" / "scroll_parchment.png"
+	top_path = ROOT / "assets" / "art" / "scroll" / "scroll_top_roller.png"
+	bot_path = ROOT / "assets" / "art" / "scroll" / "scroll_bottom_roller.png"
+	rolled_path = ROOT / "assets" / "art" / "scroll" / "scroll_rolled.png"
+	if not (parch_path.exists() and top_path.exists() and bot_path.exists()):
+		## Fallback: upright rolled tube from high-res rolled art.
+		src = rolled_path if rolled_path.exists() else ROOT / "assets" / "art" / "scroll" / "scroll_mini_unread.png"
+		rolled = _strip_black_matte(np.array(Image.open(src).convert("RGBA")))
+		ys, xs = np.where(rolled[:, :, 3] > 40)
+		crop = rolled[int(ys.min()) : int(ys.max()) + 1, int(xs.min()) : int(xs.max()) + 1]
+		upright = np.array(Image.fromarray(crop, "RGBA").transpose(Image.Transpose.ROTATE_90))
+		rw = max(48, int(target_w))
+		rh = max(72, min(int(target_h), int(rw * 1.9)))
+		scroll = np.array(Image.fromarray(upright, "RGBA").resize((rw, rh), Image.Resampling.LANCZOS))
+		return _opaque_force(scroll)
+
+	parch = _strip_black_matte(np.array(Image.open(parch_path).convert("RGBA")))
+	top = _strip_black_matte(np.array(Image.open(top_path).convert("RGBA")))
+	bot = _strip_black_matte(np.array(Image.open(bot_path).convert("RGBA")))
+
+	rw = max(48, int(target_w))
+	## Rollers slightly wider than parchment so finials read clearly.
+	roller_w = min(int(rw * 1.18), rw + 18)
+	th = max(12, int(round(rw * 0.22)))
+	bh = max(14, int(round(rw * 0.26)))
+	## Parchment body height — leave room for rollers inside target_h.
+	body_h = max(48, int(target_h) - th - bh + 10)
+	body_h = min(body_h, int(rw * 1.55))
+	filt = Image.Resampling.LANCZOS
+
+	## Crop parchment to a neat vertical love-note strip (center content).
+	ys, xs = np.where(parch[:, :, 3] > 40)
+	y0, y1 = int(ys.min()), int(ys.max()) + 1
+	x0, x1 = int(xs.min()), int(xs.max()) + 1
+	pc = parch[y0:y1, x0:x1]
+	## Take a centered vertical band so edges stay organic but width is controlled.
+	pw = pc.shape[1]
+	band_w = max(8, int(pw * 0.55))
+	bx0 = (pw - band_w) // 2
+	pc = pc[:, bx0 : bx0 + band_w]
+	parch_r = np.array(Image.fromarray(pc, "RGBA").resize((rw, body_h), filt))
+	top_r = np.array(Image.fromarray(top, "RGBA").resize((roller_w, th), filt))
+	bot_r = np.array(Image.fromarray(bot, "RGBA").resize((roller_w, bh), filt))
+
+	bundle_h = th + body_h + bh - 8
+	bundle_w = max(rw, roller_w)
+	bundle = np.zeros((bundle_h, bundle_w, 4), dtype=np.uint8)
+
+	def _paste(dst: np.ndarray, src: np.ndarray, y0: int, x0: int) -> None:
+		y1 = min(dst.shape[0], y0 + src.shape[0])
+		x1 = min(dst.shape[1], x0 + src.shape[1])
+		h = y1 - y0
+		w = x1 - x0
+		if h <= 0 or w <= 0:
+			return
+		patch = src[:h, :w]
+		a = patch[:, :, 3:4].astype(np.float32) / 255.0
+		region = dst[y0:y1, x0:x1].astype(np.float32)
+		region[:, :, :3] = patch[:, :, :3].astype(np.float32) * a + region[:, :, :3] * (1.0 - a)
+		region[:, :, 3] = np.maximum(region[:, :, 3], patch[:, :, 3].astype(np.float32))
+		dst[y0:y1, x0:x1] = region.astype(np.uint8)
+
+	_paste(bundle, top_r, 0, (bundle_w - roller_w) // 2)
+	_paste(bundle, parch_r, max(0, th - 5), (bundle_w - rw) // 2)
+	_paste(bundle, bot_r, max(0, th + body_h - 10), (bundle_w - roller_w) // 2)
+
+	## Warm parchment lift — keep paper readable and crisp.
+	rgb = bundle[:, :, :3].astype(np.float32)
+	a = bundle[:, :, 3] > 40
+	rgb[a, 0] = np.clip(rgb[a, 0] * 1.03 + 3, 0, 255)
+	rgb[a, 1] = np.clip(rgb[a, 1] * 1.015 + 1, 0, 255)
+	bundle[:, :, :3] = rgb.astype(np.uint8)
+	bundle = _opaque_force(bundle)
+	if bundle.shape[1] >= bundle.shape[0] * 0.95:
+		raise RuntimeError(
+			f"Vertical love note still too wide ({bundle.shape[1]}x{bundle.shape[0]})"
+		)
+	return bundle
+
+
+def build_clean_scroll_layer(open_placed: np.ndarray) -> np.ndarray:
+	"""Place a clean vertical love-note scroll into the open chest cavity.
+
+	One upright rolled parchment — never stacked horizontal rollers / plank.
+	Never magical-sheet chest pixels. Guarantees one chest.
 	"""
 	ys, xs = np.where(open_placed[:, :, 3] > 40)
 	if len(ys) == 0:
@@ -544,82 +672,29 @@ def build_clean_scroll_layer(open_placed: np.ndarray) -> np.ndarray:
 	chest_top, chest_bot = int(ys.min()), int(ys.max())
 	cx = float(np.median(xs))
 	chest_h = max(1, chest_bot - chest_top)
-	rim_y = int(chest_top + chest_h * 0.50)
+	rim_y = int(chest_top + chest_h * 0.48)
 	body_w = lower_body_width(open_placed) or 180.0
-	target_w = max(96, int(round(body_w * 0.66)))
+	## Narrower than the chest opening — believable love-note width/height.
+	## Keep short enough that the final rise stays inside the cavity (not a pillar).
+	target_w = max(46, int(round(body_w * 0.34)))
+	target_h = max(100, int(round(chest_h * 0.55)))
 
-	rolled_path = ROOT / "assets" / "art" / "scroll" / "scroll_rolled.png"
-	top_path = ROOT / "assets" / "art" / "scroll" / "scroll_top_roller.png"
-	bot_path = ROOT / "assets" / "art" / "scroll" / "scroll_bottom_roller.png"
-	if not rolled_path.exists():
-		return _build_scroll_from_donor_fallback(open_placed, cx, rim_y, target_w)
+	try:
+		scroll = build_vertical_love_note(target_w, target_h)
+	except Exception:
+		scroll = _build_scroll_from_donor_fallback(open_placed, cx, rim_y, target_w)
+		## Fallback may still be horizontal — rotate upright if needed.
+		if scroll.shape[1] > scroll.shape[0]:
+			scroll = np.array(Image.fromarray(scroll, "RGBA").transpose(Image.Transpose.ROTATE_90))
 
-	rolled = np.array(Image.open(rolled_path).convert("RGBA"))
-	## Strip near-black matte.
-	for arr in (rolled,):
-		lum = arr[:, :, :3].astype(np.float32).mean(axis=2)
-		a = arr[:, :, 3].astype(np.float32)
-		a[lum < 14] = 0
-		arr[:, :, 3] = a.astype(np.uint8)
-
-	scale = target_w / float(max(rolled.shape[1], 1))
-	rw = target_w
-	rh = max(28, int(round(rolled.shape[0] * scale)))
-	filt = Image.Resampling.LANCZOS if scale >= 1.0 else Image.Resampling.BICUBIC
-	rolled_r = np.array(Image.fromarray(rolled, "RGBA").resize((rw, rh), filt))
-
-	parts = [rolled_r]
-	extra_h = rh
-	if top_path.exists() and bot_path.exists():
-		top = np.array(Image.open(top_path).convert("RGBA"))
-		bot = np.array(Image.open(bot_path).convert("RGBA"))
-		for arr in (top, bot):
-			lum = arr[:, :, :3].astype(np.float32).mean(axis=2)
-			a = arr[:, :, 3].astype(np.float32)
-			a[lum < 14] = 0
-			arr[:, :, 3] = a.astype(np.uint8)
-		th = max(10, int(round(top.shape[0] * scale * 0.85)))
-		bh = max(12, int(round(bot.shape[0] * scale * 0.85)))
-		top_r = np.array(Image.fromarray(top, "RGBA").resize((rw, th), filt))
-		bot_r = np.array(Image.fromarray(bot, "RGBA").resize((rw, bh), filt))
-		## Stack rollers + body into one tall rolled bundle (still parchment-only).
-		bundle_h = th + rh + bh - 8
-		bundle = np.zeros((bundle_h, rw, 4), dtype=np.uint8)
-		def _paste(dst, src, y0):
-			y1 = min(dst.shape[0], y0 + src.shape[0])
-			h = y1 - y0
-			if h <= 0:
-				return
-			patch = src[:h]
-			a = patch[:, :, 3:4].astype(np.float32) / 255.0
-			region = dst[y0:y1].astype(np.float32)
-			region[:, :, :3] = patch[:, :, :3].astype(np.float32) * a + region[:, :, :3] * (1 - a)
-			region[:, :, 3] = np.maximum(region[:, :, 3], patch[:, :, 3].astype(np.float32))
-			dst[y0:y1] = region.astype(np.uint8)
-		_paste(bundle, top_r, 0)
-		_paste(bundle, rolled_r, max(0, th - 4))
-		_paste(bundle, bot_r, max(0, th + rh - 8))
-		scroll = bundle
-		target_h = bundle.shape[0]
-	else:
-		scroll = rolled_r
-		target_h = rh
-
-	## Warm parchment lift — keep paper readable.
-	warm = scroll.copy()
-	rgb = warm[:, :, :3].astype(np.float32)
-	rgb[:, :, 0] = np.clip(rgb[:, :, 0] * 1.02 + 2, 0, 255)
-	rgb[:, :, 1] = np.clip(rgb[:, :, 1] * 1.01 + 1, 0, 255)
-	warm[:, :, :3] = rgb.astype(np.uint8)
-	scroll = warm
-
-	dst_x = int(round(cx - target_w * 0.5))
-	## Rest: majority below rim so front lip occludes the lower scroll.
-	dst_y = int(round(rim_y - target_h * 0.30))
+	rw, rh = scroll.shape[1], scroll.shape[0]
+	dst_x = int(round(cx - rw * 0.5))
+	## Rest pose: top roller + a hint of parchment peek above the front rim.
+	dst_y = int(round(rim_y - rh * 0.22))
 	layer = np.zeros_like(open_placed)
 	h, w = layer.shape[:2]
 	src_x0 = src_y0 = 0
-	src_x1, src_y1 = scroll.shape[1], scroll.shape[0]
+	src_x1, src_y1 = rw, rh
 	if dst_x < 0:
 		src_x0 = -dst_x
 		dst_x = 0
@@ -640,12 +715,18 @@ def _build_scroll_from_donor_fallback(
 	open_placed: np.ndarray, cx: float, rim_y: int, target_w: int
 ) -> np.ndarray:
 	donor = _clean_scroll_donor_rgba()
+	## Prefer upright orientation.
+	if donor.shape[1] > donor.shape[0]:
+		donor = np.array(Image.fromarray(donor, "RGBA").transpose(Image.Transpose.ROTATE_90))
 	scale = target_w / float(max(donor.shape[1], 1))
-	target_h = max(28, int(round(donor.shape[0] * scale)))
+	target_h = max(72, int(round(donor.shape[0] * scale)))
+	## Cap height so the note fits the cavity.
+	target_h = min(target_h, int((open_placed.shape[0]) * 0.36))
 	filt = Image.Resampling.LANCZOS if scale >= 1.0 else Image.Resampling.BICUBIC
 	scroll = np.array(Image.fromarray(donor, "RGBA").resize((target_w, target_h), filt))
+	scroll = _opaque_force(scroll)
 	dst_x = int(round(cx - target_w * 0.5))
-	dst_y = int(round(rim_y - target_h * 0.28))
+	dst_y = int(round(rim_y - target_h * 0.14))
 	layer = np.zeros_like(open_placed)
 	h, w = layer.shape[:2]
 	src_x0 = src_y0 = 0
@@ -674,43 +755,77 @@ def extract_scroll_layer(open_placed: np.ndarray, scroll_placed: np.ndarray | No
 
 
 def extract_front_rim(open_placed: np.ndarray) -> np.ndarray:
-	"""Thin front-lip occlusion only — never the full chest front/body."""
+	"""Front-lip + front-face occlusion so the scroll stays inside the chest.
+
+	Covers the gold lip and the planted front wood/gold panels BELOW the lip so
+	the rising scroll is hidden until it clears the rim. Never includes the lid
+	or cavity glow above the opening.
+	"""
 	a = open_placed[:, :, 3]
 	ys, xs = np.where(a > 40)
 	if len(ys) == 0:
 		return np.zeros_like(open_placed)
 	chest_top, chest_bot = int(ys.min()), int(ys.max())
 	cx = float(np.median(xs))
-	rim_y = int(chest_top + (chest_bot - chest_top) * 0.48)
+	chest_h = max(1, chest_bot - chest_top)
+	rim_y = int(chest_top + chest_h * 0.50)
 	yy = np.arange(open_placed.shape[0])[:, None]
 	xx = np.arange(open_placed.shape[1])[None, :]
 	r = open_placed[:, :, 0].astype(np.float32)
 	g = open_placed[:, :, 1].astype(np.float32)
 	b = open_placed[:, :, 2].astype(np.float32)
 	lum = (r + g + b) / 3.0
-	## Narrow gold lip (+ tiny wood just under it). Exclude cavity glow + body.
+	## Gold lip at the cavity opening.
 	gold_lip = (
-		(a > 60)
-		& (yy >= rim_y - 1)
-		& (yy <= rim_y + 12)
-		& (np.abs(xx - cx) < 92)
-		& (r > 120)
-		& (g > 85)
-		& ((r - b) > 30)
-		& (lum < 205)
-	)
-	wood_lip = (
-		(a > 60)
-		& (yy >= rim_y + 6)
+		(a > 70)
+		& (yy >= rim_y - 3)
 		& (yy <= rim_y + 16)
-		& (np.abs(xx - cx) < 88)
-		& (lum < 130)
-		& (r > 40)
-		& (r > b)
+		& (np.abs(xx - cx) < 90)
+		& (r > 110)
+		& (g > 75)
+		& ((r - b) > 25)
+		& (lum < 225)
+		& (lum > 50)
 	)
-	front_mask = gold_lip | wood_lip
+	## Full front face below the lip — occludes the lower scroll body.
+	front_face = (
+		(a > 70)
+		& (yy >= rim_y + 8)
+		& (yy <= chest_bot)
+		& (np.abs(xx - cx) < 96)
+		& (
+			((r > 100) & (g > 70) & ((r - b) > 25) & (lum < 230))  ## gold trim
+			| ((lum < 155) & (r > 35) & (r > b) & (g > b * 0.45))  ## wood panels
+		)
+	)
+	## Exclude bright cavity glow leaking into the front band.
+	not_glow = ~((lum > 190) & (r > 200) & (g > 140) & (a < 200) & (yy < rim_y + 10))
+	front_mask = (gold_lip | front_face) & not_glow
 	front = np.zeros_like(open_placed)
 	front[front_mask] = open_placed[front_mask]
+	## Harden occlusion opacity — no washed translucent strip.
+	fa = front[:, :, 3]
+	front[:, :, 3] = np.where(fa > 40, 255, 0).astype(np.uint8)
+	## Fill holes inside the front occlusion slab so scroll cannot peek through.
+	solid = front[:, :, 3] > 40
+	if solid.any():
+		ys_f, xs_f = np.where(solid)
+		y0, y1 = int(ys_f.min()), int(ys_f.max())
+		x0, x1 = int(xs_f.min()), int(xs_f.max())
+		## Sample a typical front wood/gold color for hole fill.
+		sample = front[solid]
+		fill_rgb = np.median(sample[:, :3], axis=0).astype(np.uint8)
+		yy = np.arange(front.shape[0])[:, None]
+		xx = np.arange(front.shape[1])[None, :]
+		in_box = (yy >= y0) & (yy <= y1) & (xx >= x0) & (xx <= x1) & (np.abs(xx - cx) < 96)
+		holes = in_box & (front[:, :, 3] <= 40) & (yy >= rim_y - 1)
+		## Only fill holes that are enclosed by solid neighbors (not outside silhouette).
+		dil = _dilate(solid, 2)
+		fill_m = holes & dil
+		front[fill_m, 0] = fill_rgb[0]
+		front[fill_m, 1] = fill_rgb[1]
+		front[fill_m, 2] = fill_rgb[2]
+		front[fill_m, 3] = 255
 	return front
 
 
@@ -764,6 +879,64 @@ def progressive_scroll_reveal(
 	return out
 
 
+def seal_body_cracks(rgba: np.ndarray) -> np.ndarray:
+	"""Seal thin transparent cracks between wood planks (source-sheet black gaps).
+
+	Does not fill the open lid cavity — only pixels sandwiched by opaque body
+	neighbors within a short radius.
+	"""
+	out = rgba.copy()
+	a = out[:, :, 3]
+	opaque = a >= 200
+	ys, xs = np.where(opaque)
+	if len(ys) == 0:
+		return out
+	chest_top, chest_bot = int(ys.min()), int(ys.max())
+	cx = float(np.median(xs))
+	h, w = a.shape
+	yy = np.arange(h)[:, None]
+	xx = np.arange(w)[None, :]
+	## Body band + closed lid mass; skip bright open-cavity glow zone.
+	in_body = (
+		(yy >= chest_top + 4)
+		& (yy <= chest_bot)
+		& (np.abs(xx - cx) < (xs.max() - xs.min()) * 0.52)
+	)
+	gap = in_body & (a < 40)
+	if not gap.any():
+		return out
+	## Horizontal sandwich: opaque within 8px left and right.
+	left = np.zeros_like(opaque)
+	right = np.zeros_like(opaque)
+	for d in range(1, 9):
+		left[:, d:] |= opaque[:, :-d]
+		right[:, :-d] |= opaque[:, d:]
+	horiz = gap & left & right
+	## Vertical sandwich (short cracks between planks).
+	up = np.zeros_like(opaque)
+	down = np.zeros_like(opaque)
+	for d in range(1, 6):
+		up[d:, :] |= opaque[:-d, :]
+		down[:-d, :] |= opaque[d:, :]
+	vert = gap & up & down
+	fill = horiz | vert
+	if not fill.any():
+		return out
+	## Paint with local neighborhood median color.
+	fy, fx = np.where(fill)
+	for y, x in zip(fy, fx):
+		ya, yb = max(0, y - 3), min(h, y + 4)
+		xa, xb = max(0, x - 3), min(w, x + 4)
+		region = opaque[ya:yb, xa:xb]
+		if not region.any():
+			out[y, x] = (72, 46, 28, 255)
+			continue
+		cols = out[ya:yb, xa:xb][region]
+		out[y, x, :3] = np.median(cols[:, :3], axis=0).astype(np.uint8)
+		out[y, x, 3] = 255
+	return out
+
+
 def finalize_locked(
 	placed: np.ndarray,
 	target_cx: float,
@@ -793,7 +966,9 @@ def finalize_locked(
 	present = locked[:, :, 3] > 30
 	near = _dilate(opaque, 2) & present & (locked[:, :, 3] < 250)
 	locked[near, 3] = 255
+	locked = seal_body_cracks(locked)
 	locked = fill_internal_holes(locked)
+	locked = seal_body_cracks(locked)
 	return locked
 
 
@@ -891,13 +1066,13 @@ def process_scroll_with_rise(_magic_path: Path | None = None) -> list[dict]:
 		"open_ready",
 	]
 	## Progressive scroll rise: dy>0 lowers (behind rim); dy<0 lifts.
-	## Final target ~55–70% of the rolled scroll body above the front rim.
+	## Vertical love-note: peek → 25% → 50% → 60–70% → final reward pose.
 	rise_stages = [
-		(10, "scroll_peek"),  ## tiny crest just above / at the rim
-		(-6, "scroll_partial"),  ## ~25%
-		(-28, "scroll_rising"),  ## ~50%
+		(4, "scroll_peek"),  ## tiny crest just above / at the rim
+		(-14, "scroll_partial"),  ## ~25%
+		(-32, "scroll_rising"),  ## ~50%
 		(-48, "scroll_halfway"),  ## ~60–70%
-		(-78, "scroll_fully"),  ## clear reward pose — rises farther than v43
+		(-72, "scroll_fully"),  ## clear reward pose — vertical rise
 	]
 
 	placed_open: list[tuple[np.ndarray, int, int, str]] = []

@@ -884,10 +884,11 @@ func _show_main_chest() -> void:
 	margin.add_child(root)
 
 	## Landing reward hierarchy (management UI lives only in YOUR CHEST):
-	## 1) header — viewport-centered CHEST + dedicated right refresh
+	## 1) header — viewport-centered CHEST title only (no refresh / management)
 	## 2) message safe-zone — empty/status text never intersects chest/scroll
 	## 3) chest stage — interactive fantasy chest grounded on sand
 	## Do NOT mount Current/Unread/Locked/Requests/Saved/Hidden or stats here.
+	## Do NOT mount a top-right refresh/action button on this reward screen.
 	var header := Control.new()
 	header.name = "ChestHeaderRow"
 	header.custom_minimum_size.y = MobileUi.font_touch(52)
@@ -907,32 +908,6 @@ func _show_main_chest() -> void:
 	title.add_theme_constant_override("outline_size", 4)
 	title.add_theme_color_override("font_outline_color", Color(0.03, 0.04, 0.10, 0.72))
 	header.add_child(title)
-	var refresh_btn := Button.new()
-	refresh_btn.name = "ChestRefreshButton"
-	refresh_btn.text = "↻"
-	refresh_btn.tooltip_text = "Refresh"
-	refresh_btn.focus_mode = Control.FOCUS_NONE
-	var refresh_sz := MobileUi.font_touch(48)
-	refresh_btn.custom_minimum_size = Vector2(refresh_sz, refresh_sz)
-	MobileUi.style_button(refresh_btn, 48)
-	## Dedicated right-side slot inside the header row only — title stays viewport-centered.
-	refresh_btn.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
-	refresh_btn.anchor_left = 1.0
-	refresh_btn.anchor_right = 1.0
-	refresh_btn.anchor_top = 0.0
-	refresh_btn.anchor_bottom = 0.0
-	refresh_btn.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-	refresh_btn.offset_left = -refresh_sz
-	refresh_btn.offset_right = 0.0
-	refresh_btn.offset_top = 2.0
-	refresh_btn.offset_bottom = 2.0 + refresh_sz
-	refresh_btn.z_index = 20
-	refresh_btn.mouse_filter = Control.MOUSE_FILTER_STOP
-	refresh_btn.pressed.connect(func() -> void:
-		state.invalidate_cache("chest")
-		_show_main_chest()
-	)
-	header.add_child(refresh_btn)
 
 	## Guaranteed message band above the chest (closed / open lid / raised scroll).
 	var message_zone := Control.new()
@@ -971,17 +946,17 @@ func _show_main_chest() -> void:
 	_chest.custom_minimum_size = Vector2(chest_w, chest_h)
 	_chest.size = Vector2(chest_w, chest_h)
 	_chest.clip_contents = false
-	## Responsive plant: center X, lower sand band so the chest plants into sand with room below and
-	## open lid / raised scroll stay clear of the message zone + bottom nav.
+	## Responsive plant: center X, lower-middle sand so the chest base sits on the ground
+	## plane with room below for nav — not floating mid-scene.
 	_chest.set_anchors_preset(Control.PRESET_CENTER)
 	_chest.anchor_left = 0.5
 	_chest.anchor_right = 0.5
-	_chest.anchor_top = 0.62
-	_chest.anchor_bottom = 0.62
+	_chest.anchor_top = 0.70
+	_chest.anchor_bottom = 0.70
 	_chest.offset_left = -chest_w * 0.5
 	_chest.offset_right = chest_w * 0.5
-	_chest.offset_top = -chest_h * 0.50
-	_chest.offset_bottom = chest_h * 0.50
+	_chest.offset_top = -chest_h * 0.52
+	_chest.offset_bottom = chest_h * 0.48
 	_chest.z_index = 5
 	_chest.tapped.connect(_on_chest_tapped)
 	chest_area.add_child(_chest)
@@ -1134,9 +1109,11 @@ func _on_chest_tapped() -> void:
 		_chest_action_busy = false
 		return
 
+	## Intentional handoff after the reward hold — soft fade into YOUR CHEST.
 	var fade := create_tween()
-	fade.tween_property(dim, "color:a", 0.85, 0.18)
+	fade.tween_property(dim, "color:a", 0.92, 0.34).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	await fade.finished
+	await get_tree().create_timer(0.06).timeout
 	if is_instance_valid(dim):
 		dim.queue_free()
 	_dev_force_chest_scroll = false

@@ -45,13 +45,13 @@ const FRAME_CANVAS := Vector2(384, 496)
 const EMPTY_FRAME_COUNT := 13
 const SCROLL_FRAME_COUNT := 13
 ## Shared open cadence for empty + unread: closed→crack→quarter→half→late→open.
-const OPEN_DURATION_SEC := 1.52
+const OPEN_DURATION_SEC := 1.68
 const OPEN_DURATION_RM := 0.36
 const ANTICIPATION_SEC := 0.08
 const SETTLE_SEC := 0.12
 const MAGICAL_SWELL_SEC := 0.14
 ## Scroll emerge after fully open — peek→partial→halfway→clear→final.
-const SCROLL_EMERGE_SEC := 1.18
+const SCROLL_EMERGE_SEC := 1.28
 ## Intentional hold on the completed reward pose before note handoff.
 const REWARD_HOLD_SEC := 0.45
 ## Tiny settle pulse only — must not read as the chest growing while opening.
@@ -61,29 +61,29 @@ const SCROLL_REVEAL_START_PROGRESS := 0.54
 ## Compat index marker (legacy baked scroll frames start at 08; runtime uses layers).
 const SCROLL_REVEAL_START_INDEX := 8
 ## Canvas-pixel rise of the separate scroll layer (matches prep final dy span).
-const SCROLL_RISE_CANVAS_PX := 88.0
-## Soft glow peaks — warm interior, never a white washout.
-const GLOW_OPEN_A := 0.055
-const GLOW_SETTLE_A := 0.08
-const GLOW_RETAP_A := 0.12
-const GLOW_REWARD_HOLD_A := 0.04
+const SCROLL_RISE_CANVAS_PX := 72.0
+## Soft glow peaks — warm accent only; never washes out rim/scroll/wood.
+const GLOW_OPEN_A := 0.028
+const GLOW_SETTLE_A := 0.040
+const GLOW_RETAP_A := 0.070
+const GLOW_REWARD_HOLD_A := 0.022
 
 ## Relative dwell weights per empty pose — similar poses advance faster; larger
 ## lid motion gets more intermediate time. Normalized at playback.
 const EMPTY_POSE_WEIGHTS := [
-	0.48, ## 0 closed
-	0.52, ## 1 pre_crack
-	0.62, ## 2 crack
-	0.58, ## 3 early_glow
-	0.88, ## 4 early_open
-	1.05, ## 5 opening
-	1.12, ## 6 opening_more
-	1.22, ## 7 half_open
-	1.16, ## 8 more_open
-	1.10, ## 9 near_full
-	1.05, ## 10 three_quarter
-	0.95, ## 11 nearly_open
-	0.68, ## 12 fully_open
+	0.42, ## 0 closed
+	0.50, ## 1 pre_crack
+	0.58, ## 2 crack
+	0.62, ## 3 early_glow
+	0.92, ## 4 early_open
+	1.10, ## 5 opening
+	1.18, ## 6 opening_more
+	1.28, ## 7 half_open
+	1.20, ## 8 more_open
+	1.14, ## 9 near_full
+	1.08, ## 10 three_quarter
+	0.98, ## 11 nearly_open
+	0.72, ## 12 fully_open
 ]
 
 @export var reduced_motion: bool = false
@@ -96,8 +96,8 @@ var _input_locked: bool = false
 var _label: Label
 var _root_visual: Control
 var _shadow_view: TextureRect
-var _underlay: TextureRect
 var _frame_view: TextureRect
+var _scroll_clip: Control
 var _scroll_view: TextureRect
 var _rim_view: TextureRect
 var _glow_pulse: TextureRect
@@ -231,21 +231,11 @@ func _build_visuals() -> void:
 	_shadow_view.stretch_mode = TextureRect.STRETCH_SCALE
 	_shadow_view.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	_shadow_view.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_shadow_view.modulate = Color(1, 1, 1, 0.72)
+	_shadow_view.modulate = Color(1, 1, 1, 0.78)
 	_shadow_view.z_index = 1
 	_root_visual.add_child(_shadow_view)
 
-	## Opaque silhouette underlay — blocks beach bleed through fringe/cracks.
-	_underlay = TextureRect.new()
-	_underlay.name = "ChestOpaqueUnderlay"
-	_underlay.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	_underlay.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	_underlay.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	_underlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_underlay.modulate = Color(0.10, 0.07, 0.04, 1.0)
-	_underlay.z_index = 2
-	_root_visual.add_child(_underlay)
-
+	## Exactly ONE opaque chest sprite — no duplicate underlay / crossfade layers.
 	_frame_view = TextureRect.new()
 	_frame_view.name = "ChestFrame"
 	_frame_view.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
@@ -258,7 +248,17 @@ func _build_visuals() -> void:
 	_frame_view.z_index = 3
 	_root_visual.add_child(_frame_view)
 
-	## Separate scroll layer — rises in front of interior, behind front rim.
+	## Cavity clip — only the portion of the scroll above the front lip is visible.
+	## Lower scroll body stays hidden inside the chest (simple, deterministic occlusion).
+	_scroll_clip = Control.new()
+	_scroll_clip.name = "ScrollCavityClip"
+	_scroll_clip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_scroll_clip.clip_contents = true
+	_scroll_clip.z_index = 4
+	_scroll_clip.visible = false
+	_root_visual.add_child(_scroll_clip)
+
+	## Separate vertical love-note scroll — rises inside the clipped cavity.
 	_scroll_view = TextureRect.new()
 	_scroll_view.name = "ScrollLayer"
 	_scroll_view.texture = _scroll_layer_tex
@@ -267,11 +267,10 @@ func _build_visuals() -> void:
 	_scroll_view.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	_scroll_view.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_scroll_view.modulate = Color(1, 1, 1, 1)
-	_scroll_view.z_index = 4
-	_scroll_view.visible = false
-	_root_visual.add_child(_scroll_view)
+	_scroll_view.visible = true
+	_scroll_clip.add_child(_scroll_view)
 
-	## Thin front-lip occlusion only — never the lid covering the rising scroll top.
+	## Thin front-lip highlight/occlusion strip on top of the clipped scroll.
 	_rim_view = TextureRect.new()
 	_rim_view.name = "ChestFrontRim"
 	_rim_view.texture = _rim_layer_tex
@@ -290,7 +289,7 @@ func _build_visuals() -> void:
 	_glow_pulse.texture = _load_cached(SOFT_GLOW)
 	_glow_pulse.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	_glow_pulse.stretch_mode = TextureRect.STRETCH_SCALE
-	_glow_pulse.modulate = Color(1.0, 0.86, 0.55, 0.0)
+	_glow_pulse.modulate = Color(1.0, 0.82, 0.48, 0.0)
 	_glow_pulse.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_glow_pulse.z_index = 6
 	_root_visual.add_child(_glow_pulse)
@@ -367,30 +366,28 @@ func _layout_frames() -> void:
 	_fit_scale = fit
 	var draw_w: float = FRAME_CANVAS.x * fit
 	var draw_h: float = FRAME_CANVAS.y * fit
-	## Slight vertical bias so the planted chest sits naturally in the content area.
+	## Slight vertical bias so the planted chest sits on the sand plane.
 	var left: float = (area.x - draw_w) * 0.5
-	var top: float = (area.y - draw_h) * 0.42
+	var top: float = (area.y - draw_h) * 0.48
 	_anchor_rect = Rect2(left, top, draw_w, draw_h)
 	_place_rect(_frame_view, _anchor_rect)
-	if _underlay:
-		_place_rect(_underlay, _anchor_rect)
 	_place_scroll_and_rim()
-	## Soft elliptical contact shadow under the foot (not a giant blot).
+	## Tight elliptical contact shadow directly under the foot (not a hover blot).
 	if _shadow_view:
-		var sh_w := draw_w * 0.72
-		var sh_h := draw_h * 0.10
+		var sh_w := draw_w * 0.58
+		var sh_h := draw_h * 0.055
 		_place_rect(_shadow_view, Rect2(
 			_anchor_rect.position.x + (draw_w - sh_w) * 0.5,
-			_anchor_rect.position.y + draw_h * 0.735,
+			_anchor_rect.position.y + draw_h * 0.742,
 			sh_w,
-			sh_h * 0.85
+			sh_h
 		))
 	## Soft radial pulse over the cavity — circular texture, not a box.
 	_place_rect(_glow_pulse, Rect2(
-		_anchor_rect.position.x + draw_w * 0.22,
-		_anchor_rect.position.y + draw_h * 0.34,
-		draw_w * 0.56,
-		draw_h * 0.34
+		_anchor_rect.position.x + draw_w * 0.28,
+		_anchor_rect.position.y + draw_h * 0.38,
+		draw_w * 0.44,
+		draw_h * 0.26
 	))
 	var cavity_center := Vector2(area.x * 0.5, _anchor_rect.position.y + draw_h * 0.48)
 	_dust.position = cavity_center
@@ -400,8 +397,8 @@ func _layout_frames() -> void:
 	if _badge:
 		## Near the closed chest — slightly above/right, not on lid, not horizon.
 		_badge.position = Vector2(
-			_anchor_rect.position.x + draw_w * 0.76,
-			_anchor_rect.position.y + draw_h * 0.30
+			_anchor_rect.position.x + draw_w * 0.74,
+			_anchor_rect.position.y + draw_h * 0.28
 		)
 		_badge.size = Vector2(40, 40)
 
@@ -409,16 +406,25 @@ func _layout_frames() -> void:
 func _place_scroll_and_rim() -> void:
 	if _anchor_rect.size == Vector2.ZERO:
 		return
+	var draw_w := _anchor_rect.size.x
+	var draw_h := _anchor_rect.size.y
+	## Cavity clip window: from above the open lid down to the front lip.
+	## Scroll content below the lip is clipped away (hidden inside the chest).
+	var clip_x := _anchor_rect.position.x + draw_w * 0.22
+	var clip_w := draw_w * 0.56
+	var clip_y := _anchor_rect.position.y + draw_h * 0.18
+	var clip_h := draw_h * 0.40
+	if _scroll_clip:
+		_place_rect(_scroll_clip, Rect2(clip_x, clip_y, clip_w, clip_h))
 	var rise_px := -_scroll_rise * SCROLL_RISE_CANVAS_PX * _fit_scale
-	if _scroll_view:
-		_place_rect(_scroll_view, Rect2(
-			_anchor_rect.position.x,
-			_anchor_rect.position.y + rise_px,
-			_anchor_rect.size.x,
-			_anchor_rect.size.y
-		))
+	if _scroll_view and _scroll_clip:
+		## Place the full canvas-aligned scroll relative to the clip so rise is vertical.
+		## Scroll texture is authored on FRAME_CANVAS; map into clip-local coords.
+		var local_x := _anchor_rect.position.x - clip_x
+		var local_y := _anchor_rect.position.y - clip_y + rise_px
+		_place_rect(_scroll_view, Rect2(local_x, local_y, draw_w, draw_h))
 	if _rim_view:
-		## Rim stays planted with the chest — occludes only the lower scroll.
+		## Rim stays planted with the chest — gold lip sits over the clip bottom.
 		_place_rect(_rim_view, _anchor_rect)
 
 
@@ -543,9 +549,7 @@ func _show_frame_index(index: int) -> void:
 	var tex: Texture2D = _active_frames[_frame_index]
 	if _frame_view and tex:
 		_frame_view.texture = tex
-		if _underlay:
-			_underlay.texture = tex
-		## One opaque chest sprite on top — underlay only blocks beach bleed.
+		## One opaque chest sprite only — never a second chest overlay.
 		_enforce_chest_opaque()
 
 
@@ -587,8 +591,8 @@ func _frame_index_from_progress(eased: float, emerge_scroll: bool) -> int:
 
 
 func _set_scroll_layers_visible(vis: bool) -> void:
-	if _scroll_view:
-		_scroll_view.visible = vis
+	if _scroll_clip:
+		_scroll_clip.visible = vis
 	if _rim_view:
 		_rim_view.visible = vis
 
@@ -967,8 +971,13 @@ func _open_full() -> void:
 
 
 func get_scroll_global_center() -> Vector2:
-	## Approximate the raised scroll center from the layered scroll view.
-	if _scroll_view and _scroll_view.visible:
+	## Approximate the raised scroll center from the clipped cavity.
+	if _scroll_clip and _scroll_clip.visible:
+		return _scroll_clip.global_position + Vector2(
+			_scroll_clip.size.x * 0.5,
+			_scroll_clip.size.y * 0.55
+		)
+	if _scroll_view and _scroll_view.is_visible_in_tree():
 		return _scroll_view.global_position + Vector2(
 			_scroll_view.size.x * 0.5,
 			_scroll_view.size.y * 0.38

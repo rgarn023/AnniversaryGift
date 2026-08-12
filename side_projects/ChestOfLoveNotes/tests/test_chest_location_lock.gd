@@ -152,7 +152,7 @@ func _test_version() -> void:
 	_assert(BuildFlags.APP_VERSION_CODE >= 26, "versionCode >= 24")
 	var preset := FileAccess.get_file_as_string("res://export_presets.cfg")
 	_assert(
-		preset.contains("ChestOfLoveNotes-v44-chest-render-scroll-beach-polish-debug.apk")
+		preset.contains("ChestOfLoveNotes-v45-chest-grounding-scroll-fix-debug.apk") or preset.contains("ChestOfLoveNotes-v44-chest-render-scroll-beach-polish-debug.apk")
 		or preset.contains("ChestOfLoveNotes-v42-one-chest-beach-layout-debug.apk")
 		or preset.contains("ChestOfLoveNotes-v40-chest-smoothing-hidden-fix-debug.apk")
 		or preset.contains("ChestOfLoveNotes-v39-chest-polish-debug.apk")
@@ -161,7 +161,7 @@ func _test_version() -> void:
 		"APK name"
 	)
 	_assert(
-		preset.contains("version/code=44")
+		preset.contains("version/code=45")
 		or preset.contains("version/code=41")
 		or preset.contains("version/code=40")
 		or preset.contains("version/code=39")

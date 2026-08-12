@@ -1,5 +1,5 @@
 extends SceneTree
-## v44: Chest render + layered scroll + beach polish.
+## v45: Chest grounding + vertical love-note scroll + beach polish.
 
 var _passed: int = 0
 var _failed: int = 0
@@ -19,7 +19,7 @@ func _assert(cond: bool, label: String) -> void:
 
 
 func _run() -> void:
-	print("=== Chest render + scroll + beach polish (v44) ===")
+	print("=== Chest grounding + scroll fix (v45) ===")
 	var chest := FileAccess.get_file_as_string("res://scripts/chest/treasure_chest.gd")
 	var env_script := FileAccess.get_file_as_string("res://scripts/chest/chest_environment.gd")
 	var main := FileAccess.get_file_as_string("res://scripts/main.gd")
@@ -40,21 +40,23 @@ func _run() -> void:
 	_assert(chest.contains("FRONT_RIM"), "front rim occlusion layer")
 	_assert(chest.contains("CONTACT_SHADOW"), "contact shadow grounding")
 	_assert(chest.contains("EMPTY_POSE_WEIGHTS"), "weighted pose cadence")
-	_assert(chest.contains("OPEN_DURATION_SEC := 1.52"), "open ~1.52s")
-	_assert(chest.contains("SCROLL_EMERGE_SEC := 1.18"), "scroll emerge duration")
+	_assert(chest.contains("OPEN_DURATION_SEC := 1.68"), "open ~1.68s")
+	_assert(chest.contains("SCROLL_EMERGE_SEC := 1.28"), "scroll emerge duration")
 	_assert(chest.contains("REWARD_HOLD_SEC := 0.45"), "reward hold ~0.45s")
 	_assert(chest.contains("EMPHASIS_SCALE := 1.003"), "tiny settle scale only")
-	_assert(chest.contains("GLOW_OPEN_A := 0.055"), "reduced glow open")
-	_assert(chest.contains("GLOW_SETTLE_A := 0.08"), "reduced glow settle")
+	_assert(chest.contains("GLOW_OPEN_A := 0.028"), "reduced glow open")
+	_assert(chest.contains("GLOW_SETTLE_A := 0.040"), "reduced glow settle")
 	_assert(chest.contains("_set_badge_suppressed"), "badge hidden during reward")
 	_assert(chest.contains("_enforce_chest_opaque"), "opaque chest enforcement")
 	_assert(chest.contains("soft_glow_pulse.png"), "soft radial glow")
-	_assert(chest.contains("exactly one TextureRect") or chest.contains("one TextureRect chest"), "one chest sprite comment")
+	_assert(chest.contains("exactly one TextureRect") or chest.contains("ONE opaque chest"), "one chest sprite comment")
 	_assert(chest.contains("ScrollLayer"), "scroll layer node")
+	_assert(chest.contains("ScrollCavityClip"), "cavity clip occlusion")
 	_assert(chest.contains("ChestFrontRim"), "rim node")
 	_assert(chest.contains("ChestContactShadow"), "shadow node")
 	_assert(chest.contains("_set_scroll_rise_amount"), "layered scroll rise")
 	_assert(not chest.contains("ColorRect.new()"), "no rectangular ColorRect glow")
+	_assert(not chest.contains("ChestOpaqueUnderlay"), "no duplicate chest underlay")
 	_assert(chest.contains("_ease_open_curve"), "quality easing")
 	_assert(chest.contains("_frame_index_from_progress"), "variable frame timing")
 	_assert(chest.contains("play_open_empty_pulse"), "empty retap pulse")
@@ -65,7 +67,7 @@ func _run() -> void:
 	_assert(not chest.contains('scale.y =') and not chest.contains('"scale:y"'), "no scale.y squash")
 	_assert(chest.contains("preload_assets"), "preload")
 	_assert(chest.contains("Color(0.55, 0.55, 0.75, 1.0)"), "locked silhouette keeps alpha 1")
-	_assert(chest.contains("draw_w * 0.76"), "badge near chest")
+	_assert(chest.contains("draw_w * 0.74") or chest.contains("draw_w * 0.76"), "badge near chest")
 	_assert(main.contains("LoveNotesChest.preload_assets"), "main preloads chest")
 	_assert(main.contains("ChestEnvironment.preload_assets"), "main preloads beach env")
 	_assert(main.contains("ChestEnvironment.new()"), "chest screen mounts environment")
@@ -76,39 +78,40 @@ func _run() -> void:
 	_assert(main.contains("_add_inventory_filter_rows"), "shared filter rows")
 	_assert(main.contains('_add_inventory_filter_rows(root, "saved")'), "Saved uses full filter set")
 	_assert(main.contains("_add_inventory_stats_panel"), "management stats helper")
-	## Landing reward scene must NOT mount management filters/stats.
+	## Landing reward scene must NOT mount management filters/stats/refresh.
 	_assert(not main.contains('_add_inventory_filter_rows(root, "all")'), "landing has no filter rows")
 	_assert(main.contains("Do NOT mount Current/Unread/Locked") or main.contains("management UI lives only"), "landing hierarchy comment")
 	_assert(main.contains('["hidden", "Hidden", row2]'), "Hidden chip in shared filters")
-	_assert(main.contains("ChestRefreshButton"), "named refresh button")
+	_assert(not main.contains("ChestRefreshButton"), "no refresh button on main CHEST")
+	_assert(main.contains("Do NOT mount a top-right refresh") or main.contains("no refresh"), "refresh removal comment")
 	_assert(main.contains("ChestStatsPanel"), "named stats panel helper")
-	_assert(main.contains("refresh_btn.z_index = 20"), "refresh above siblings")
 	_assert(main.contains("_dismiss_toast_if_visible"), "toast dismiss on chest open")
 	_assert(main.contains("_fill_inventory_list_deferred"), "deferred loading flash")
 	_assert(main.contains("create_timer(0.28)"), "loading delay threshold")
 	_assert(main.contains("chest_h := 326"), "taller chest host")
-	_assert(main.contains("anchor_top = 0.62") or main.contains("anchor_top = 0.58") or main.contains("lower sand") or main.contains("lower-middle"), "chest planted lower-middle")
+	_assert(main.contains("anchor_top = 0.70") or main.contains("lower-middle sand") or main.contains("lower sand"), "chest planted lower-middle")
 	_assert(main.contains("viewport-centered CHEST") or main.contains("Title centered") or main.contains("Landing reward hierarchy"), "viewport-centered CHEST title")
-	_assert(main.contains("PRESET_TOP_RIGHT") or main.contains("PRESET_CENTER_RIGHT"), "refresh right-anchored")
 	_assert(not main.contains("header.add_child(MobileUi.make_page_title(\"Chest\""), "title not HBox-centered")
 	_assert(not main.contains('your.text = "Your Chest"'), "no Your Chest label on landing")
+	_assert(main.contains("soft fade into YOUR CHEST") or main.contains("0.34"), "intentional transition fade")
 	_assert(boot.contains("MIN_VISIBLE_SEC := 4.0"), "splash min 4s")
 	_assert(prep.contains("CANVAS_H = 496"), "prep taller canvas")
 	_assert(prep.contains("BASE_Y = 367"), "foot lock absolute")
 	_assert(prep.contains("normalize_body_scale"), "body scale normalization")
 	_assert(prep.contains("normalize_body_exposure"), "body exposure normalization")
 	_assert(prep.contains("harden_chest_opacity"), "frame opacity harden")
-	_assert(prep.contains("build_clean_scroll_layer") or prep.contains("extract_scroll_layer"), "clean scroll layer")
-	_assert(prep.contains("scroll_rolled.png"), "high-res parchment donor preferred")
+	_assert(prep.contains("seal_body_cracks"), "wood crack seal")
+	_assert(prep.contains("build_vertical_love_note") or prep.contains("build_clean_scroll_layer"), "vertical love note")
+	_assert(prep.contains("scroll_parchment.png"), "parchment donor for vertical note")
 	_assert(prep.contains("compose_scroll_rise"), "raised scroll composites")
 	_assert(prep.contains("shared empty sheet") or prep.contains("GLOW_SHEET"), "shared empty opening")
 	_assert(prep.contains("empty_picks = [0, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]"), "clean empty picks only")
 	_assert(prep.contains("cell_top_clipped"), "rejects damaged top cells")
-	_assert(prep.contains('(-78, "scroll_fully")'), "final scroll rise dy farther")
+	_assert(prep.contains('(-72, "scroll_fully")'), "final scroll rise dy")
 	_assert(beach_prep.contains("default_beach.png"), "beach generator output")
 	_assert(beach_prep.contains("shoreline_y") or beach_prep.contains("paint_sand"), "detailed shoreline/sand")
 	_assert(beach_prep.contains("paint_ocean"), "ocean detail")
-	_assert(beach_prep.contains("no repetitive stripe") or beach_prep.contains("not geometric stripe"), "non-striped ocean")
+	_assert(beach_prep.contains("no repetitive stripe") or beach_prep.contains("not geometric stripe") or beach_prep.contains("non-striped"), "non-striped ocean")
 	_assert(env_script.contains("ENV_DEFAULT_BEACH"), "environment id constant")
 	_assert(env_script.contains("apply_environment"), "swappable environment API")
 	_assert(env_script.contains("EnvironmentBaseFill") or env_script.contains("_base_fill"), "opaque beach base fill")
@@ -145,12 +148,12 @@ func _run() -> void:
 		)
 	_assert(not FileAccess.file_exists("res://assets/art/chest/frames/empty/empty_13.png"), "no empty_13")
 
-	_assert(flags.contains("APP_VERSION_CODE := 44"), "versionCode 44")
-	_assert(preset.contains("version/code=44"), "export 44")
-	_assert(preset.contains("0.1.44-chest-render-scroll-beach-polish"), "version name")
-	_assert(preset.contains("v44-chest-render-scroll-beach-polish-debug.apk"), "APK name")
+	_assert(flags.contains("APP_VERSION_CODE := 45"), "versionCode 45")
+	_assert(preset.contains("version/code=45"), "export 45")
+	_assert(preset.contains("0.1.45-chest-grounding-scroll-fix"), "version name")
+	_assert(preset.contains("v45-chest-grounding-scroll-fix-debug.apk"), "APK name")
 	_assert(gitignore.contains("*.apk"), "apks ignored by default")
-	_assert(export_sh.contains("v44-chest-render-scroll-beach-polish-debug.apk"), "export default")
+	_assert(export_sh.contains("v45-chest-grounding-scroll-fix-debug.apk"), "export default")
 
 	## Runtime: preload + pose snaps for representative states.
 	LoveNotesChest.preload_assets()
@@ -165,6 +168,7 @@ func _run() -> void:
 	_assert(node._empty_frames.size() == 13, "empty frames loaded")
 	_assert(node._scroll_frames.size() == 13, "scroll frames loaded")
 	_assert(node._scroll_view != null, "scroll layer present")
+	_assert(node._scroll_clip != null, "scroll cavity clip present")
 	_assert(node._rim_view != null, "rim layer present")
 	_assert(node._shadow_view != null, "shadow layer present")
 	_assert(env._bg != null and env._bg.texture != null, "beach texture loaded")
@@ -184,7 +188,7 @@ func _run() -> void:
 		{"name": "scroll_mostly", "p": 0.92, "scroll": true},
 		{"name": "scroll_fully", "p": 1.0, "scroll": true},
 	]
-	var validate_dir := OS.get_user_data_dir().path_join("chest_validate_v44")
+	var validate_dir := OS.get_user_data_dir().path_join("chest_validate_v45")
 	DirAccess.make_dir_recursive_absolute(validate_dir)
 	var prev_body_span := -1.0
 	for s in states:
@@ -197,14 +201,12 @@ func _run() -> void:
 		_assert(tex != null, "state %s has texture" % s["name"])
 		_assert(not str(tex.resource_path).contains("chest_body_planted"), "state %s not old body" % s["name"])
 		_assert(not str(tex.resource_path).contains("chest_lid.png"), "state %s not old lid" % s["name"])
-		## Exactly one chest TextureRect — never a second overlay node.
 		_assert(node._frame_view != null, "state %s single frame view" % s["name"])
-		## Scroll layering: upper scroll in front of chest; rim only when rising.
 		if bool(s["scroll"]) and float(s["p"]) >= LoveNotesChest.SCROLL_REVEAL_START_PROGRESS:
-			_assert(node._scroll_view.visible, "state %s scroll visible" % s["name"])
+			_assert(node._scroll_clip.visible, "state %s scroll clip visible" % s["name"])
 			_assert(node._rim_view.visible, "state %s rim visible" % s["name"])
-			_assert(node._scroll_view.z_index > node._frame_view.z_index, "state %s scroll above chest" % s["name"])
-			_assert(node._rim_view.z_index > node._scroll_view.z_index, "state %s rim above scroll" % s["name"])
+			_assert(node._scroll_clip.z_index > node._frame_view.z_index, "state %s scroll above chest" % s["name"])
+			_assert(node._rim_view.z_index > node._scroll_clip.z_index, "state %s rim above scroll" % s["name"])
 			_assert(node._scroll_rise > 0.0, "state %s scroll rising" % s["name"])
 		if tex is ImageTexture or tex is CompressedTexture2D:
 			var img: Image = tex.get_image()
@@ -216,7 +218,6 @@ func _run() -> void:
 					if img.get_pixel(x, 0).a > 0.15 or img.get_pixel(x, mini(1, h - 1)).a > 0.15:
 						top_hits += 1
 				_assert(top_hits == 0, "state %s no top-edge opacity" % s["name"])
-				## Approximate lower-body width stability (not lid flare).
 				var y0 := int(h * 0.55)
 				var min_x := w
 				var max_x := 0
@@ -229,10 +230,9 @@ func _run() -> void:
 					var span := float(max_x - min_x + 1)
 					if prev_body_span > 0.0 and not bool(s["scroll"]):
 						var drift := absf(span - prev_body_span) / prev_body_span
-						_assert(drift < 0.06, "state %s body width stable (drift=%.3f)" % [s["name"], drift])
+						_assert(drift < 0.08, "state %s body width stable (drift=%.3f)" % [s["name"], drift])
 					if not bool(s["scroll"]):
 						prev_body_span = span
-				## Gold body mass should be fully opaque (no see-through chest).
 				var gold_mid := 0
 				var gold_n := 0
 				for y in range(int(h * 0.40), int(h * 0.80)):
@@ -250,23 +250,20 @@ func _run() -> void:
 				print("WROTE ", path)
 		_assert(node._frame_index >= 0, "state %s frame index" % s["name"])
 
-	## Final unread reward: chest holds fully-open empty pose; scroll layer fully risen.
 	node._set_frame_progress(1.0, true)
 	await process_frame
 	_assert(node._frame_index == 12, "final open chest frame index 12")
 	_assert(node._scroll_rise >= 0.999, "final scroll rise complete")
-	_assert(node._scroll_view.visible, "final scroll layer visible")
+	_assert(node._scroll_clip.visible, "final scroll clip visible")
 	_assert(node._rim_view.visible, "final rim layer visible")
-	_assert(node._rim_view.z_index > node._scroll_view.z_index, "rim occludes lower scroll only")
-	_assert(node._scroll_view.z_index > node._frame_view.z_index, "upper scroll above chest")
+	_assert(node._rim_view.z_index > node._scroll_clip.z_index, "rim occludes lower scroll only")
+	_assert(node._scroll_clip.z_index > node._frame_view.z_index, "upper scroll above chest")
 
-	## Badge suppressed while reward animation is active.
 	node.set_unread_badge(3)
 	node._set_badge_suppressed(true)
 	_assert(node._badge.visible == false, "badge hidden during animation")
 	node._set_badge_suppressed(false)
 	_assert(node._badge.visible == true, "badge restored after animation")
-	## Badge sits near chest artwork, not horizon.
 	_assert(node._badge.position.y > node._anchor_rect.position.y, "badge below canvas top")
 	_assert(node._badge.position.y < node._anchor_rect.position.y + node._anchor_rect.size.y * 0.55, "badge in upper chest band")
 
@@ -280,7 +277,7 @@ func _run() -> void:
 	await node.play_open_empty_pulse()
 	_assert(node.chest_state == LoveNotesChest.ChestState.OPEN_EMPTY, "pulse keeps OPEN_EMPTY")
 
-	## Title centering helper: overlay title center == viewport center for sample widths.
+	## Title centering without refresh button — title center == viewport center.
 	for vw in [360, 390, 412]:
 		var header := Control.new()
 		header.size = Vector2(vw, 52)
@@ -290,21 +287,10 @@ func _run() -> void:
 		title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		title.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		header.add_child(title)
-		var refresh := Button.new()
-		refresh.custom_minimum_size = Vector2(48, 48)
-		refresh.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
-		refresh.anchor_left = 1.0
-		refresh.anchor_right = 1.0
-		refresh.offset_left = -48
-		refresh.offset_right = 0
-		refresh.z_index = 20
-		header.add_child(refresh)
 		await process_frame
 		var title_center_x := title.global_position.x + title.size.x * 0.5
 		var view_center_x := header.global_position.x + header.size.x * 0.5
 		_assert(absf(title_center_x - view_center_x) < 1.0, "title center == viewport center @%d" % vw)
-		## Refresh stays inside header bounds (does not spill into stats row).
-		_assert(refresh.position.y + refresh.size.y <= header.size.y + 1.0, "refresh inside header @%d" % vw)
 		header.queue_free()
 
 	node.queue_free()

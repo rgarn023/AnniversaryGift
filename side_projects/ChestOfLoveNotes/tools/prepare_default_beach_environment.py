@@ -4,8 +4,9 @@
 Output:
   assets/art/background/environments/default_beach.png
 
-v44: painted/game-quality twilight beach — textured sand with depth,
-irregular shoreline, calm non-striped ocean, soft atmospheric horizon.
+v45: stylized-realistic romantic twilight beach — sharper sand grain/dunes,
+natural shoreline with foam/wet edge, calmer non-striped water, soft atmosphere.
+Complements the opaque fantasy chest without fighting it.
 Mobile-friendly baked raster (no expensive runtime shaders).
 """
 
@@ -256,10 +257,10 @@ def paint_sand(base, shore_ys, rng):
 
 def main():
 	OUT.parent.mkdir(parents=True, exist_ok=True)
-	rng = np.random.default_rng(44)
-	horizon_frac = 0.46
-	shore_base = 0.57
-	shore_amp = 20.0
+	rng = np.random.default_rng(45)
+	horizon_frac = 0.455
+	shore_base = 0.565
+	shore_amp = 24.0
 	sky = paint_sky(rng)
 	shore_ys = np.array([shoreline_y(float(x), H*shore_base, shore_amp) for x in range(W)], np.float32)
 	# soft horizon glow band with slight undulation
@@ -279,17 +280,23 @@ def main():
 	# top readability shade
 	shade = Image.new("RGBA", (W,H), (0,0,0,0))
 	sd = ImageDraw.Draw(shade)
-	for y in range(0, int(H*0.24)):
-		t = 1.0 - y/(H*0.24)
-		sd.line([(0,y),(W,y)], fill=(8,12,28,int(70*t*t)), width=1)
+	for y in range(0, int(H*0.22)):
+		t = 1.0 - y/(H*0.22)
+		sd.line([(0,y),(W,y)], fill=(8,12,28,int(58*t*t)), width=1)
 	img = Image.alpha_composite(img, shade)
-	# soften horizon
+	# Soften horizon only — keep sand/water sharper so beach matches chest quality.
 	hy = int(H*horizon_frac)
-	hyb = img.crop((0, hy-34, W, hy+42)).filter(ImageFilter.GaussianBlur(8))
-	img.paste(hyb, (0, hy-34))
-	img = img.filter(ImageFilter.GaussianBlur(0.3))
-	img = ImageEnhance.Contrast(img).enhance(1.07)
-	img = ImageEnhance.Color(img).enhance(1.08)
+	hyb = img.crop((0, hy-28, W, hy+36)).filter(ImageFilter.GaussianBlur(5.5))
+	img.paste(hyb, (0, hy-28))
+	## Extra sand micro-grain (no whole-image blur washout).
+	sand = np.array(img)
+	grain = rng.normal(0, 3.2, size=sand.shape).astype(np.float32)
+	y0 = int(H * 0.58)
+	sand[y0:, :, :3] = np.clip(sand[y0:, :, :3].astype(np.float32) + grain[y0:, :, :3], 0, 255)
+	img = Image.fromarray(sand.astype(np.uint8), "RGBA")
+	img = ImageEnhance.Contrast(img).enhance(1.10)
+	img = ImageEnhance.Color(img).enhance(1.06)
+	img = ImageEnhance.Sharpness(img).enhance(1.12)
 	img.save(OUT, "PNG", optimize=True)
 	print(f"wrote {OUT} ({OUT.stat().st_size} bytes) size={img.size}")
 

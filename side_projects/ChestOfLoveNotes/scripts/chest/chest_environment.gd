@@ -131,4 +131,4 @@ func _process(delta: float) -> void:
 ## Sand contact band as a fraction of this control's height (for chest grounding).
 func sand_contact_y_frac() -> float:
 	## Chest plant target: lower-middle sand with room below for ground + nav.
-	return 0.70
+	return 0.74
