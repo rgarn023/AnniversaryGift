@@ -158,10 +158,15 @@ func _test_chest_frames() -> void:
 	_assert(chest_src.contains("CLOSING"), "closing state present")
 	var main_src := FileAccess.get_file_as_string("res://scripts/main.gd")
 	_assert(main_src.contains("play_open_animation(state.reduced_motion"), "main uses cinematic open")
-	_assert(main_src.contains("var chest_side := 252"), "main chest display ~252")
+	_assert(main_src.contains("var chest_w := 252") or main_src.contains("var chest_side := 252"), "main chest display ~252")
+	_assert(main_src.contains("chest_h := 326") or main_src.contains("chest_h := 292"), "taller chest host")
 	_assert(main_src.contains("No new scrolls today"), "empty open message present")
 	_assert(main_src.contains("_begin_nav_transition"), "prepared page transitions")
-	_assert(main_src.contains("Hidden from Sent history"), "sent hide uses snackbar text")
+	_assert(
+		main_src.contains("Hidden from Sent history")
+		or main_src.contains("Scroll hidden"),
+		"sent hide uses snackbar text"
+	)
 	_assert(main_src.contains("_add_inventory_filter_rows"), "shared chest filter rows")
 	_assert(main_src.contains('_add_inventory_filter_rows(root, "saved")'), "Saved keeps Hidden sibling")
 	_assert(main_src.contains("_dismiss_toast_if_visible"), "dismiss toast before chest reward")
@@ -207,7 +212,9 @@ func _test_build_version() -> void:
 	_assert(BuildFlags.APP_VERSION_CODE >= 26, "versionCode >= 24")
 	var preset := FileAccess.get_file_as_string("res://export_presets.cfg")
 	_assert(
-		preset.contains("ChestOfLoveNotes-fantasy-sheet-chest-debug.apk")
+		preset.contains("ChestOfLoveNotes-v40-chest-smoothing-hidden-fix-debug.apk")
+		or preset.contains("ChestOfLoveNotes-v39-chest-polish-debug.apk")
+		or preset.contains("ChestOfLoveNotes-fantasy-sheet-chest-debug.apk")
 		or preset.contains("ChestOfLoveNotes-game-quality-chest-disconnect-fix-debug.apk")
 		or preset.contains("splash-timing-chest-animation-fix-debug.apk"),
 		"export APK name"

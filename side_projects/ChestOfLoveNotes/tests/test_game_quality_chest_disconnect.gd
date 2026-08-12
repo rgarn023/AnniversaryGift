@@ -90,7 +90,9 @@ func _run() -> void:
 	_assert(flags.contains("APP_VERSION_CODE :="), "versionCode present")
 	_assert(preset.contains("version/code="), "export version present")
 	_assert(
-		preset.contains("backend-disconnect-fix-debug.apk")
+		preset.contains("v40-chest-smoothing-hidden-fix-debug.apk")
+		or preset.contains("v39-chest-polish-debug.apk")
+		or preset.contains("backend-disconnect-fix-debug.apk")
 		or preset.contains("game-quality-chest-disconnect-fix-debug.apk")
 		or preset.contains("permanent-disconnect-fix-debug.apk")
 		or preset.contains("fantasy-sheet-chest-debug.apk")
@@ -98,13 +100,16 @@ func _run() -> void:
 		"APK name"
 	)
 	_assert(
-		gitignore.contains("ChestOfLoveNotes-game-quality-chest-disconnect-fix-debug.apk")
+		gitignore.contains("*.apk")
+		or gitignore.contains("ChestOfLoveNotes-game-quality-chest-disconnect-fix-debug.apk")
 		or gitignore.contains("ChestOfLoveNotes-backend-disconnect-fix-debug.apk")
 		or gitignore.contains("ChestOfLoveNotes-fantasy-sheet-chest-debug.apk"),
 		"gitignore allow"
 	)
 	_assert(
-		export_sh.contains("disconnect-fix-debug.apk")
+		export_sh.contains("v40-chest-smoothing-hidden-fix-debug.apk")
+		or export_sh.contains("v39-chest-polish-debug.apk")
+		or export_sh.contains("disconnect-fix-debug.apk")
 		or export_sh.contains("fantasy-sheet-chest-debug.apk"),
 		"export default"
 	)
