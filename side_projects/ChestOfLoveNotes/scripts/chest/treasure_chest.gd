@@ -367,7 +367,19 @@ func _set_frame_progress(raw_amount: float, emerge_scroll: bool) -> void:
 		return
 	var eased := _ease_open_curve(linear)
 	var max_i := _active_frames.size() - 1
-	var idx := int(round(eased * float(max_i)))
+	var idx: int
+	if emerge_scroll and max_i >= SCROLL_REVEAL_START_INDEX:
+		## Hold opening poses until the chest is substantially open, then reveal scroll.
+		## First ~62% of eased time → frames before scroll peek; remainder → scroll rise.
+		var open_end := SCROLL_REVEAL_START_INDEX - 1
+		if eased < 0.62:
+			var t_open := eased / 0.62
+			idx = int(round(t_open * float(open_end)))
+		else:
+			var t_scroll := (eased - 0.62) / 0.38
+			idx = open_end + int(round(t_scroll * float(max_i - open_end)))
+	else:
+		idx = int(round(eased * float(max_i)))
 	_show_frame_index(idx)
 
 	## Particles after interior is visibly open.
@@ -379,6 +391,7 @@ func _set_frame_progress(raw_amount: float, emerge_scroll: bool) -> void:
 	## Scroll emerge signal once peek frames are reached.
 	if emerge_scroll and not _scroll_emerged_emitted and idx >= SCROLL_REVEAL_START_INDEX:
 		_scroll_emerged_emitted = true
+		chest_state = ChestState.OPEN_SCROLL_EMERGING
 		sfx_scroll_emerge.emit()
 		scroll_emerged.emit(get_scroll_global_center())
 
