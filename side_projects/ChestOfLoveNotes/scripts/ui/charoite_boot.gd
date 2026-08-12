@@ -4,12 +4,18 @@ class_name CharoiteBoot
 ## Plays the APPROVED animated splash derived from 154659_cursor_under4mb.gif
 ## (frame sequence preserves order/timing). Does not redraw or recolor the mark.
 ## Session/backend restore runs in parallel during this presentation.
+##
+## Timing model (minimum-visible, not force-close):
+##   fade in → hold until (≈2.0s visible AND app ready) → short fade out → finished
+## If startup needs longer than 2.0s, splash stays until mark_app_ready().
 
 signal finished
 
-const MIN_DURATION_SEC := 1.75
+## Branded CG must remain visibly presented ≈2.0s before transition begins.
+const MIN_VISIBLE_SEC := 2.0
 const FADE_IN_SEC := 0.28
-const FADE_OUT_SEC := 0.28
+## Short smooth handoff into the app (150–250 ms).
+const FADE_OUT_SEC := 0.20
 const SOURCE_GIF := "res://assets/branding/154659_cursor_under4mb.gif"
 const FRAMES_META := "res://assets/branding/splash_frames_meta.json"
 const STILL_FRAME := "res://assets/branding/splash_still.png"
@@ -20,6 +26,7 @@ const FALLBACK_WORDMARK := "res://assets/art/brand/charoite_games_wordmark.png"
 const LOGO_DISPLAY := Vector2(300, 400)
 
 var _started_usec: int = 0
+var _visible_usec: int = 0
 var _logo: TextureRect
 var _done: bool = false
 var _used_official: bool = false
@@ -29,6 +36,8 @@ var _anim_durations_sec: Array[float] = []
 var _anim_index: int = 0
 var _anim_accum: float = 0.0
 var _anim_playing: bool = false
+## Set by Main when session restore / startup gate completes.
+var _app_ready: bool = false
 
 
 func _ready() -> void:
@@ -37,6 +46,11 @@ func _ready() -> void:
 	_started_usec = Time.get_ticks_usec()
 	_build()
 	_play()
+
+
+func mark_app_ready() -> void:
+	## Initialization finished — splash may fade once MIN_VISIBLE_SEC has elapsed.
+	_app_ready = true
 
 
 func _process(delta: float) -> void:
@@ -171,18 +185,15 @@ func _play() -> void:
 	var fade_in := create_tween()
 	fade_in.tween_property(_logo, "modulate:a", 1.0, FADE_IN_SEC).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	await fade_in.finished
-	## Hold until total duration reaches MIN_DURATION_SEC including fade-out window.
-	## Animated splash may naturally run longer; never cut below MIN_DURATION_SEC.
-	var min_hold_target := MIN_DURATION_SEC
-	if _used_animation and not _anim_durations_sec.is_empty():
-		var loop_len := 0.0
-		for d in _anim_durations_sec:
-			loop_len += d
-		## Show at least one full loop when short; cap presentation reasonably.
-		min_hold_target = maxf(MIN_DURATION_SEC, minf(loop_len, 3.5))
-	var elapsed := (Time.get_ticks_usec() - _started_usec) / 1_000_000.0
-	var hold := maxf(0.05, min_hold_target - elapsed - FADE_OUT_SEC)
-	await get_tree().create_timer(hold).timeout
+	_visible_usec = Time.get_ticks_usec()
+	## Hold while branded splash is fully visible.
+	## Exit only when: ≈2.0s visible AND Main has marked app ready.
+	## Never force-close early if restore/init still running.
+	while true:
+		var visible_elapsed := (Time.get_ticks_usec() - _visible_usec) / 1_000_000.0
+		if visible_elapsed >= MIN_VISIBLE_SEC and _app_ready:
+			break
+		await get_tree().process_frame
 	_anim_playing = false
 	var fade_out := create_tween()
 	fade_out.tween_property(_logo, "modulate:a", 0.0, FADE_OUT_SEC).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)

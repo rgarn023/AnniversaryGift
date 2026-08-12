@@ -1,14 +1,30 @@
 extends Control
 class_name LoveNotesChest
 ## Frame-based chest open — ONE full-chest plate at a time on a fixed canvas.
-## No lid scale/squash/perspective transforms. No dual-chest crossfade ghosts.
+## Body stays planted. No lid squash/scale.Y, no dual-chest crossfade ghosts,
+## no whole-chest cinematic zoom. Opening uses authored same-canvas plates.
 
 signal tapped
 signal open_finished
 signal skip_requested
 signal scroll_emerged(global_pos: Vector2)
+## Future audio hooks (no assets required this pass).
+signal sfx_open_start
+signal sfx_fully_open
+signal sfx_scroll_emerge
 
-enum ChestState { LOCKED_SILHOUETTE, AVAILABLE, OPENING, OPENED, READY, CLOSING }
+## Authoritative logical states — never infer from sprite frame alone.
+enum ChestState {
+	LOCKED_SILHOUETTE,
+	AVAILABLE, ## closed, tappable
+	OPENING,
+	OPEN_EMPTY,
+	OPEN_SCROLL_EMERGING,
+	OPENED, ## generic open (compat)
+	READY,
+	CLOSING,
+	TRANSITIONING,
+}
 
 const ART := "res://assets/art/chest/"
 const SCROLL_ART := "res://assets/art/scroll/"
@@ -23,10 +39,13 @@ const FRAME_FILES := [
 	"chest_half.png",
 	"chest_open.png",
 ]
-## Nominal playback rate for the open sequence (elapsed-time driven).
-const OPEN_FPS := 24.0
-const OPEN_DURATION_SEC := 1.05
-const OPEN_DURATION_RM := 0.42
+## Cumulative open_amount thresholds for each plate (eased playback maps into these).
+const FRAME_STOPS: Array[float] = [0.0, 0.16, 0.34, 0.52, 0.72, 1.0]
+## Tap → fully open (full motion). Settle follows separately.
+const OPEN_DURATION_SEC := 0.95
+const OPEN_DURATION_RM := 0.36
+const SETTLE_SEC := 0.14
+const SCROLL_EMERGE_SEC := 0.62
 
 @export var reduced_motion: bool = false
 
@@ -47,16 +66,15 @@ var _rolled_scroll: TextureRect
 var _dust: CPUParticles2D
 var _sparks: CPUParticles2D
 var _button: Button
-var _press_scale: float = 1.0
 var _ready_visuals: bool = false
 var _badge: Label
 var _unread_count: int = 0
 var _open_amount: float = 0.0
 var _show_scroll_on_finish: bool = false
 var _anchor_rect: Rect2 = Rect2()
-var _cinematic_zoom: float = 1.0
 var _frame_index: int = 0
 var _frame_textures: Array[Texture2D] = []
+var _anticipation_y: float = 0.0
 
 ## Process-wide preload so the first tap never decompresses textures.
 static var _tex_cache: Dictionary = {}
@@ -146,21 +164,23 @@ func _build_visuals() -> void:
 	_contact_shadow.modulate = Color(1, 1, 1, 0.88)
 	_root_visual.add_child(_contact_shadow)
 
-	_interior_glow = _make_tr(_tex("chest_inner_glow.png"), 1, "InteriorGlow")
-	_interior_glow.modulate = Color(1.15, 0.9, 0.55, 0.0)
-	_root_visual.add_child(_interior_glow)
-
 	## Single plate — swap texture by index (never two full chests / ghost crossfade).
 	var first: Texture2D = _frame_textures[0] if not _frame_textures.is_empty() else null
 	_frame_plate = _make_tr(first, 2, "ChestFrame")
 	_root_visual.add_child(_frame_plate)
 
+	## Glow sits above the plate so light reads as escaping the interior opening.
+	## Texture is cavity-focused; keep alpha modest so the plate itself does not flood.
+	_interior_glow = _make_tr(_tex("chest_inner_glow.png"), 3, "InteriorGlow")
+	_interior_glow.modulate = Color(1.15, 0.9, 0.55, 0.0)
+	_root_visual.add_child(_interior_glow)
+
 	_scroll_spawn = Control.new()
 	_scroll_spawn.name = "ScrollSpawnPoint"
 	_scroll_spawn.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_scroll_spawn.z_index = 3
+	_scroll_spawn.z_index = 4
 	_scroll_spawn.visible = false
-	_scroll_spawn.clip_contents = false
+	_scroll_spawn.clip_contents = true
 	_root_visual.add_child(_scroll_spawn)
 
 	_rolled_scroll = TextureRect.new()
@@ -172,7 +192,7 @@ func _build_visuals() -> void:
 	_rolled_scroll.visible = false
 	_scroll_spawn.add_child(_rolled_scroll)
 
-	_front_lip = _make_tr(_tex("chest_front_lip.png"), 4, "ForegroundLip")
+	_front_lip = _make_tr(_tex("chest_front_lip.png"), 5, "ForegroundLip")
 	_front_lip.modulate.a = 0.0
 	_root_visual.add_child(_front_lip)
 
@@ -239,7 +259,13 @@ func _layout_frames() -> void:
 
 	## Every plate shares identical rect — base stays planted across frames.
 	_place_rect(_frame_plate, _anchor_rect)
-	_place_rect(_interior_glow, _anchor_rect)
+	## Glow focused on the cavity / opening, not the whole chest sprite.
+	_place_rect(_interior_glow, Rect2(
+		_anchor_rect.position.x + _anchor_rect.size.x * 0.16,
+		_anchor_rect.position.y + frame_h * 0.26,
+		_anchor_rect.size.x * 0.68,
+		frame_h * 0.46
+	))
 	_place_rect(_highlight, _anchor_rect)
 	_place_rect(_contact_shadow, Rect2(
 		_anchor_rect.position.x,
@@ -258,12 +284,14 @@ func _layout_frames() -> void:
 	_sparks.position = _dust.position
 	var scroll_w := area.x * 0.52
 	var scroll_h := scroll_w * 0.30
-	var spawn_h := scroll_h * 2.4
-	var rim_y := _anchor_rect.position.y + frame_h * 0.40
-	_scroll_spawn.position = Vector2(area.x * 0.5 - scroll_w * 0.5, rim_y - scroll_h)
+	var spawn_h := scroll_h * 2.6
+	## Origin sits inside the open cavity; scroll rises from within.
+	var rim_y := _anchor_rect.position.y + frame_h * 0.38
+	_scroll_spawn.position = Vector2(area.x * 0.5 - scroll_w * 0.5, rim_y - scroll_h * 0.15)
 	_scroll_spawn.size = Vector2(scroll_w, spawn_h)
 	_rolled_scroll.size = Vector2(scroll_w, scroll_h)
 	_rolled_scroll.pivot_offset = Vector2(scroll_w * 0.5, scroll_h * 0.5)
+	_apply_root_offset()
 	if _badge:
 		_badge.position = Vector2(area.x * 0.72, top + frame_h * 0.08)
 		_badge.size = Vector2(40, 40)
@@ -274,6 +302,15 @@ func _place_rect(node: Control, rect: Rect2) -> void:
 		return
 	node.position = rect.position
 	node.size = rect.size
+
+
+func _apply_root_offset() -> void:
+	## Anticipation uses a tiny Y nudge only — never scale the chest.
+	if _root_visual == null:
+		return
+	_root_visual.scale = Vector2.ONE
+	_root_visual.rotation = 0.0
+	_root_visual.position = Vector2(0.0, _anticipation_y)
 
 
 func set_unread_badge(count: int) -> void:
@@ -297,7 +334,7 @@ func configure(state: ChestState, show_final_label: bool = false) -> void:
 	animating = false
 	_skip = false
 	_input_locked = false
-	_cinematic_zoom = 1.0
+	_anticipation_y = 0.0
 	_reset_pose()
 	match state:
 		ChestState.LOCKED_SILHOUETTE:
@@ -308,16 +345,16 @@ func configure(state: ChestState, show_final_label: bool = false) -> void:
 			set_process(false)
 		ChestState.AVAILABLE, ChestState.READY:
 			self_modulate = Color.WHITE
-			_interior_glow.modulate.a = 0.10
+			_interior_glow.modulate.a = 0.08
 			_label.visible = show_final_label
 			_label.text = "Your Chest"
 			_show_frame_progress(0.0)
 			set_process(not reduced_motion)
-		ChestState.OPENED:
+		ChestState.OPENED, ChestState.OPEN_EMPTY:
 			self_modulate = Color.WHITE
 			_show_frame_progress(1.0)
 			_label.visible = false
-			_interior_glow.modulate.a = 0.65
+			_interior_glow.modulate.a = 0.62
 			_front_lip.modulate.a = 0.0
 			set_process(false)
 		_:
@@ -327,24 +364,34 @@ func configure(state: ChestState, show_final_label: bool = false) -> void:
 func _show_frame_progress(open_amount: float) -> void:
 	## Map elapsed open amount to a discrete plate — ONE plate visible.
 	_open_amount = clampf(open_amount, 0.0, 1.0)
-	var count := maxi(_frame_textures.size(), 1)
-	var idx := 0
-	if _open_amount >= 0.999:
-		idx = count - 1
-	elif _open_amount > 0.0:
-		idx = clampi(int(floor(_open_amount * float(count - 1) + 0.0001)), 0, count - 1)
+	var idx := _frame_index_for_amount(_open_amount)
 	_set_frame_index(idx)
+	## Warm interior glow intensifies as the lid opens (from inside the cavity).
 	var glow_a := 0.0
-	if _open_amount < 0.2:
-		glow_a = _open_amount * 0.4
+	if _open_amount < 0.12:
+		glow_a = _open_amount * 0.55
 	elif _open_amount < 0.55:
-		glow_a = 0.08 + (_open_amount - 0.2) * 1.1
+		glow_a = 0.07 + (_open_amount - 0.12) * 1.05
 	else:
-		glow_a = 0.45 + (_open_amount - 0.55) * 0.9
+		glow_a = 0.52 + (_open_amount - 0.55) * 0.75
 	if _interior_glow:
-		_interior_glow.modulate = Color(1.18, 0.90, 0.52, clampf(glow_a, 0.0, 0.85))
+		_interior_glow.modulate = Color(1.18, 0.90, 0.52, clampf(glow_a, 0.0, 0.82))
 	if _contact_shadow:
 		_contact_shadow.modulate.a = 0.78 + _open_amount * 0.12
+
+
+func _frame_index_for_amount(amount: float) -> int:
+	var count := maxi(_frame_textures.size(), 1)
+	if amount >= 0.999:
+		return count - 1
+	if amount <= 0.0:
+		return 0
+	var stops := FRAME_STOPS
+	var last := mini(count, stops.size()) - 1
+	for i in range(1, last + 1):
+		if amount < float(stops[i]):
+			return i - 1
+	return last
 
 
 func _set_frame_index(idx: int) -> void:
@@ -360,11 +407,12 @@ func _set_frame_index(idx: int) -> void:
 
 
 func _reset_pose() -> void:
+	_anticipation_y = 0.0
 	if _root_visual:
 		_root_visual.scale = Vector2.ONE
 		_root_visual.position = Vector2.ZERO
 		_root_visual.rotation = 0.0
-	_cinematic_zoom = 1.0
+		_root_visual.modulate = Color.WHITE
 	_layout_frames()
 	if _rolled_scroll:
 		_rolled_scroll.modulate.a = 0.0
@@ -377,18 +425,6 @@ func _reset_pose() -> void:
 		_front_lip.modulate.a = 0.0
 
 
-func _apply_centered_zoom(zoom: float) -> void:
-	_cinematic_zoom = zoom
-	if _root_visual == null:
-		return
-	var z := zoom * _press_scale
-	_root_visual.scale = Vector2(z, z)
-	_root_visual.position = Vector2(
-		(1.0 - z) * size.x * 0.5,
-		(1.0 - z) * size.y * 0.5
-	)
-
-
 func _process(delta: float) -> void:
 	if not visible or not is_visible_in_tree():
 		return
@@ -397,10 +433,11 @@ func _process(delta: float) -> void:
 	if chest_state != ChestState.AVAILABLE and chest_state != ChestState.READY:
 		return
 	_idle_time += delta
-	var breathe: float = 1.0 + sin(_idle_time * 1.0) * 0.008
-	_apply_centered_zoom(breathe)
+	## Idle shimmer only — no breathing scale / zoom on the chest body.
 	if _highlight:
 		_highlight.modulate.a = 0.16 + 0.08 * sin(_idle_time * 1.4)
+	if _interior_glow and _open_amount < 0.05:
+		_interior_glow.modulate.a = 0.06 + 0.04 * sin(_idle_time * 0.9)
 
 
 func set_active_processing(enabled: bool) -> void:
@@ -412,17 +449,28 @@ func _on_pressed() -> void:
 		_skip = true
 		skip_requested.emit()
 		return
+	if chest_state == ChestState.OPENING \
+			or chest_state == ChestState.OPEN_SCROLL_EMERGING \
+			or chest_state == ChestState.TRANSITIONING \
+			or chest_state == ChestState.CLOSING:
+		return
 	tapped.emit()
 
 
 func play_press_feedback() -> void:
+	## Tiny downward anticipation — not a scale squash.
 	HapticHelper.light_tap()
+	if reduced_motion:
+		return
 	var tween := create_tween()
-	_press_scale = 0.985
 	tween.tween_method(func(v: float) -> void:
-		_press_scale = v
-		_apply_centered_zoom(_cinematic_zoom)
-	, 0.985, 1.0, 0.16).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+		_anticipation_y = v
+		_apply_root_offset()
+	, 0.0, 2.5, 0.08).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tween.tween_method(func(v: float) -> void:
+		_anticipation_y = v
+		_apply_root_offset()
+	, 2.5, 0.0, 0.12).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 
 
 func play_empty_feedback() -> void:
@@ -430,26 +478,39 @@ func play_empty_feedback() -> void:
 
 
 func play_open_empty_pulse() -> void:
+	## Retap on open empty: glow/shimmer only — lid stays open, no reopen, no zoom.
 	if animating:
 		return
+	if chest_state != ChestState.OPENED and chest_state != ChestState.OPEN_EMPTY:
+		## Still allow subtle feedback if already visually open.
+		if _open_amount < 0.95:
+			return
 	animating = true
 	_input_locked = true
 	HapticHelper.light_tap()
+	var base_a := 0.62
+	if _interior_glow:
+		base_a = _interior_glow.modulate.a
 	var glow := create_tween()
-	glow.tween_property(_interior_glow, "modulate:a", 0.78, 0.14).set_trans(Tween.TRANS_SINE)
-	glow.tween_property(_interior_glow, "modulate:a", 0.55, 0.22).set_trans(Tween.TRANS_SINE)
-	var pulse := create_tween()
-	pulse.tween_method(_apply_centered_zoom, _cinematic_zoom, 1.10, 0.12).set_trans(Tween.TRANS_SINE)
-	pulse.tween_method(_apply_centered_zoom, 1.10, 1.08, 0.16).set_trans(Tween.TRANS_SINE)
+	glow.tween_property(_interior_glow, "modulate:a", minf(base_a + 0.22, 0.92), 0.14).set_trans(Tween.TRANS_SINE)
+	glow.tween_property(_interior_glow, "modulate:a", base_a, 0.28).set_trans(Tween.TRANS_SINE)
+	if _highlight:
+		var shimmer := create_tween()
+		shimmer.tween_property(_highlight, "modulate:a", 0.42, 0.12).set_trans(Tween.TRANS_SINE)
+		shimmer.tween_property(_highlight, "modulate:a", 0.22, 0.22).set_trans(Tween.TRANS_SINE)
 	await glow.finished
 	animating = false
 	_input_locked = false
 
 
 func play_open_animation(short: bool = false, emerge_scroll: bool = false) -> void:
-	if animating or chest_state == ChestState.OPENING or chest_state == ChestState.CLOSING:
+	if animating \
+			or chest_state == ChestState.OPENING \
+			or chest_state == ChestState.OPEN_SCROLL_EMERGING \
+			or chest_state == ChestState.TRANSITIONING \
+			or chest_state == ChestState.CLOSING:
 		return
-	if chest_state == ChestState.OPENED and not emerge_scroll:
+	if (chest_state == ChestState.OPENED or chest_state == ChestState.OPEN_EMPTY) and not emerge_scroll:
 		await play_open_empty_pulse()
 		return
 	animating = true
@@ -458,20 +519,23 @@ func play_open_animation(short: bool = false, emerge_scroll: bool = false) -> vo
 	set_process(false)
 	_show_scroll_on_finish = emerge_scroll
 	chest_state = ChestState.OPENING
+	sfx_open_start.emit()
 	play_press_feedback()
 	if reduced_motion or short:
 		await _open_short()
 	else:
 		await _open_full()
 	_apply_finished_state()
-	chest_state = ChestState.OPENED
+	## OPENED kept for empty-retap checks in Main; TRANSITIONING while handing off to note.
+	chest_state = ChestState.TRANSITIONING if emerge_scroll else ChestState.OPENED
 	animating = false
 	_input_locked = false
+	sfx_fully_open.emit()
 	open_finished.emit()
 
 
 func play_close_animation() -> void:
-	if animating or chest_state == ChestState.OPENING:
+	if animating or chest_state == ChestState.OPENING or chest_state == ChestState.OPEN_SCROLL_EMERGING:
 		return
 	animating = true
 	_input_locked = true
@@ -480,10 +544,10 @@ func play_close_animation() -> void:
 	var dur := 0.28 if reduced_motion else 0.55
 	var tw := create_tween()
 	tw.tween_method(_show_frame_progress, _open_amount, 0.0, dur).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
-	tw.parallel().tween_method(_apply_centered_zoom, _cinematic_zoom, 1.0, dur)
 	await tw.finished
 	_show_frame_progress(0.0)
-	_apply_centered_zoom(1.0)
+	_anticipation_y = 0.0
+	_apply_root_offset()
 	chest_state = ChestState.READY
 	animating = false
 	_input_locked = false
@@ -509,7 +573,7 @@ func finish_opening_safely() -> void:
 	_apply_finished_state()
 	animating = false
 	_input_locked = false
-	chest_state = ChestState.OPENED
+	chest_state = ChestState.OPENED if not _show_scroll_on_finish else ChestState.TRANSITIONING
 	open_finished.emit()
 
 
@@ -517,13 +581,13 @@ func apply_ready_idle_state() -> void:
 	animating = false
 	_skip = false
 	_idle_time = 0.0
-	_press_scale = 1.0
+	_anticipation_y = 0.0
 	if _dust != null:
 		_dust.emitting = false
 	if _sparks != null:
 		_sparks.emitting = false
 	hide_rolled_scroll()
-	_apply_centered_zoom(1.0)
+	_reset_pose()
 	configure(ChestState.READY, true)
 	set_interaction_enabled(true)
 	modulate = Color(1, 1, 1, 1)
@@ -531,12 +595,13 @@ func apply_ready_idle_state() -> void:
 
 
 func _open_short() -> void:
+	## Reduced motion: closed → brief glow → open pose. Same logical outcomes.
 	_show_frame_progress(0.0)
 	_layout_frames()
 	var tw := create_tween()
 	tw.set_parallel(true)
 	tw.tween_method(_show_frame_progress, 0.0, 1.0, OPEN_DURATION_RM).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-	tw.tween_method(_apply_centered_zoom, 1.0, 1.04, OPEN_DURATION_RM).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tw.tween_property(_interior_glow, "modulate:a", 0.72, OPEN_DURATION_RM).set_trans(Tween.TRANS_SINE)
 	await tw.finished
 	if _show_scroll_on_finish and not _skip:
 		await _emerge_scroll()
@@ -546,71 +611,72 @@ func _open_short() -> void:
 
 func _open_full() -> void:
 	_layout_frames()
-	_apply_centered_zoom(1.0)
-	var press := create_tween()
-	press.tween_method(_apply_centered_zoom, 1.0, 0.985, 0.08).set_trans(Tween.TRANS_SINE)
-	await press.finished
-	if _skip:
-		_apply_finished_state()
-		return
-	var enlarge := create_tween()
-	enlarge.tween_method(_apply_centered_zoom, 0.985, 1.06, 0.22).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
-	await enlarge.finished
+	_anticipation_y = 0.0
+	_apply_root_offset()
+	## Brief anticipation already kicked off by play_press_feedback (Y nudge + haptic).
+	await get_tree().create_timer(0.12).timeout
 	if _skip:
 		_apply_finished_state()
 		return
 
 	HapticHelper.lock_release()
-	_front_lip.modulate.a = 0.25
-	## Elapsed-time tween advances discrete plates (~OPEN_FPS nominal with 6 keys).
+	_front_lip.modulate.a = 0.18
+	## Elapsed-time driven plate progression — ease-out open, then short settle.
 	var lid := create_tween()
-	lid.tween_method(_show_frame_progress, 0.0, 1.0, OPEN_DURATION_SEC).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
-	lid.parallel().tween_callback(_emit_burst).set_delay(OPEN_DURATION_SEC * 0.45)
+	lid.tween_method(_show_frame_progress, 0.0, 1.0, OPEN_DURATION_SEC).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	lid.parallel().tween_callback(_emit_burst).set_delay(OPEN_DURATION_SEC * 0.48)
 	await lid.finished
 	if _skip:
 		_apply_finished_state()
 		return
-	var hold := create_tween()
-	hold.tween_property(_interior_glow, "modulate:a", 0.88, 0.16).set_trans(Tween.TRANS_SINE)
-	await hold.finished
+	var settle := create_tween()
+	settle.tween_property(_interior_glow, "modulate:a", 0.82, SETTLE_SEC).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	await settle.finished
 	if _show_scroll_on_finish and not _skip:
 		await _emerge_scroll()
 		scroll_emerged.emit(get_scroll_global_center())
 	else:
-		await get_tree().create_timer(0.10).timeout
+		await get_tree().create_timer(0.08).timeout
 	_front_lip.modulate.a = 0.0
+	_anticipation_y = 0.0
+	_apply_root_offset()
 
 
 func _emerge_scroll() -> void:
 	if _rolled_scroll == null:
 		return
-	## Only after lid is substantially open (~70–80%).
-	if _open_amount < 0.75:
+	## Scroll only after the chest is substantially / fully open.
+	if _open_amount < 0.92:
 		var catchup := create_tween()
-		catchup.tween_method(_show_frame_progress, _open_amount, 1.0, 0.12)
+		catchup.tween_method(_show_frame_progress, _open_amount, 1.0, 0.10)
 		await catchup.finished
+	chest_state = ChestState.OPEN_SCROLL_EMERGING
+	sfx_scroll_emerge.emit()
 	_scroll_spawn.visible = true
 	_rolled_scroll.visible = true
 	_rolled_scroll.modulate.a = 0.0
-	_rolled_scroll.scale = Vector2(0.72, 0.72)
-	var start_y := _scroll_spawn.size.y * 0.48
-	var end_y := 4.0
+	_rolled_scroll.scale = Vector2(0.86, 0.86)
+	## Start fully inside the clipped spawn (hidden in the cavity), then rise.
+	var start_y := _scroll_spawn.size.y * 0.62
+	var end_y := 6.0
 	_rolled_scroll.position = Vector2(0, start_y)
-	_rolled_scroll.rotation_degrees = -4.0
-	_front_lip.modulate.a = 0.90
+	_rolled_scroll.rotation_degrees = -3.0
+	_front_lip.modulate.a = 0.85
 	var glow_up := create_tween()
-	glow_up.tween_property(_interior_glow, "modulate:a", 0.95, 0.35).set_trans(Tween.TRANS_SINE)
+	glow_up.tween_property(_interior_glow, "modulate:a", 0.92, 0.18).set_trans(Tween.TRANS_SINE)
+	await glow_up.finished
+	if _skip:
+		return
 	var tw := create_tween()
 	tw.set_parallel(true)
-	tw.tween_property(_rolled_scroll, "modulate:a", 1.0, 0.40).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-	tw.tween_property(_rolled_scroll, "position:y", end_y, 0.62).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
-	tw.tween_property(_rolled_scroll, "scale", Vector2(1.04, 1.04), 0.62).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-	tw.tween_property(_rolled_scroll, "rotation_degrees", 0.0, 0.62).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tw.tween_property(_rolled_scroll, "modulate:a", 1.0, 0.36).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tw.tween_property(_rolled_scroll, "position:y", end_y, SCROLL_EMERGE_SEC).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	tw.tween_property(_rolled_scroll, "scale", Vector2(1.0, 1.0), SCROLL_EMERGE_SEC).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tw.tween_property(_rolled_scroll, "rotation_degrees", 0.0, SCROLL_EMERGE_SEC).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	await tw.finished
 	var settle := create_tween()
 	settle.set_parallel(true)
-	settle.tween_property(_rolled_scroll, "scale", Vector2.ONE, 0.14).set_trans(Tween.TRANS_SINE)
-	settle.tween_property(_front_lip, "modulate:a", 0.18, 0.16)
+	settle.tween_property(_front_lip, "modulate:a", 0.16, 0.14)
 	await settle.finished
 
 
@@ -632,13 +698,14 @@ func hide_rolled_scroll() -> void:
 
 func _apply_finished_state() -> void:
 	_show_frame_progress(1.0)
-	_apply_centered_zoom(1.06 if not reduced_motion else 1.03)
+	_anticipation_y = 0.0
+	_apply_root_offset()
 	_front_lip.modulate.a = 0.0
 	if _show_scroll_on_finish and _rolled_scroll:
 		_scroll_spawn.visible = true
 		_rolled_scroll.visible = true
 		_rolled_scroll.modulate.a = 1.0
-		_rolled_scroll.position = Vector2(0, 4.0)
+		_rolled_scroll.position = Vector2(0, 6.0)
 		_rolled_scroll.scale = Vector2.ONE
 		_rolled_scroll.rotation_degrees = 0.0
 	else:

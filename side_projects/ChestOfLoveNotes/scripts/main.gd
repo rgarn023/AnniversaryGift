@@ -71,7 +71,8 @@ func _ready() -> void:
 
 
 func _startup_navigate() -> void:
-	## Charoite Games cold boot (~1.5–2s). Session restore runs during the hold.
+	## Charoite Games cold boot: min ≈2.0s visible + app ready, then short fade.
+	## Session restore runs concurrently; splash never force-closes early.
 	_startup_done = false
 	var boot := CharoiteBoot.new()
 	boot.z_index = 80
@@ -81,6 +82,9 @@ func _startup_navigate() -> void:
 	if state.is_online():
 		_pending_restore = await state.restore_session_if_possible()
 		_log_secure_debug("startup_after_restore")
+	## Allow boot to leave only after restore/offline gate AND min visible time.
+	if is_instance_valid(boot) and boot.has_method("mark_app_ready"):
+		boot.mark_app_ready()
 	if not boot.is_finished():
 		await boot.finished
 	_boot_duration_sec = boot.measured_duration_sec()
