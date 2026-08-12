@@ -212,7 +212,7 @@ func _test_build_version() -> void:
 	_assert(BuildFlags.APP_VERSION_CODE >= 26, "versionCode >= 24")
 	var preset := FileAccess.get_file_as_string("res://export_presets.cfg")
 	_assert(
-		preset.contains("ChestOfLoveNotes-v43-chest-hierarchy-beach-fix-debug.apk")
+		preset.contains("ChestOfLoveNotes-v44-chest-render-scroll-beach-polish-debug.apk")
 		or preset.contains("ChestOfLoveNotes-v40-chest-smoothing-hidden-fix-debug.apk")
 		or preset.contains("ChestOfLoveNotes-v39-chest-polish-debug.apk")
 		or preset.contains("ChestOfLoveNotes-fantasy-sheet-chest-debug.apk")
@@ -220,7 +220,7 @@ func _test_build_version() -> void:
 		or preset.contains("splash-timing-chest-animation-fix-debug.apk"),
 		"export APK name"
 	)
-	_assert(preset.contains("version/code=43") or preset.contains("version/code=42") or preset.contains("version/code=41") or preset.contains("version/code=40") or preset.contains("version/code=39") or preset.contains("version/code=37") or preset.contains("version/code=33") or preset.contains("version/code=32"), "export versionCode recent")
+	_assert(preset.contains("version/code=44") or preset.contains("version/code=42") or preset.contains("version/code=41") or preset.contains("version/code=40") or preset.contains("version/code=39") or preset.contains("version/code=37") or preset.contains("version/code=33") or preset.contains("version/code=32"), "export versionCode recent")
 	_assert(BuildFlags.PRIVATE_ONBOARDING_BUILD == true, "private onboarding still enabled")
 	_assert(BuildFlags.SHOW_ONBOARDING_BANNER == false, "onboarding banner hidden in APKs")
 	_assert(FileAccess.file_exists("res://assets/icons/app_icon_1024.png"), "app icon present")

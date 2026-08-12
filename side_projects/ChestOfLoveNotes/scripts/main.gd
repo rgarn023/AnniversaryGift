@@ -971,13 +971,13 @@ func _show_main_chest() -> void:
 	_chest.custom_minimum_size = Vector2(chest_w, chest_h)
 	_chest.size = Vector2(chest_w, chest_h)
 	_chest.clip_contents = false
-	## Responsive plant: center X, lower-middle of stage so sand reads below and
+	## Responsive plant: center X, lower sand band so the chest plants into sand with room below and
 	## open lid / raised scroll stay clear of the message zone + bottom nav.
 	_chest.set_anchors_preset(Control.PRESET_CENTER)
 	_chest.anchor_left = 0.5
 	_chest.anchor_right = 0.5
-	_chest.anchor_top = 0.58
-	_chest.anchor_bottom = 0.58
+	_chest.anchor_top = 0.62
+	_chest.anchor_bottom = 0.62
 	_chest.offset_left = -chest_w * 0.5
 	_chest.offset_right = chest_w * 0.5
 	_chest.offset_top = -chest_h * 0.50

@@ -1,5 +1,5 @@
 extends SceneTree
-## v43: Chest hierarchy restore + opaque chest + improved beach.
+## v44: Chest render + layered scroll + beach polish.
 
 var _passed: int = 0
 var _failed: int = 0
@@ -19,7 +19,7 @@ func _assert(cond: bool, label: String) -> void:
 
 
 func _run() -> void:
-	print("=== Chest hierarchy + beach fix (v43) ===")
+	print("=== Chest render + scroll + beach polish (v44) ===")
 	var chest := FileAccess.get_file_as_string("res://scripts/chest/treasure_chest.gd")
 	var env_script := FileAccess.get_file_as_string("res://scripts/chest/chest_environment.gd")
 	var main := FileAccess.get_file_as_string("res://scripts/main.gd")
@@ -36,14 +36,24 @@ func _run() -> void:
 	_assert(chest.contains("EMPTY_FRAME_COUNT := 13"), "13 empty frames")
 	_assert(chest.contains("SCROLL_FRAME_COUNT := 13"), "13 scroll frames")
 	_assert(chest.contains("SCROLL_REVEAL_START_INDEX := 8"), "scroll starts after open")
-	_assert(chest.contains("OPEN_DURATION_SEC := 1.48"), "open ~1.48s")
-	_assert(chest.contains("SCROLL_EMERGE_SEC := 1.22"), "scroll emerge duration")
-	_assert(chest.contains("REWARD_HOLD_SEC := 0.40"), "reward hold before note")
+	_assert(chest.contains("SCROLL_LAYER"), "separate scroll layer constant")
+	_assert(chest.contains("FRONT_RIM"), "front rim occlusion layer")
+	_assert(chest.contains("CONTACT_SHADOW"), "contact shadow grounding")
+	_assert(chest.contains("EMPTY_POSE_WEIGHTS"), "weighted pose cadence")
+	_assert(chest.contains("OPEN_DURATION_SEC := 1.52"), "open ~1.52s")
+	_assert(chest.contains("SCROLL_EMERGE_SEC := 1.18"), "scroll emerge duration")
+	_assert(chest.contains("REWARD_HOLD_SEC := 0.45"), "reward hold ~0.45s")
 	_assert(chest.contains("EMPHASIS_SCALE := 1.003"), "tiny settle scale only")
+	_assert(chest.contains("GLOW_OPEN_A := 0.055"), "reduced glow open")
+	_assert(chest.contains("GLOW_SETTLE_A := 0.08"), "reduced glow settle")
 	_assert(chest.contains("_set_badge_suppressed"), "badge hidden during reward")
 	_assert(chest.contains("_enforce_chest_opaque"), "opaque chest enforcement")
 	_assert(chest.contains("soft_glow_pulse.png"), "soft radial glow")
 	_assert(chest.contains("exactly one TextureRect") or chest.contains("one TextureRect chest"), "one chest sprite comment")
+	_assert(chest.contains("ScrollLayer"), "scroll layer node")
+	_assert(chest.contains("ChestFrontRim"), "rim node")
+	_assert(chest.contains("ChestContactShadow"), "shadow node")
+	_assert(chest.contains("_set_scroll_rise_amount"), "layered scroll rise")
 	_assert(not chest.contains("ColorRect.new()"), "no rectangular ColorRect glow")
 	_assert(chest.contains("_ease_open_curve"), "quality easing")
 	_assert(chest.contains("_frame_index_from_progress"), "variable frame timing")
@@ -55,6 +65,7 @@ func _run() -> void:
 	_assert(not chest.contains('scale.y =') and not chest.contains('"scale:y"'), "no scale.y squash")
 	_assert(chest.contains("preload_assets"), "preload")
 	_assert(chest.contains("Color(0.55, 0.55, 0.75, 1.0)"), "locked silhouette keeps alpha 1")
+	_assert(chest.contains("draw_w * 0.76"), "badge near chest")
 	_assert(main.contains("LoveNotesChest.preload_assets"), "main preloads chest")
 	_assert(main.contains("ChestEnvironment.preload_assets"), "main preloads beach env")
 	_assert(main.contains("ChestEnvironment.new()"), "chest screen mounts environment")
@@ -76,7 +87,7 @@ func _run() -> void:
 	_assert(main.contains("_fill_inventory_list_deferred"), "deferred loading flash")
 	_assert(main.contains("create_timer(0.28)"), "loading delay threshold")
 	_assert(main.contains("chest_h := 326"), "taller chest host")
-	_assert(main.contains("anchor_top = 0.58") or main.contains("lower-middle"), "chest planted lower-middle")
+	_assert(main.contains("anchor_top = 0.62") or main.contains("anchor_top = 0.58") or main.contains("lower sand") or main.contains("lower-middle"), "chest planted lower-middle")
 	_assert(main.contains("viewport-centered CHEST") or main.contains("Title centered") or main.contains("Landing reward hierarchy"), "viewport-centered CHEST title")
 	_assert(main.contains("PRESET_TOP_RIGHT") or main.contains("PRESET_CENTER_RIGHT"), "refresh right-anchored")
 	_assert(not main.contains("header.add_child(MobileUi.make_page_title(\"Chest\""), "title not HBox-centered")
@@ -85,17 +96,19 @@ func _run() -> void:
 	_assert(prep.contains("CANVAS_H = 496"), "prep taller canvas")
 	_assert(prep.contains("BASE_Y = 367"), "foot lock absolute")
 	_assert(prep.contains("normalize_body_scale"), "body scale normalization")
+	_assert(prep.contains("normalize_body_exposure"), "body exposure normalization")
 	_assert(prep.contains("harden_chest_opacity"), "frame opacity harden")
 	_assert(prep.contains("build_clean_scroll_layer") or prep.contains("extract_scroll_layer"), "clean scroll layer")
-	_assert(prep.contains("scroll_mini.png"), "clean parchment donor")
+	_assert(prep.contains("scroll_rolled.png"), "high-res parchment donor preferred")
 	_assert(prep.contains("compose_scroll_rise"), "raised scroll composites")
 	_assert(prep.contains("shared empty sheet") or prep.contains("GLOW_SHEET"), "shared empty opening")
 	_assert(prep.contains("empty_picks = [0, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]"), "clean empty picks only")
 	_assert(prep.contains("cell_top_clipped"), "rejects damaged top cells")
-	_assert(prep.contains("(-48, \"scroll_fully\")"), "final scroll rise dy")
+	_assert(prep.contains('(-78, "scroll_fully")'), "final scroll rise dy farther")
 	_assert(beach_prep.contains("default_beach.png"), "beach generator output")
 	_assert(beach_prep.contains("shoreline_y") or beach_prep.contains("paint_sand"), "detailed shoreline/sand")
-	_assert(beach_prep.contains("paint_ocean") or beach_prep.contains("ripple"), "ocean detail")
+	_assert(beach_prep.contains("paint_ocean"), "ocean detail")
+	_assert(beach_prep.contains("no repetitive stripe") or beach_prep.contains("not geometric stripe"), "non-striped ocean")
 	_assert(env_script.contains("ENV_DEFAULT_BEACH"), "environment id constant")
 	_assert(env_script.contains("apply_environment"), "swappable environment API")
 	_assert(env_script.contains("EnvironmentBaseFill") or env_script.contains("_base_fill"), "opaque beach base fill")
@@ -116,6 +129,7 @@ func _run() -> void:
 	_assert(FileAccess.file_exists("res://assets/art/chest/soft_glow_pulse.png"), "soft glow asset")
 	_assert(FileAccess.file_exists("res://assets/art/chest/scroll_rolled.png"), "scroll layer asset")
 	_assert(FileAccess.file_exists("res://assets/art/chest/chest_front_rim.png"), "front rim asset")
+	_assert(FileAccess.file_exists("res://assets/art/chest/chest_contact_shadow.png"), "contact shadow asset")
 	_assert(
 		FileAccess.file_exists("res://assets/art/background/environments/default_beach.png"),
 		"default beach environment art"
@@ -131,12 +145,12 @@ func _run() -> void:
 		)
 	_assert(not FileAccess.file_exists("res://assets/art/chest/frames/empty/empty_13.png"), "no empty_13")
 
-	_assert(flags.contains("APP_VERSION_CODE := 43"), "versionCode 43")
-	_assert(preset.contains("version/code=43"), "export 43")
-	_assert(preset.contains("0.1.43-chest-hierarchy-beach-fix"), "version name")
-	_assert(preset.contains("v43-chest-hierarchy-beach-fix-debug.apk"), "APK name")
+	_assert(flags.contains("APP_VERSION_CODE := 44"), "versionCode 44")
+	_assert(preset.contains("version/code=44"), "export 44")
+	_assert(preset.contains("0.1.44-chest-render-scroll-beach-polish"), "version name")
+	_assert(preset.contains("v44-chest-render-scroll-beach-polish-debug.apk"), "APK name")
 	_assert(gitignore.contains("*.apk"), "apks ignored by default")
-	_assert(export_sh.contains("v43-chest-hierarchy-beach-fix-debug.apk"), "export default")
+	_assert(export_sh.contains("v44-chest-render-scroll-beach-polish-debug.apk"), "export default")
 
 	## Runtime: preload + pose snaps for representative states.
 	LoveNotesChest.preload_assets()
@@ -150,6 +164,9 @@ func _run() -> void:
 	await process_frame
 	_assert(node._empty_frames.size() == 13, "empty frames loaded")
 	_assert(node._scroll_frames.size() == 13, "scroll frames loaded")
+	_assert(node._scroll_view != null, "scroll layer present")
+	_assert(node._rim_view != null, "rim layer present")
+	_assert(node._shadow_view != null, "shadow layer present")
 	_assert(env._bg != null and env._bg.texture != null, "beach texture loaded")
 	_assert(env.environment_id == ChestEnvironment.ENV_DEFAULT_BEACH, "default beach id active")
 	_assert(env._base_fill != null, "opaque environment base present")
@@ -167,7 +184,7 @@ func _run() -> void:
 		{"name": "scroll_mostly", "p": 0.92, "scroll": true},
 		{"name": "scroll_fully", "p": 1.0, "scroll": true},
 	]
-	var validate_dir := OS.get_user_data_dir().path_join("chest_validate_v43")
+	var validate_dir := OS.get_user_data_dir().path_join("chest_validate_v44")
 	DirAccess.make_dir_recursive_absolute(validate_dir)
 	var prev_body_span := -1.0
 	for s in states:
@@ -182,6 +199,13 @@ func _run() -> void:
 		_assert(not str(tex.resource_path).contains("chest_lid.png"), "state %s not old lid" % s["name"])
 		## Exactly one chest TextureRect — never a second overlay node.
 		_assert(node._frame_view != null, "state %s single frame view" % s["name"])
+		## Scroll layering: upper scroll in front of chest; rim only when rising.
+		if bool(s["scroll"]) and float(s["p"]) >= LoveNotesChest.SCROLL_REVEAL_START_PROGRESS:
+			_assert(node._scroll_view.visible, "state %s scroll visible" % s["name"])
+			_assert(node._rim_view.visible, "state %s rim visible" % s["name"])
+			_assert(node._scroll_view.z_index > node._frame_view.z_index, "state %s scroll above chest" % s["name"])
+			_assert(node._rim_view.z_index > node._scroll_view.z_index, "state %s rim above scroll" % s["name"])
+			_assert(node._scroll_rise > 0.0, "state %s scroll rising" % s["name"])
 		if tex is ImageTexture or tex is CompressedTexture2D:
 			var img: Image = tex.get_image()
 			if img:
@@ -226,10 +250,15 @@ func _run() -> void:
 				print("WROTE ", path)
 		_assert(node._frame_index >= 0, "state %s frame index" % s["name"])
 
-	## Scroll final frame should sit on the raised reward pose (index 12).
+	## Final unread reward: chest holds fully-open empty pose; scroll layer fully risen.
 	node._set_frame_progress(1.0, true)
 	await process_frame
-	_assert(node._frame_index == 12, "final scroll frame index 12")
+	_assert(node._frame_index == 12, "final open chest frame index 12")
+	_assert(node._scroll_rise >= 0.999, "final scroll rise complete")
+	_assert(node._scroll_view.visible, "final scroll layer visible")
+	_assert(node._rim_view.visible, "final rim layer visible")
+	_assert(node._rim_view.z_index > node._scroll_view.z_index, "rim occludes lower scroll only")
+	_assert(node._scroll_view.z_index > node._frame_view.z_index, "upper scroll above chest")
 
 	## Badge suppressed while reward animation is active.
 	node.set_unread_badge(3)
@@ -237,6 +266,9 @@ func _run() -> void:
 	_assert(node._badge.visible == false, "badge hidden during animation")
 	node._set_badge_suppressed(false)
 	_assert(node._badge.visible == true, "badge restored after animation")
+	## Badge sits near chest artwork, not horizon.
+	_assert(node._badge.position.y > node._anchor_rect.position.y, "badge below canvas top")
+	_assert(node._badge.position.y < node._anchor_rect.position.y + node._anchor_rect.size.y * 0.55, "badge in upper chest band")
 
 	## Rapid-tap guard
 	node.animating = true
