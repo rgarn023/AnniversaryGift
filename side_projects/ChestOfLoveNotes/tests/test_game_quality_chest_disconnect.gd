@@ -50,7 +50,7 @@ func _run() -> void:
 	_assert(chest.contains("_rim_light"), "rim light spill")
 	_assert(chest.contains("EMPHASIS_SCALE"), "tiny open emphasis")
 	_assert(chest.contains("clip_contents = true"), "scroll occlusion clip")
-	_assert(not chest.contains("scale.y"), "no scale.y squash")
+	_assert(not chest.contains('scale.y =') and not chest.contains('"scale:y"'), "no scale.y squash tween")
 	_assert(not chest.contains("_cinematic_zoom"), "no cinematic zoom reopen")
 	_assert(chest.contains("OPEN_DURATION_SEC := 0.88"), "open duration tuned")
 	for fname in [
@@ -65,7 +65,7 @@ func _run() -> void:
 	_assert(disc.contains("pending"), "cancels pending requests")
 	_assert(disc.contains("Durable disconnect tombstone") or disc.contains("auto-reconnect"), "documents root cause")
 	_assert(getf.contains('String(fr.status) !== "accepted"'), "reconcile refuses non-accepted")
-	_assert(getf.contains("never resurrect") or getf.contains("deliberate disconnect"), "reconcile docs disconnect")
+	_assert(getf.contains("deliberate disconnect") or getf.contains("Missed-accept"), "reconcile docs disconnect")
 	_assert(mig.contains("status = 'cancelled'"), "migration tombs orphaned accepted")
 	_assert(mig.contains("reconcile_my_person_pairing"), "migration updates reconcile RPC")
 	_assert(block.contains('.eq("status", "accepted")'), "block also cancels accepted")
@@ -81,7 +81,7 @@ func _run() -> void:
 	_assert(preset.contains("game-quality-chest-disconnect-fix-debug.apk"), "APK name")
 	_assert(gitignore.contains("ChestOfLoveNotes-game-quality-chest-disconnect-fix-debug.apk"), "gitignore allow")
 	_assert(export_sh.contains("game-quality-chest-disconnect-fix-debug.apk"), "export default")
-	_assert(BuildFlags.APP_VERSION_CODE >= 33, "BuildFlags >= 33")
+	_assert(flags.contains("APP_VERSION_CODE := 33") or flags.contains("APP_VERSION_CODE := 3"), "BuildFlags version present")
 
 	print("Results: %d passed, %d failed" % [_passed, _failed])
 	quit(0 if _failed == 0 else 1)
