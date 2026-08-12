@@ -8,6 +8,7 @@
     "base_y": 367.0,
     "visual_cx": 192.1033018313857,
     "visual_cy": 280.62015311155386,
+    "lower_body_w": 183.0,
     "canvas": [
       384,
       496
@@ -19,10 +20,11 @@
     "src_index": 6,
     "label": "pre_crack",
     "crop_h": 256,
-    "base_cx": 237.0,
+    "base_cx": 238.0,
     "base_y": 367.0,
-    "visual_cx": 191.9089329551951,
-    "visual_cy": 270.08932853289366,
+    "visual_cx": 192.19075817407693,
+    "visual_cy": 267.1880298921098,
+    "lower_body_w": 183.0,
     "canvas": [
       384,
       496
@@ -34,10 +36,11 @@
     "src_index": 7,
     "label": "crack",
     "crop_h": 256,
-    "base_cx": 236.0,
+    "base_cx": 237.0,
     "base_y": 367.0,
-    "visual_cx": 192.18319036383957,
-    "visual_cy": 269.2613217434496,
+    "visual_cx": 191.5324381649473,
+    "visual_cy": 265.5478782307055,
+    "lower_body_w": 183.0,
     "canvas": [
       384,
       496
@@ -49,10 +52,11 @@
     "src_index": 8,
     "label": "early_glow",
     "crop_h": 256,
-    "base_cx": 234.0,
+    "base_cx": 235.0,
     "base_y": 367.0,
-    "visual_cx": 191.71338127763403,
-    "visual_cy": 269.0039833787911,
+    "visual_cx": 192.19077351218803,
+    "visual_cy": 265.306662710378,
+    "lower_body_w": 183.0,
     "canvas": [
       384,
       496
@@ -64,10 +68,11 @@
     "src_index": 9,
     "label": "early_open",
     "crop_h": 256,
-    "base_cx": 235.0,
+    "base_cx": 236.0,
     "base_y": 367.0,
-    "visual_cx": 191.67765893025586,
-    "visual_cy": 269.53790181396124,
+    "visual_cx": 192.3465833103276,
+    "visual_cy": 266.2078652959227,
+    "lower_body_w": 184.0,
     "canvas": [
       384,
       496
@@ -79,10 +84,11 @@
     "src_index": 10,
     "label": "opening",
     "crop_h": 256,
-    "base_cx": 233.0,
+    "base_cx": 234.0,
     "base_y": 367.0,
-    "visual_cx": 191.59393776299987,
-    "visual_cy": 269.4242091089655,
+    "visual_cx": 192.42368149173862,
+    "visual_cy": 266.07804988968206,
+    "lower_body_w": 184.0,
     "canvas": [
       384,
       496
@@ -94,10 +100,11 @@
     "src_index": 11,
     "label": "opening_more",
     "crop_h": 256,
-    "base_cx": 235.0,
+    "base_cx": 236.0,
     "base_y": 367.0,
-    "visual_cx": 191.63187276720942,
-    "visual_cy": 270.26324973240145,
+    "visual_cx": 192.01814203199407,
+    "visual_cy": 267.11093691684965,
+    "lower_body_w": 183.0,
     "canvas": [
       384,
       496
@@ -109,10 +116,11 @@
     "src_index": 12,
     "label": "half_open",
     "crop_h": 242,
-    "base_cx": 232.0,
+    "base_cx": 234.0,
     "base_y": 367.0,
-    "visual_cx": 192.0359807237848,
-    "visual_cy": 268.267097408214,
+    "visual_cx": 192.42800055781927,
+    "visual_cy": 263.3108936620295,
+    "lower_body_w": 183.0,
     "canvas": [
       384,
       496
@@ -124,10 +132,11 @@
     "src_index": 13,
     "label": "more_open",
     "crop_h": 201,
-    "base_cx": 230.0,
+    "base_cx": 232.0,
     "base_y": 367.0,
-    "visual_cx": 192.2664489390369,
-    "visual_cy": 270.0648446878389,
+    "visual_cx": 191.84453484461218,
+    "visual_cy": 265.09476412438005,
+    "lower_body_w": 183.0,
     "canvas": [
       384,
       496
@@ -139,10 +148,11 @@
     "src_index": 14,
     "label": "near_full",
     "crop_h": 201,
-    "base_cx": 227.5,
+    "base_cx": 228.0,
     "base_y": 367.0,
-    "visual_cx": 191.8798678305583,
-    "visual_cy": 270.27758854274913,
+    "visual_cx": 191.57127317597104,
+    "visual_cy": 264.65279965197504,
+    "lower_body_w": 183.0,
     "canvas": [
       384,
       496
@@ -154,10 +164,11 @@
     "src_index": 15,
     "label": "three_quarter",
     "crop_h": 201,
-    "base_cx": 227.0,
+    "base_cx": 229.0,
     "base_y": 367.0,
-    "visual_cx": 191.74826684633024,
-    "visual_cy": 270.54812539955367,
+    "visual_cx": 192.43512061118403,
+    "visual_cy": 265.0828874627324,
+    "lower_body_w": 183.0,
     "canvas": [
       384,
       496
@@ -169,10 +180,11 @@
     "src_index": 16,
     "label": "nearly_open",
     "crop_h": 201,
-    "base_cx": 227.5,
+    "base_cx": 229.0,
     "base_y": 367.0,
-    "visual_cx": 192.11080680927594,
-    "visual_cy": 270.6298513418184,
+    "visual_cx": 191.84929982689349,
+    "visual_cy": 265.7127437458784,
+    "lower_body_w": 184.0,
     "canvas": [
       384,
       496
@@ -184,10 +196,11 @@
     "src_index": 17,
     "label": "fully_open",
     "crop_h": 201,
-    "base_cx": 228.0,
+    "base_cx": 230.0,
     "base_y": 367.0,
-    "visual_cx": 191.8741606816035,
-    "visual_cy": 271.3339408671325,
+    "visual_cx": 191.56184336352763,
+    "visual_cy": 266.2737182550966,
+    "lower_body_w": 184.0,
     "canvas": [
       384,
       496

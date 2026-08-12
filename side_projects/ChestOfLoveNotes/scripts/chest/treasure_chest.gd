@@ -39,16 +39,17 @@ const FRAME_CANVAS := Vector2(384, 496)
 const EMPTY_FRAME_COUNT := 13
 const SCROLL_FRAME_COUNT := 13
 ## Variable-feel open: faster through similar early poses, smoother into fully-open.
-const OPEN_DURATION_SEC := 1.28
+const OPEN_DURATION_SEC := 1.36
 const OPEN_DURATION_RM := 0.36
 const ANTICIPATION_SEC := 0.10
-const SETTLE_SEC := 0.14
-const MAGICAL_SWELL_SEC := 0.16
-## Scroll emerge after chest is open enough — enough time for peek→partial→full.
-const SCROLL_EMERGE_SEC := 0.96
+const SETTLE_SEC := 0.12
+const MAGICAL_SWELL_SEC := 0.14
+## Scroll emerge after chest is open enough — peek→partial→halfway→clear reveal.
+const SCROLL_EMERGE_SEC := 1.08
 ## Short intentional hold on the completed reward pose before note handoff.
 const REWARD_HOLD_SEC := 0.40
-const EMPHASIS_SCALE := 1.006
+## Tiny settle pulse only — must not read as the chest growing while opening.
+const EMPHASIS_SCALE := 1.003
 ## First scroll-peek frame index in the scroll sequence (scroll_08).
 const SCROLL_REVEAL_START_INDEX := 8
 
@@ -394,28 +395,37 @@ func _frame_index_from_progress(eased: float, emerge_scroll: bool) -> int:
 	if max_i <= 0:
 		return 0
 	if emerge_scroll and max_i >= SCROLL_REVEAL_START_INDEX:
-		## First ~55% → open chest; remainder → progressive scroll rise.
+		## First ~52% → open chest; remainder → progressive scroll rise stages.
 		var open_end := SCROLL_REVEAL_START_INDEX - 1
-		if eased < 0.55:
-			var t_open := eased / 0.55
-			## Faster through early near-duplicates; linger on meaningful lid poses.
+		if eased < 0.52:
+			var t_open := eased / 0.52
+			## Faster through early near-duplicates; linger on mid/late lid poses.
 			t_open = t_open * t_open * (3.0 - 2.0 * t_open)
-			if t_open < 0.28:
-				t_open *= 1.15
+			if t_open < 0.26:
+				t_open *= 1.18
+			elif t_open > 0.72:
+				## Extra dwell approaching fully-open before scroll peeks.
+				t_open = 0.72 + (t_open - 0.72) * 0.82
 			return clampi(int(floor(t_open * float(open_end) + 0.0001)), 0, open_end)
-		var t_scroll := (eased - 0.55) / 0.45
-		## Ease-out so peek→partial→halfway each read before the final reveal.
+		var t_scroll := (eased - 0.52) / 0.48
+		## Smoothstep then gentle ease-out so peek→partial→halfway each read.
+		t_scroll = t_scroll * t_scroll * (3.0 - 2.0 * t_scroll)
 		t_scroll = 1.0 - (1.0 - t_scroll) * (1.0 - t_scroll)
 		var scroll_span := max_i - open_end
-		## Bias so we don't snap from peek to fully in one step.
+		## Hold final reward frame a bit longer inside the progress window.
 		var stepped := t_scroll * float(scroll_span)
+		if t_scroll > 0.88:
+			return max_i
 		return clampi(open_end + int(floor(stepped + 0.0001)), open_end, max_i)
 	## Empty open: quicker early similar poses, smoother approach into fully-open.
 	var shaped := eased
-	if eased < 0.30:
-		shaped = eased * 1.12
-	elif eased > 0.70:
-		shaped = 0.70 + (eased - 0.70) * 0.78
+	if eased < 0.28:
+		shaped = eased * 1.16
+	elif eased < 0.55:
+		## Steady through early-open → half-open (reduces visible stepping).
+		shaped = 0.28 * 1.16 + (eased - 0.28) * 0.92
+	elif eased > 0.72:
+		shaped = 0.72 + (eased - 0.72) * 0.74
 	return clampi(int(round(clampf(shaped, 0.0, 1.0) * float(max_i))), 0, max_i)
 
 

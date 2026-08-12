@@ -56,8 +56,9 @@ func _ready() -> void:
 	cold_bg.z_index = -10
 	add_child(cold_bg)
 	MobileUi.ensure_loaded()
-	## Preload chest art before first tap to avoid decode hitch.
+	## Preload chest art + default beach environment before first tap.
 	LoveNotesChest.preload_assets()
+	ChestEnvironment.preload_assets()
 	state = AppState.new()
 	state.bootstrap()
 	state.reduced_motion = MobileUi.reduced_motion()
@@ -848,6 +849,15 @@ func _show_main_chest() -> void:
 	_last_chest_counts = counts.duplicate()
 
 	_begin_nav_transition()
+	## Chest-only default twilight beach — modular, replaceable later (no IAP/store).
+	var chest_env := ChestEnvironment.new()
+	chest_env.name = "ChestEnvironment"
+	chest_env.environment_id = ChestEnvironment.ENV_DEFAULT_BEACH
+	chest_env.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	chest_env.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	chest_env.z_index = -2
+	_screen_host.add_child(chest_env)
+
 	var margin := MarginContainer.new()
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	MobileUi.apply_safe_margins(margin, _nav_content_inset())
@@ -857,15 +867,35 @@ func _show_main_chest() -> void:
 	root.add_theme_constant_override("separation", 10)
 	margin.add_child(root)
 
-	var header := HBoxContainer.new()
+	## Title centered on the viewport — not in the asymmetric gap beside refresh.
+	var header := Control.new()
 	header.custom_minimum_size.y = MobileUi.font_touch(48)
+	header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	root.add_child(header)
-	header.add_child(MobileUi.make_page_title("Chest", _title_font()))
+	var title := MobileUi.make_page_title("Chest", _title_font())
+	title.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	## Stronger outline so CHEST stays readable over the beach sky.
+	title.add_theme_color_override("font_shadow_color", Color(0.02, 0.03, 0.08, 0.85))
+	title.add_theme_constant_override("shadow_offset_x", 0)
+	title.add_theme_constant_override("shadow_offset_y", 1)
+	title.add_theme_constant_override("outline_size", 4)
+	title.add_theme_color_override("font_outline_color", Color(0.03, 0.04, 0.10, 0.72))
+	header.add_child(title)
 	var refresh_btn := Button.new()
 	refresh_btn.text = "↻"
 	refresh_btn.tooltip_text = "Refresh"
+	refresh_btn.focus_mode = Control.FOCUS_NONE
 	refresh_btn.custom_minimum_size = Vector2(MobileUi.font_touch(48), MobileUi.font_touch(48))
 	MobileUi.style_button(refresh_btn, 48)
+	refresh_btn.set_anchors_preset(Control.PRESET_CENTER_RIGHT)
+	refresh_btn.anchor_left = 1.0
+	refresh_btn.anchor_right = 1.0
+	refresh_btn.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	refresh_btn.offset_left = -MobileUi.font_touch(48)
+	refresh_btn.offset_right = 0.0
+	refresh_btn.offset_top = 0.0
+	refresh_btn.offset_bottom = MobileUi.font_touch(48)
 	refresh_btn.pressed.connect(func() -> void:
 		state.invalidate_cache("chest")
 		_show_main_chest()
@@ -915,6 +945,10 @@ func _show_main_chest() -> void:
 	your.offset_top = 8
 	your.offset_bottom = 36
 	MobileUi.apply_label(your, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY)
+	your.add_theme_color_override("font_shadow_color", Color(0.02, 0.03, 0.08, 0.75))
+	your.add_theme_constant_override("shadow_offset_y", 1)
+	your.add_theme_constant_override("outline_size", 3)
+	your.add_theme_color_override("font_outline_color", Color(0.03, 0.04, 0.10, 0.65))
 	chest_area.add_child(your)
 
 	_chest = LoveNotesChest.new()
@@ -926,7 +960,9 @@ func _show_main_chest() -> void:
 	_chest.custom_minimum_size = Vector2(chest_w, chest_h)
 	_chest.size = Vector2(chest_w, chest_h)
 	_chest.clip_contents = false
-	_chest.position = Vector2(-chest_w * 0.5, -chest_h * 0.46)
+	## Bias downward so the planted base meets the beach sand (not floating in water).
+	## Keep enough headroom above for open lid + raised scroll.
+	_chest.position = Vector2(-chest_w * 0.5, -chest_h * 0.18)
 	_chest.z_index = 5
 	_chest.tapped.connect(_on_chest_tapped)
 	chest_area.clip_contents = false
@@ -944,6 +980,10 @@ func _show_main_chest() -> void:
 	_empty_chest_hint.offset_bottom = -8
 	_empty_chest_hint.modulate.a = 0.0
 	MobileUi.apply_label(_empty_chest_hint, MobileUi.SIZE_SECONDARY, MobileUi.COLOR_HELPER)
+	_empty_chest_hint.add_theme_color_override("font_shadow_color", Color(0.02, 0.03, 0.08, 0.80))
+	_empty_chest_hint.add_theme_constant_override("shadow_offset_y", 1)
+	_empty_chest_hint.add_theme_constant_override("outline_size", 3)
+	_empty_chest_hint.add_theme_color_override("font_outline_color", Color(0.03, 0.04, 0.10, 0.70))
 	chest_area.add_child(_empty_chest_hint)
 
 	if state.is_demo():

@@ -8,6 +8,7 @@
     "base_y": 367.0,
     "visual_cx": 191.74856965795146,
     "visual_cy": 287.99136214380957,
+    "lower_body_w": 163.0,
     "canvas": [
       384,
       496
@@ -19,10 +20,11 @@
     "src_index": 3,
     "label": "pre_crack",
     "crop_h": 256,
-    "base_cx": 231.0,
+    "base_cx": 230.0,
     "base_y": 367.0,
-    "visual_cx": 192.2983555579052,
-    "visual_cy": 285.5120720295731,
+    "visual_cx": 191.61979545488282,
+    "visual_cy": 285.4809176327391,
+    "lower_body_w": 164.0,
     "canvas": [
       384,
       496
@@ -38,6 +40,7 @@
     "base_y": 367.0,
     "visual_cx": 192.15624867741482,
     "visual_cy": 285.55020635741954,
+    "lower_body_w": 163.0,
     "canvas": [
       384,
       496
@@ -51,8 +54,9 @@
     "crop_h": 256,
     "base_cx": 228.0,
     "base_y": 367.0,
-    "visual_cx": 191.72493083274543,
-    "visual_cy": 284.44506211226206,
+    "visual_cx": 191.54808138173829,
+    "visual_cy": 281.68315646299845,
+    "lower_body_w": 163.0,
     "canvas": [
       384,
       496
@@ -66,8 +70,9 @@
     "crop_h": 256,
     "base_cx": 227.0,
     "base_y": 367.0,
-    "visual_cx": 191.73305252214269,
-    "visual_cy": 284.1241557912619,
+    "visual_cx": 191.54794932236797,
+    "visual_cy": 281.18161172990887,
+    "lower_body_w": 164.0,
     "canvas": [
       384,
       496
@@ -83,6 +88,7 @@
     "base_y": 367.0,
     "visual_cx": 192.20660938970872,
     "visual_cy": 284.05184625379525,
+    "lower_body_w": 163.0,
     "canvas": [
       384,
       496
@@ -96,8 +102,9 @@
     "crop_h": 192,
     "base_cx": 223.0,
     "base_y": 367.0,
-    "visual_cx": 191.82739497025602,
-    "visual_cy": 285.5994917053299,
+    "visual_cx": 191.7073946818129,
+    "visual_cy": 284.84728675321185,
+    "lower_body_w": 164.0,
     "canvas": [
       384,
       496
@@ -111,8 +118,9 @@
     "crop_h": 161,
     "base_cx": 221.0,
     "base_y": 367.0,
-    "visual_cx": 192.25866035277116,
-    "visual_cy": 282.3502372151863,
+    "visual_cx": 191.62814655093348,
+    "visual_cy": 279.30586698227444,
+    "lower_body_w": 164.0,
     "canvas": [
       384,
       496
@@ -121,13 +129,14 @@
   },
   {
     "file": "scroll_08.png",
-    "src_index": "peek13_y300",
+    "src_index": "rise_dy14",
     "label": "scroll_peek",
     "crop_h": 0,
-    "base_cx": 221.0,
+    "base_cx": 222.0,
     "base_y": 367.0,
-    "visual_cx": 192.484721289875,
-    "visual_cy": 282.9415341347222,
+    "visual_cx": 192.31618336599124,
+    "visual_cy": 281.310483495285,
+    "lower_body_w": 164.0,
     "canvas": [
       384,
       496
@@ -136,13 +145,14 @@
   },
   {
     "file": "scroll_09.png",
-    "src_index": "peek13_y285",
+    "src_index": "rise_dy4",
     "label": "scroll_partial",
     "crop_h": 0,
-    "base_cx": 220.0,
+    "base_cx": 221.0,
     "base_y": 367.0,
-    "visual_cx": 191.7325369211219,
-    "visual_cy": 282.97469401647396,
+    "visual_cx": 191.7408492040608,
+    "visual_cy": 279.6662363259097,
+    "lower_body_w": 164.0,
     "canvas": [
       384,
       496
@@ -151,13 +161,14 @@
   },
   {
     "file": "scroll_10.png",
-    "src_index": 13,
+    "src_index": "rise_dy-8",
     "label": "scroll_rising",
-    "crop_h": 162,
-    "base_cx": 221.5,
+    "crop_h": 0,
+    "base_cx": 221.0,
     "base_y": 367.0,
-    "visual_cx": 192.49974830009572,
-    "visual_cy": 281.8131543577561,
+    "visual_cx": 191.5154299244497,
+    "visual_cy": 279.23756487905945,
+    "lower_body_w": 164.0,
     "canvas": [
       384,
       496
@@ -166,13 +177,14 @@
   },
   {
     "file": "scroll_11.png",
-    "src_index": 14,
+    "src_index": "rise_dy-22",
     "label": "scroll_halfway",
-    "crop_h": 163,
-    "base_cx": 221.5,
+    "crop_h": 0,
+    "base_cx": 222.0,
     "base_y": 367.0,
-    "visual_cx": 192.27264674984886,
-    "visual_cy": 281.425283440532,
+    "visual_cx": 192.26086433894056,
+    "visual_cy": 278.3115121014008,
+    "lower_body_w": 164.0,
     "canvas": [
       384,
       496
@@ -181,13 +193,14 @@
   },
   {
     "file": "scroll_12.png",
-    "src_index": 15,
+    "src_index": "rise_dy-40",
     "label": "scroll_fully",
-    "crop_h": 163,
-    "base_cx": 221.0,
+    "crop_h": 0,
+    "base_cx": 222.0,
     "base_y": 367.0,
-    "visual_cx": 192.4456677766524,
-    "visual_cy": 281.63555670521254,
+    "visual_cx": 192.32973423863032,
+    "visual_cy": 277.1000961515585,
+    "lower_body_w": 164.0,
     "canvas": [
       384,
       496
