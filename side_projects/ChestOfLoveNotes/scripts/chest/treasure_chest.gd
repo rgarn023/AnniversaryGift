@@ -34,17 +34,18 @@ const FRAME_ART := "res://assets/art/chest/frames/"
 const EMPTY_DIR := FRAME_ART + "empty/"
 const SCROLL_DIR := FRAME_ART + "scroll/"
 const SOFT_GLOW := "res://assets/art/chest/soft_glow_pulse.png"
-const FRAME_CANVAS := Vector2(384, 448)
-const EMPTY_FRAME_COUNT := 14
+## Taller transparent canvas (foot locked at y=367) — extra headroom, no plant drift.
+const FRAME_CANVAS := Vector2(384, 496)
+const EMPTY_FRAME_COUNT := 13
 const SCROLL_FRAME_COUNT := 13
-## Slightly longer, variable-feel open (easing holds key poses).
-const OPEN_DURATION_SEC := 1.18
+## Variable-feel open: faster through similar early poses, smoother into fully-open.
+const OPEN_DURATION_SEC := 1.28
 const OPEN_DURATION_RM := 0.36
 const ANTICIPATION_SEC := 0.10
 const SETTLE_SEC := 0.14
 const MAGICAL_SWELL_SEC := 0.16
-## Scroll emerge portion after chest is open enough (frame path).
-const SCROLL_EMERGE_SEC := 0.82
+## Scroll emerge after chest is open enough — enough time for peek→partial→full.
+const SCROLL_EMERGE_SEC := 0.96
 ## Short intentional hold on the completed reward pose before note handoff.
 const REWARD_HOLD_SEC := 0.40
 const EMPHASIS_SCALE := 1.006
@@ -363,11 +364,12 @@ func configure(state: ChestState, show_final_label: bool = false) -> void:
 
 func _ease_open_curve(t: float) -> float:
 	## Small resistance → smooth acceleration → gentle ease-out (no elastic bounce).
-	## Slightly heavier early ease so lid poses linger and read less stepped.
+	## Heavier early ease so near-duplicate early poses pass quicker in shaped indexing,
+	## while mid/late lid progression reads clearly.
 	t = clampf(t, 0.0, 1.0)
 	var s := t * t * (3.0 - 2.0 * t)
 	var early := t * t * t
-	return lerpf(early, s, 0.78)
+	return lerpf(early, s, 0.72)
 
 
 func _select_sequence(emerge_scroll: bool) -> void:
@@ -386,6 +388,37 @@ func _show_frame_index(index: int) -> void:
 		_frame_view.texture = tex
 
 
+func _frame_index_from_progress(eased: float, emerge_scroll: bool) -> int:
+	## Map eased 0–1 onto discrete frames with deliberate dwell (no ghost crossfades).
+	var max_i := _active_frames.size() - 1
+	if max_i <= 0:
+		return 0
+	if emerge_scroll and max_i >= SCROLL_REVEAL_START_INDEX:
+		## First ~55% → open chest; remainder → progressive scroll rise.
+		var open_end := SCROLL_REVEAL_START_INDEX - 1
+		if eased < 0.55:
+			var t_open := eased / 0.55
+			## Faster through early near-duplicates; linger on meaningful lid poses.
+			t_open = t_open * t_open * (3.0 - 2.0 * t_open)
+			if t_open < 0.28:
+				t_open *= 1.15
+			return clampi(int(floor(t_open * float(open_end) + 0.0001)), 0, open_end)
+		var t_scroll := (eased - 0.55) / 0.45
+		## Ease-out so peek→partial→halfway each read before the final reveal.
+		t_scroll = 1.0 - (1.0 - t_scroll) * (1.0 - t_scroll)
+		var scroll_span := max_i - open_end
+		## Bias so we don't snap from peek to fully in one step.
+		var stepped := t_scroll * float(scroll_span)
+		return clampi(open_end + int(floor(stepped + 0.0001)), open_end, max_i)
+	## Empty open: quicker early similar poses, smoother approach into fully-open.
+	var shaped := eased
+	if eased < 0.30:
+		shaped = eased * 1.12
+	elif eased > 0.70:
+		shaped = 0.70 + (eased - 0.70) * 0.78
+	return clampi(int(round(clampf(shaped, 0.0, 1.0) * float(max_i))), 0, max_i)
+
+
 func _set_frame_progress(raw_amount: float, emerge_scroll: bool) -> void:
 	var linear := clampf(raw_amount, 0.0, 1.0)
 	_open_amount = linear
@@ -393,41 +426,18 @@ func _set_frame_progress(raw_amount: float, emerge_scroll: bool) -> void:
 	if _active_frames.is_empty():
 		return
 	var eased := _ease_open_curve(linear)
-	var max_i := _active_frames.size() - 1
-	var idx: int
-	if emerge_scroll and max_i >= SCROLL_REVEAL_START_INDEX:
-		## Hold opening poses until the chest is substantially open, then reveal scroll.
-		## First ~58% of eased time → frames before scroll peek; remainder → scroll rise.
-		var open_end := SCROLL_REVEAL_START_INDEX - 1
-		if eased < 0.58:
-			var t_open := eased / 0.58
-			## Bias toward spending more time on mid-open poses.
-			t_open = t_open * t_open * (3.0 - 2.0 * t_open)
-			idx = int(round(t_open * float(open_end)))
-		else:
-			var t_scroll := (eased - 0.58) / 0.42
-			## Smooth scroll rise — avoid jumping straight to a flat full sheet.
-			t_scroll = 1.0 - (1.0 - t_scroll) * (1.0 - t_scroll)
-			idx = open_end + int(round(t_scroll * float(max_i - open_end)))
-	else:
-		## Variable dwell: spend a bit more time near closed + near fully open.
-		var shaped := eased
-		if eased < 0.35:
-			shaped = eased * 0.85
-		elif eased > 0.75:
-			shaped = 0.75 + (eased - 0.75) * 0.72
-		idx = int(round(clampf(shaped, 0.0, 1.0) * float(max_i)))
+	var idx := _frame_index_from_progress(eased, emerge_scroll)
 	_show_frame_index(idx)
 
-	## Particles after interior is visibly open.
-	if not reduced_motion and linear >= 0.28 and not _particles_armed:
+	## Particles after interior is visibly open — reinforce lid motion, don't outpace it.
+	if not reduced_motion and linear >= 0.26 and not _particles_armed:
 		_particles_armed = true
 		_emit_burst()
 		_start_motes()
 		## Soft cavity glow eases in with the open — radial, not rectangular.
 		if _glow_pulse:
 			var g := create_tween()
-			g.tween_property(_glow_pulse, "modulate:a", 0.16, 0.22).set_trans(Tween.TRANS_SINE)
+			g.tween_property(_glow_pulse, "modulate:a", 0.14, 0.28).set_trans(Tween.TRANS_SINE)
 
 	## Scroll emerge signal once peek frames are reached.
 	if emerge_scroll and not _scroll_emerged_emitted and idx >= SCROLL_REVEAL_START_INDEX:
@@ -683,8 +693,8 @@ func _open_full() -> void:
 	## Advance frames with easing so key poses dwell longer (less stepped).
 	var dur := OPEN_DURATION_SEC
 	if _show_scroll_on_finish:
-		## Extra time so scroll does not start rising until chest is open enough.
-		dur = OPEN_DURATION_SEC + SCROLL_EMERGE_SEC * 0.42
+		## Extra time so scroll peeks then rises with intermediate stages.
+		dur = OPEN_DURATION_SEC + SCROLL_EMERGE_SEC * 0.55
 
 	var lid := create_tween()
 	lid.tween_method(
@@ -692,7 +702,7 @@ func _open_full() -> void:
 		0.0,
 		1.0,
 		dur
-	).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN_OUT)
+	).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	await lid.finished
 	if _skip:
 		_apply_finished_state()

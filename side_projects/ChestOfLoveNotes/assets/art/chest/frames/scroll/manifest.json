@@ -10,8 +10,9 @@
     "visual_cy": 287.99136214380957,
     "canvas": [
       384,
-      448
-    ]
+      496
+    ],
+    "canvas_top_hits": 0
   },
   {
     "file": "scroll_01.png",
@@ -24,8 +25,9 @@
     "visual_cy": 285.5120720295731,
     "canvas": [
       384,
-      448
-    ]
+      496
+    ],
+    "canvas_top_hits": 0
   },
   {
     "file": "scroll_02.png",
@@ -38,8 +40,9 @@
     "visual_cy": 285.55020635741954,
     "canvas": [
       384,
-      448
-    ]
+      496
+    ],
+    "canvas_top_hits": 0
   },
   {
     "file": "scroll_03.png",
@@ -52,8 +55,9 @@
     "visual_cy": 284.44506211226206,
     "canvas": [
       384,
-      448
-    ]
+      496
+    ],
+    "canvas_top_hits": 0
   },
   {
     "file": "scroll_04.png",
@@ -66,8 +70,9 @@
     "visual_cy": 284.1241557912619,
     "canvas": [
       384,
-      448
-    ]
+      496
+    ],
+    "canvas_top_hits": 0
   },
   {
     "file": "scroll_05.png",
@@ -80,8 +85,9 @@
     "visual_cy": 284.05184625379525,
     "canvas": [
       384,
-      448
-    ]
+      496
+    ],
+    "canvas_top_hits": 0
   },
   {
     "file": "scroll_06.png",
@@ -94,8 +100,9 @@
     "visual_cy": 285.5994917053299,
     "canvas": [
       384,
-      448
-    ]
+      496
+    ],
+    "canvas_top_hits": 0
   },
   {
     "file": "scroll_07.png",
@@ -108,13 +115,44 @@
     "visual_cy": 282.3502372151863,
     "canvas": [
       384,
-      448
-    ]
+      496
+    ],
+    "canvas_top_hits": 0
   },
   {
     "file": "scroll_08.png",
-    "src_index": 13,
+    "src_index": "peek13_y300",
     "label": "scroll_peek",
+    "crop_h": 0,
+    "base_cx": 221.0,
+    "base_y": 367.0,
+    "visual_cx": 192.484721289875,
+    "visual_cy": 282.9415341347222,
+    "canvas": [
+      384,
+      496
+    ],
+    "canvas_top_hits": 0
+  },
+  {
+    "file": "scroll_09.png",
+    "src_index": "peek13_y285",
+    "label": "scroll_partial",
+    "crop_h": 0,
+    "base_cx": 220.0,
+    "base_y": 367.0,
+    "visual_cx": 191.7325369211219,
+    "visual_cy": 282.97469401647396,
+    "canvas": [
+      384,
+      496
+    ],
+    "canvas_top_hits": 0
+  },
+  {
+    "file": "scroll_10.png",
+    "src_index": 13,
+    "label": "scroll_rising",
     "crop_h": 162,
     "base_cx": 221.5,
     "base_y": 367.0,
@@ -122,13 +160,14 @@
     "visual_cy": 281.8131543577561,
     "canvas": [
       384,
-      448
-    ]
+      496
+    ],
+    "canvas_top_hits": 0
   },
   {
-    "file": "scroll_09.png",
+    "file": "scroll_11.png",
     "src_index": 14,
-    "label": "scroll_rising",
+    "label": "scroll_halfway",
     "crop_h": 163,
     "base_cx": 221.5,
     "base_y": 367.0,
@@ -136,13 +175,14 @@
     "visual_cy": 281.425283440532,
     "canvas": [
       384,
-      448
-    ]
+      496
+    ],
+    "canvas_top_hits": 0
   },
   {
-    "file": "scroll_10.png",
+    "file": "scroll_12.png",
     "src_index": 15,
-    "label": "scroll_mid",
+    "label": "scroll_fully",
     "crop_h": 163,
     "base_cx": 221.0,
     "base_y": 367.0,
@@ -150,35 +190,8 @@
     "visual_cy": 281.63555670521254,
     "canvas": [
       384,
-      448
-    ]
-  },
-  {
-    "file": "scroll_11.png",
-    "src_index": 16,
-    "label": "scroll_high",
-    "crop_h": 163,
-    "base_cx": 220.0,
-    "base_y": 367.0,
-    "visual_cx": 192.481407442664,
-    "visual_cy": 280.13802950975725,
-    "canvas": [
-      384,
-      448
-    ]
-  },
-  {
-    "file": "scroll_12.png",
-    "src_index": 17,
-    "label": "scroll_complete",
-    "crop_h": 163,
-    "base_cx": 219.0,
-    "base_y": 367.0,
-    "visual_cx": 191.96266783664987,
-    "visual_cy": 279.2116909732206,
-    "canvas": [
-      384,
-      448
-    ]
+      496
+    ],
+    "canvas_top_hits": 0
   }
 ]

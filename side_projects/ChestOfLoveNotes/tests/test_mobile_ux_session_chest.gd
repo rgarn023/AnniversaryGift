@@ -162,6 +162,9 @@ func _test_chest_frames() -> void:
 	_assert(main_src.contains("No new scrolls today"), "empty open message present")
 	_assert(main_src.contains("_begin_nav_transition"), "prepared page transitions")
 	_assert(main_src.contains("Hidden from Sent history"), "sent hide uses snackbar text")
+	_assert(main_src.contains("_add_inventory_filter_rows"), "shared chest filter rows")
+	_assert(main_src.contains('_add_inventory_filter_rows(root, "saved")'), "Saved keeps Hidden sibling")
+	_assert(main_src.contains("_dismiss_toast_if_visible"), "dismiss toast before chest reward")
 	_assert(main_src.contains("_hide_sent_with_undo"), "sent hide undo path")
 	_assert(main_src.contains("No sent scrolls yet"), "sent empty state present")
 	_assert(main_src.contains("scroll_rolled.png"), "sent empty uses vector scroll icon")
@@ -209,7 +212,7 @@ func _test_build_version() -> void:
 		or preset.contains("splash-timing-chest-animation-fix-debug.apk"),
 		"export APK name"
 	)
-	_assert(preset.contains("version/code=39") or preset.contains("version/code=37") or preset.contains("version/code=33") or preset.contains("version/code=32"), "export versionCode recent")
+	_assert(preset.contains("version/code=40") or preset.contains("version/code=39") or preset.contains("version/code=37") or preset.contains("version/code=33") or preset.contains("version/code=32"), "export versionCode recent")
 	_assert(BuildFlags.PRIVATE_ONBOARDING_BUILD == true, "private onboarding still enabled")
 	_assert(BuildFlags.SHOW_ONBOARDING_BANNER == false, "onboarding banner hidden in APKs")
 	_assert(FileAccess.file_exists("res://assets/icons/app_icon_1024.png"), "app icon present")

@@ -347,6 +347,24 @@ func _show_toast(text: String) -> void:
 	_show_snackbar(text, "", Callable())
 
 
+func _dismiss_toast_if_visible() -> void:
+	if _toast_panel == null or not is_instance_valid(_toast_panel):
+		return
+	if not _toast_panel.visible:
+		return
+	if _toast_tween != null and is_instance_valid(_toast_tween):
+		_toast_tween.kill()
+	_toast_tween = create_tween()
+	_toast_tween.tween_property(_toast_panel, "modulate:a", 0.0, 0.18)
+	_toast_tween.tween_callback(func() -> void:
+		if is_instance_valid(_toast_panel):
+			_toast_panel.visible = false
+		_toast_action = Callable()
+		if _toast_action_btn:
+			_toast_action_btn.visible = false
+	)
+
+
 func _show_snackbar(text: String, action_label: String = "", action: Callable = Callable()) -> void:
 	## Temporary snackbar above bottom navigation — optional Undo action.
 	_position_snackbar()
@@ -360,7 +378,8 @@ func _show_snackbar(text: String, action_label: String = "", action: Callable = 
 	if _toast_tween != null and is_instance_valid(_toast_tween):
 		_toast_tween.kill()
 	_toast_tween = create_tween()
-	_toast_tween.tween_interval(3.2 if _toast_action_btn and _toast_action_btn.visible else 2.0)
+	## Shorter default so "Scroll sent." clears before chest reward usually begins.
+	_toast_tween.tween_interval(3.2 if _toast_action_btn and _toast_action_btn.visible else 1.55)
 	_toast_tween.tween_property(_toast_panel, "modulate:a", 0.0, 0.28)
 	_toast_tween.tween_callback(func() -> void:
 		if is_instance_valid(_toast_panel):
@@ -901,9 +920,9 @@ func _show_main_chest() -> void:
 	_chest = LoveNotesChest.new()
 	_chest.reduced_motion = state.reduced_motion
 	_chest.set_anchors_preset(Control.PRESET_CENTER)
-	## Slightly taller host so the taller production canvas / rising scroll is not clipped.
+	## Host sized to the taller production canvas so scroll/lid headroom is not clipped.
 	var chest_w := 252
-	var chest_h := 292
+	var chest_h := 326
 	_chest.custom_minimum_size = Vector2(chest_w, chest_h)
 	_chest.size = Vector2(chest_w, chest_h)
 	_chest.clip_contents = false
@@ -1029,6 +1048,8 @@ func _on_chest_tapped() -> void:
 		return
 	if _chest == null or _chest.animating or _chest_action_busy:
 		return
+	## Dismiss send confirmation so it does not compete with the reward animation.
+	_dismiss_toast_if_visible()
 	_chest_action_busy = true
 	_chest.set_interaction_enabled(false)
 	var has_new := (
@@ -1252,6 +1273,72 @@ func _style_inventory_filter_chip(chip: Button, selected: bool) -> void:
 		chip.add_theme_stylebox_override("pressed", gold)
 
 
+func _add_inventory_filter_rows(root: VBoxContainer, selected_filter: String) -> void:
+	## Shared filter grid — every sibling chip stays visible regardless of selection.
+	var chip_h := MobileUi.font_touch(MobileUi.FILTER_CHIP_H)
+	var row1 := HBoxContainer.new()
+	row1.add_theme_constant_override("separation", 8)
+	root.add_child(row1)
+	var row2 := HBoxContainer.new()
+	row2.add_theme_constant_override("separation", 8)
+	root.add_child(row2)
+	for f in [
+		["all", "Current", row1],
+		["unread", "Unread", row1],
+		["locked", "Locked", row1],
+		["requests", "Requests", row2],
+		["saved", "Saved", row2],
+		["hidden", "Hidden", row2],
+	]:
+		var fname: String = str(f[0])
+		var parent: HBoxContainer = f[2]
+		var chip := _make_button(str(f[1]), func() -> void:
+			if fname == "saved":
+				_inventory_filter = "saved"
+				_show_saved()
+			else:
+				_inventory_filter = fname
+				_show_inventory()
+		, Vector2(0, chip_h))
+		_style_inventory_filter_chip(chip, selected_filter == fname)
+		parent.add_child(chip)
+
+
+func _fill_inventory_list_deferred(list: VBoxContainer, screen_name: String, load_cb: Callable) -> void:
+	## Avoid flashing "Loading…" on instant/cached switches; only show after a short wait.
+	var loading: Label = null
+	var show_loading := func() -> void:
+		if not is_instance_valid(list) or _current_screen != screen_name:
+			return
+		if list.get_child_count() > 0:
+			return
+		loading = Label.new()
+		loading.text = "Loading…"
+		loading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		MobileUi.apply_label(loading, MobileUi.SIZE_BODY, MobileUi.COLOR_HELPER)
+		list.add_child(loading)
+	var loading_timer := get_tree().create_timer(0.14)
+	loading_timer.timeout.connect(show_loading)
+	var items: Array[Dictionary] = await load_cb.call()
+	if _current_screen != screen_name:
+		return
+	for c in list.get_children():
+		c.queue_free()
+	if items.is_empty():
+		var empty := Label.new()
+		if screen_name == "saved":
+			empty.text = "No saved scrolls yet. Open a note to keep it here."
+			MobileUi.apply_label(empty, MobileUi.SIZE_BODY, MobileUi.COLOR_HELPER)
+		else:
+			empty.text = "Your chest is empty.\n\nNew love notes will appear here."
+			empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			MobileUi.apply_label(empty, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY)
+		list.add_child(empty)
+		return
+	for item in items:
+		list.add_child(_make_chest_item_row(item))
+
+
 func _show_inventory() -> void:
 	if not _guard_private_chest():
 		return
@@ -1291,34 +1378,7 @@ func _show_inventory() -> void:
 		title.add_theme_font_override("font", _title_font())
 	header.add_child(title)
 
-	## Two-row filter grid — all categories visible without horizontal scroll.
-	var chip_h := MobileUi.font_touch(MobileUi.FILTER_CHIP_H)
-	var row1 := HBoxContainer.new()
-	row1.add_theme_constant_override("separation", 8)
-	root.add_child(row1)
-	var row2 := HBoxContainer.new()
-	row2.add_theme_constant_override("separation", 8)
-	root.add_child(row2)
-	for f in [
-		["all", "Current", row1],
-		["unread", "Unread", row1],
-		["locked", "Locked", row1],
-		["requests", "Requests", row2],
-		["saved", "Saved", row2],
-		["hidden", "Hidden", row2],
-	]:
-		var fname: String = str(f[0])
-		var parent: HBoxContainer = f[2]
-		var chip := _make_button(str(f[1]), func() -> void:
-			if fname == "saved":
-				_inventory_filter = "saved"
-				_show_saved()
-			else:
-				_inventory_filter = fname
-				_show_inventory()
-		, Vector2(0, chip_h))
-		_style_inventory_filter_chip(chip, _inventory_filter == fname)
-		parent.add_child(chip)
+	_add_inventory_filter_rows(root, _inventory_filter)
 
 	var scroll := _wire_scroll(ScrollContainer.new())
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -1329,31 +1389,15 @@ func _show_inventory() -> void:
 	scroll.add_child(list)
 	MobileUi.enable_touch_scroll_on_tree(list)
 
-	## Paint shell first; fill items after (network may await).
-	var loading := Label.new()
-	loading.text = "Loading…"
-	loading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	MobileUi.apply_label(loading, MobileUi.SIZE_BODY, MobileUi.COLOR_HELPER)
-	list.add_child(loading)
-
-	var items: Array[Dictionary] = []
-	if state.is_demo():
-		items = state.demo.get_chest_items(_inventory_filter)
-	elif state.is_online():
-		items = await _load_online_chest_items(_inventory_filter)
-	if _current_screen != "inventory":
-		return
-	for c in list.get_children():
-		c.queue_free()
-	if items.is_empty():
-		var empty := Label.new()
-		empty.text = "Your chest is empty.\n\nNew love notes will appear here."
-		empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		MobileUi.apply_label(empty, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY)
-		list.add_child(empty)
-		return
-	for item in items:
-		list.add_child(_make_chest_item_row(item))
+	var filter_name := _inventory_filter
+	await _fill_inventory_list_deferred(list, "inventory", func() -> Array[Dictionary]:
+		if state.is_demo():
+			return state.demo.get_chest_items(filter_name)
+		if state.is_online():
+			return await _load_online_chest_items(filter_name)
+		var empty: Array[Dictionary] = []
+		return empty
+	)
 
 
 func _make_chest_item_row(item: Dictionary) -> PanelContainer:
@@ -1497,35 +1541,8 @@ func _show_saved() -> void:
 	if _title_font():
 		title.add_theme_font_override("font", _title_font())
 	header.add_child(title)
-	var chip_h := MobileUi.font_touch(MobileUi.FILTER_CHIP_H)
-	var row1 := HBoxContainer.new()
-	row1.add_theme_constant_override("separation", 8)
-	root.add_child(row1)
-	var row2 := HBoxContainer.new()
-	row2.add_theme_constant_override("separation", 8)
-	root.add_child(row2)
-	for f in [
-		["all", "Current", row1],
-		["unread", "Unread", row1],
-		["locked", "Locked", row1],
-		["requests", "Requests", row2],
-		["saved", "Saved", row2],
-	]:
-		var fname: String = str(f[0])
-		var parent: HBoxContainer = f[2]
-		var chip := _make_button(str(f[1]), func() -> void:
-			if fname == "saved":
-				_inventory_filter = "saved"
-				_show_saved()
-			else:
-				_inventory_filter = fname
-				_show_inventory()
-		, Vector2(0, chip_h))
-		_style_inventory_filter_chip(chip, fname == "saved")
-		parent.add_child(chip)
-	var row2_pad := Control.new()
-	row2_pad.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row2.add_child(row2_pad)
+	## Same sibling filter set as inventory — Hidden must remain visible when Saved is selected.
+	_add_inventory_filter_rows(root, "saved")
 	var scroll := _wire_scroll(ScrollContainer.new())
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	root.add_child(scroll)
@@ -1534,29 +1551,14 @@ func _show_saved() -> void:
 	list.add_theme_constant_override("separation", MobileUi.GAP_CARDS)
 	scroll.add_child(list)
 	MobileUi.enable_touch_scroll_on_tree(list)
-	var loading := Label.new()
-	loading.text = "Loading…"
-	loading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	MobileUi.apply_label(loading, MobileUi.SIZE_BODY, MobileUi.COLOR_HELPER)
-	list.add_child(loading)
-	var items: Array[Dictionary] = []
-	if state.is_demo():
-		items = state.demo.get_saved_scrolls()
-	elif state.is_online():
-		items = await _load_online_saved_items()
-	if _current_screen != "saved":
-		return
-	for c in list.get_children():
-		c.queue_free()
-	if items.is_empty():
-		var empty := Label.new()
-		empty.text = "No saved scrolls yet. Open a note to keep it here."
-		MobileUi.apply_label(empty, MobileUi.SIZE_BODY, MobileUi.COLOR_HELPER)
-		list.add_child(empty)
-		return
-	for item in items:
-		list.add_child(_make_chest_item_row(item))
-
+	await _fill_inventory_list_deferred(list, "saved", func() -> Array[Dictionary]:
+		if state.is_demo():
+			return state.demo.get_saved_scrolls()
+		if state.is_online():
+			return await _load_online_saved_items()
+		var empty: Array[Dictionary] = []
+		return empty
+	)
 
 func _toggle_favorite(scroll_id: String, is_favorite: bool) -> void:
 	if state.is_demo():
