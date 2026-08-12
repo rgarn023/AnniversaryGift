@@ -13,6 +13,7 @@ static var _tex_cache: Dictionary = {}
 static var _preloaded: bool = false
 
 var environment_id: String = ENV_DEFAULT_BEACH
+var _base_fill: ColorRect
 var _bg: TextureRect
 var _top_shade: ColorRect
 var _horizon_sheen: ColorRect
@@ -54,6 +55,14 @@ func _ready() -> void:
 
 
 func _build() -> void:
+	## Opaque twilight fill so the global starfield never peeks through.
+	_base_fill = ColorRect.new()
+	_base_fill.name = "EnvironmentBaseFill"
+	_base_fill.color = Color(0.06, 0.09, 0.18, 1.0)
+	_base_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_base_fill.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(_base_fill)
+
 	_bg = TextureRect.new()
 	_bg.name = "EnvironmentArt"
 	_bg.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
@@ -67,7 +76,7 @@ func _build() -> void:
 	## Soft upper shade for title / filter readability — not an opaque panel.
 	_top_shade = ColorRect.new()
 	_top_shade.name = "TopReadabilityShade"
-	_top_shade.color = Color(0.04, 0.05, 0.12, 0.42)
+	_top_shade.color = Color(0.04, 0.06, 0.12, 0.28)
 	_top_shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_top_shade)
 
@@ -97,14 +106,16 @@ func _layout() -> void:
 	var area := size
 	if area.x < 8.0 or area.y < 8.0:
 		return
+	if _base_fill:
+		_base_fill.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	if _bg:
 		_bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	if _top_shade:
 		_top_shade.position = Vector2.ZERO
-		_top_shade.size = Vector2(area.x, area.y * 0.22)
+		_top_shade.size = Vector2(area.x, area.y * 0.18)
 	if _horizon_sheen:
-		## Horizon sits ~52% down the authored beach art.
-		_horizon_sheen.position = Vector2(0.0, area.y * 0.50)
+		## Horizon sits ~47% down the authored beach art.
+		_horizon_sheen.position = Vector2(0.0, area.y * 0.47)
 		_horizon_sheen.size = Vector2(area.x, area.y * 0.035)
 
 
@@ -119,4 +130,4 @@ func _process(delta: float) -> void:
 
 ## Sand contact band as a fraction of this control's height (for chest grounding).
 func sand_contact_y_frac() -> float:
-	return 0.70
+	return 0.72

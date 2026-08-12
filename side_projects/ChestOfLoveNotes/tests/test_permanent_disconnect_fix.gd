@@ -71,10 +71,10 @@ func _run() -> void:
 	_assert(chest.contains("LoveNotesChest") or chest.contains("class_name LoveNotesChest"), "chest file untouched structurally")
 
 	## VERSION
-	_assert(flags.contains("APP_VERSION_CODE := 41") or flags.contains("APP_VERSION_CODE := 40") or flags.contains("APP_VERSION_CODE := 39") or flags.contains("APP_VERSION_CODE := 35") or flags.contains("APP_VERSION_CODE := 34"), "versionCode 34+")
-	_assert(preset.contains("version/code=41") or preset.contains("version/code=40") or preset.contains("version/code=39") or preset.contains("version/code=38") or preset.contains("version/code=35") or preset.contains("version/code=34"), "export 34+")
+	_assert(flags.contains("APP_VERSION_CODE := 42") or flags.contains("APP_VERSION_CODE := 41") or flags.contains("APP_VERSION_CODE := 40") or flags.contains("APP_VERSION_CODE := 39") or flags.contains("APP_VERSION_CODE := 35") or flags.contains("APP_VERSION_CODE := 34"), "versionCode 34+")
+	_assert(preset.contains("version/code=42") or preset.contains("version/code=41") or preset.contains("version/code=40") or preset.contains("version/code=39") or preset.contains("version/code=38") or preset.contains("version/code=35") or preset.contains("version/code=34"), "export 34+")
 	_assert(
-		preset.contains("v41-beach-chest-polish-debug.apk")
+		preset.contains("v42-one-chest-beach-layout-debug.apk")
 		or preset.contains("v40-chest-smoothing-hidden-fix-debug.apk")
 		or preset.contains("v39-chest-polish-debug.apk")
 		or preset.contains("backend-disconnect-fix-debug.apk")
@@ -88,7 +88,7 @@ func _run() -> void:
 		"gitignore"
 	)
 	_assert(
-		export_sh.contains("v41-beach-chest-polish-debug.apk")
+		export_sh.contains("v42-one-chest-beach-layout-debug.apk")
 		or export_sh.contains("v40-chest-smoothing-hidden-fix-debug.apk")
 		or export_sh.contains("v39-chest-polish-debug.apk")
 		or export_sh.contains("backend-disconnect-fix-debug.apk")

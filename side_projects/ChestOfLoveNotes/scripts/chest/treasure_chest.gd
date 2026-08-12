@@ -2,8 +2,10 @@ extends Control
 class_name LoveNotesChest
 ## Fantasy sheet chest animation — deterministic cropped frames from the
 ## authoritative sprite sheets (not the old hinged bronze lid path).
-## Empty opens use glowing_treasure_chest_opening_sprite_sheet frames.
-## Unread opens use magical_treasure_chest_animation_sheet frames (scroll baked in).
+## Empty + unread share glowing-sheet opening geometry (one chest family).
+## Unread then diverges into clean parchment scroll-rise composites.
+## Exactly one TextureRect chest sprite is visible at all times — never a
+## second chest overlay / contaminated scroll-layer chest pixels.
 
 signal tapped
 signal open_finished
@@ -38,14 +40,14 @@ const SOFT_GLOW := "res://assets/art/chest/soft_glow_pulse.png"
 const FRAME_CANVAS := Vector2(384, 496)
 const EMPTY_FRAME_COUNT := 13
 const SCROLL_FRAME_COUNT := 13
-## Variable-feel open: faster through similar early poses, smoother into fully-open.
-const OPEN_DURATION_SEC := 1.36
+## Shared open cadence for empty + unread: closed→crack→quarter→half→late→open.
+const OPEN_DURATION_SEC := 1.42
 const OPEN_DURATION_RM := 0.36
 const ANTICIPATION_SEC := 0.10
 const SETTLE_SEC := 0.12
 const MAGICAL_SWELL_SEC := 0.14
-## Scroll emerge after chest is open enough — peek→partial→halfway→clear reveal.
-const SCROLL_EMERGE_SEC := 1.08
+## Scroll emerge after fully open — peek→partial→halfway→clear→final.
+const SCROLL_EMERGE_SEC := 1.16
 ## Short intentional hold on the completed reward pose before note handoff.
 const REWARD_HOLD_SEC := 0.40
 ## Tiny settle pulse only — must not read as the chest growing while opening.
@@ -391,41 +393,42 @@ func _show_frame_index(index: int) -> void:
 
 func _frame_index_from_progress(eased: float, emerge_scroll: bool) -> int:
 	## Map eased 0–1 onto discrete frames with deliberate dwell (no ghost crossfades).
+	## Never blends two textures — one frame index → one TextureRect.
 	var max_i := _active_frames.size() - 1
 	if max_i <= 0:
 		return 0
 	if emerge_scroll and max_i >= SCROLL_REVEAL_START_INDEX:
-		## First ~52% → open chest; remainder → progressive scroll rise stages.
+		## First ~56% → shared opening cadence; remainder → scroll rise only.
 		var open_end := SCROLL_REVEAL_START_INDEX - 1
-		if eased < 0.52:
-			var t_open := eased / 0.52
-			## Faster through early near-duplicates; linger on mid/late lid poses.
+		if eased < 0.56:
+			var t_open := eased / 0.56
+			## Match empty shaping: closed→crack→quarter→half→late→fully open.
 			t_open = t_open * t_open * (3.0 - 2.0 * t_open)
-			if t_open < 0.26:
-				t_open *= 1.18
-			elif t_open > 0.72:
-				## Extra dwell approaching fully-open before scroll peeks.
-				t_open = 0.72 + (t_open - 0.72) * 0.82
+			if t_open < 0.24:
+				t_open *= 1.14
+			elif t_open < 0.55:
+				t_open = 0.24 * 1.14 + (t_open - 0.24) * 0.94
+			elif t_open > 0.74:
+				## Extra dwell on fully-open before any scroll peek.
+				t_open = 0.74 + (t_open - 0.74) * 0.78
 			return clampi(int(floor(t_open * float(open_end) + 0.0001)), 0, open_end)
-		var t_scroll := (eased - 0.52) / 0.48
-		## Smoothstep then gentle ease-out so peek→partial→halfway each read.
+		var t_scroll := (eased - 0.56) / 0.44
+		## Smoothstep then ease-out so peek→partial→halfway→final each read.
 		t_scroll = t_scroll * t_scroll * (3.0 - 2.0 * t_scroll)
 		t_scroll = 1.0 - (1.0 - t_scroll) * (1.0 - t_scroll)
 		var scroll_span := max_i - open_end
-		## Hold final reward frame a bit longer inside the progress window.
 		var stepped := t_scroll * float(scroll_span)
-		if t_scroll > 0.88:
+		if t_scroll > 0.90:
 			return max_i
 		return clampi(open_end + int(floor(stepped + 0.0001)), open_end, max_i)
-	## Empty open: quicker early similar poses, smoother approach into fully-open.
+	## Empty open: same cadence — quicker early poses, smoother into fully-open.
 	var shaped := eased
-	if eased < 0.28:
-		shaped = eased * 1.16
+	if eased < 0.24:
+		shaped = eased * 1.14
 	elif eased < 0.55:
-		## Steady through early-open → half-open (reduces visible stepping).
-		shaped = 0.28 * 1.16 + (eased - 0.28) * 0.92
-	elif eased > 0.72:
-		shaped = 0.72 + (eased - 0.72) * 0.74
+		shaped = 0.24 * 1.14 + (eased - 0.24) * 0.94
+	elif eased > 0.74:
+		shaped = 0.74 + (eased - 0.74) * 0.78
 	return clampi(int(round(clampf(shaped, 0.0, 1.0) * float(max_i))), 0, max_i)
 
 

@@ -53,24 +53,24 @@ def main() -> None:
 
 	## Twilight sky → warm horizon → calm ocean → soft sand.
 	## Sand band starts high enough that a mid/lower chest plant reads as grounded.
-	sky_horizon = 0.48
-	water_sand = 0.62
+	sky_horizon = 0.47
+	water_sand = 0.60
 
 	base = vertical_gradient(
 		H,
 		W,
 		[
-			(0.00, (12, 16, 42)),  ## deep twilight
-			(0.20, (28, 30, 72)),
-			(0.36, (78, 48, 96)),  ## dusk purple
-			(0.46, (168, 78, 72)),  ## warm sunset
-			(0.50, (212, 118, 74)),  ## horizon glow
-			(0.54, (56, 78, 118)),  ## calm ocean start
-			(0.60, (34, 58, 96)),
-			(0.63, (58, 78, 92)),  ## wet sand transition
-			(0.72, (122, 92, 68)),  ## sand
-			(0.88, (148, 112, 78)),
-			(1.00, (118, 88, 62)),
+			(0.00, (14, 22, 48)),  ## deep twilight (blue, not purple space)
+			(0.18, (34, 42, 78)),
+			(0.32, (88, 58, 92)),  ## soft dusk
+			(0.42, (176, 86, 68)),  ## warm sunset
+			(0.48, (230, 132, 78)),  ## bright horizon
+			(0.51, (62, 98, 138)),  ## calm ocean
+			(0.58, (38, 72, 112)),
+			(0.62, (72, 92, 98)),  ## wet sand
+			(0.68, (138, 104, 72)),  ## dry sand (larger band)
+			(0.82, (164, 124, 84)),
+			(1.00, (132, 98, 68)),
 		],
 	)
 
@@ -93,7 +93,7 @@ def main() -> None:
 
 	## Subtle early stars in upper sky only.
 	rng = np.random.default_rng(41)
-	for _ in range(48):
+	for _ in range(22):
 		x = int(rng.integers(0, W))
 		y = int(rng.integers(0, int(H * 0.32)))
 		bright = int(rng.integers(140, 220))
@@ -134,7 +134,7 @@ def main() -> None:
 	## Warm chest spill suggestion near lower-center sand (where chest rests).
 	glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
 	gd = ImageDraw.Draw(glow)
-	cx, cy = int(W * 0.50), int(H * 0.72)
+	cx, cy = int(W * 0.50), int(H * 0.74)
 	for r, a in [(120, 22), (80, 30), (45, 38)]:
 		gd.ellipse([cx - r * 1.4, cy - r * 0.55, cx + r * 1.4, cy + r * 0.55], fill=(255, 170, 90, a))
 	glow = glow.filter(ImageFilter.GaussianBlur(radius=18))

@@ -8,14 +8,14 @@ Source sheets (do not delete):
 Outputs:
   assets/art/chest/frames/empty/*.png
   assets/art/chest/frames/scroll/*.png
-  assets/art/chest/scroll_rolled.png   (optional separate scroll layer donor)
-  assets/art/chest/chest_front_rim.png (front-lip occlusion for scroll rise)
+  assets/art/chest/scroll_rolled.png   (clean parchment-only scroll layer)
+  assets/art/chest/chest_front_rim.png (thin front-lip occlusion for scroll rise)
 
-v41 polish:
-  - normalize lower-body visual scale across poses (foot-locked) so the chest
-    does not appear to grow as the lid opens
-  - denser clean opening poses (unchanged clean source picks)
-  - raise scroll farther above the front rim via shifted scroll-layer composite
+v42 polish:
+  - empty + unread share glowing-sheet opening geometry (one chest family)
+  - scroll rise uses a clean parchment donor — never magical-sheet chest pixels
+  - stronger rim-occluded peek → rise → final reward stages
+  - normalize lower-body visual scale across poses (foot-locked)
   - preserve absolute foot lock (BASE_Y) and canvas center
   - reject top-sheared source cells
 """
@@ -353,79 +353,88 @@ def _dilate(mask: np.ndarray, n: int = 1) -> np.ndarray:
 	return out
 
 
-def extract_scroll_layer(open_placed: np.ndarray, scroll_placed: np.ndarray) -> np.ndarray:
-	"""Isolate the rolled parchment scroll (not the cavity glow) from an open+scroll pose."""
-	h = min(open_placed.shape[0], scroll_placed.shape[0])
-	w = min(open_placed.shape[1], scroll_placed.shape[1])
-	open_c = open_placed[:h, :w]
-	scroll_c = scroll_placed[:h, :w]
-	ys, xs = np.where(open_c[:, :, 3] > 40)
+def _clean_scroll_donor_rgba() -> np.ndarray:
+	"""Load the clean project scroll (no chest pixels). Prefer mini, then rolled."""
+	candidates = [
+		ROOT / "assets" / "art" / "scroll" / "scroll_mini.png",
+		ROOT / "assets" / "art" / "scroll" / "scroll_rolled.png",
+		ROOT / "assets" / "art" / "scroll" / "scroll_mini_unread.png",
+	]
+	for path in candidates:
+		if path.exists():
+			rgba = np.array(Image.open(path).convert("RGBA"))
+			## Treat near-black as transparent so composites stay clean.
+			lum = rgba[:, :, :3].astype(np.float32).mean(axis=2)
+			alpha = rgba[:, :, 3].astype(np.float32)
+			alpha[lum < 18] = 0
+			rgba = rgba.copy()
+			rgba[:, :, 3] = alpha.astype(np.uint8)
+			if (rgba[:, :, 3] > 40).sum() > 200:
+				return rgba
+	raise RuntimeError("No clean scroll donor found under assets/art/scroll/")
+
+
+def build_clean_scroll_layer(open_placed: np.ndarray) -> np.ndarray:
+	"""Place a clean parchment-only scroll into the open chest cavity.
+
+	Never copies chest gold/wood from the magical sheet. This is the hard
+	guarantee that rising reward frames contain exactly one chest.
+	"""
+	ys, xs = np.where(open_placed[:, :, 3] > 40)
 	if len(ys) == 0:
 		return np.zeros_like(open_placed)
 	chest_top, chest_bot = int(ys.min()), int(ys.max())
 	cx = float(np.median(xs))
-	## Scroll lives in the mid cavity — exclude lid gold and lower front lip.
-	cavity_top = int(chest_top + (chest_bot - chest_top) * 0.34)
-	cavity_bot = int(chest_top + (chest_bot - chest_top) * 0.72)
-	yy = np.arange(h)[:, None]
-	xx = np.arange(w)[None, :]
-	cavity = (yy >= cavity_top) & (yy <= cavity_bot) & (np.abs(xx - cx) < 58)
-	r = scroll_c[:, :, 0].astype(np.float32)
-	g = scroll_c[:, :, 1].astype(np.float32)
-	b = scroll_c[:, :, 2].astype(np.float32)
-	lum = (r + g + b) / 3.0
-	a = scroll_c[:, :, 3]
-	## Cream parchment body (exclude near-white gold glow core).
-	parch = (
-		(a > 50)
-		& cavity
-		& (lum > 140)
-		& (lum < 210)
-		& (r > 140)
-		& (g > 120)
-		& (b > 80)
-		& (b < 165)
-		& ((r - b) > 25)
-		& ((r - g) < 50)
-	)
-	under = (
-		(a > 50)
-		& cavity
-		& (lum > 95)
-		& (lum < 150)
-		& (r > 115)
-		& (g > 85)
-		& ((r - b) > 18)
-		& (np.abs(xx - cx) < 48)
-	)
-	knob = (
-		(a > 50)
-		& cavity
-		& (r > 170)
-		& (g > 130)
-		& (b < 100)
-		& (lum > 140)
-		& (lum < 220)
-		& (np.abs(xx - cx) > 20)
-		& (np.abs(xx - cx) < 55)
-	)
-	mask = _dilate(parch | under | knob, 1)
-	## Pull nearby non-glow diffs so the roll stays coherent when raised.
-	diff = np.abs(scroll_c[:, :, :3].astype(np.float32) - open_c[:, :, :3].astype(np.float32)).sum(axis=2)
-	changed = (diff > 50) & (a > 50) & cavity
-	glow = (lum > 210) & (r > 220) & (b < 80)
-	near = _dilate(mask, 6)
-	scrollish = changed & near & (~glow) & (lum > 110) & (lum < 215) & ((r - b) > 15)
-	mask = _dilate(mask | scrollish, 1)
-	layer = np.zeros_like(scroll_c)
-	layer[mask] = scroll_c[mask]
-	full = np.zeros_like(open_placed)
-	full[:h, :w] = layer
-	return full
+	chest_h = max(1, chest_bot - chest_top)
+	## Target: scroll rests mostly behind the front rim; rise stages peek then clear.
+	rim_y = int(chest_top + chest_h * 0.50)
+	donor = _clean_scroll_donor_rgba()
+	## Fit scroll width to ~58% of lower-body width so it reads inside the cavity.
+	body_w = lower_body_width(open_placed) or 180.0
+	target_w = max(72, int(round(body_w * 0.58)))
+	scale = target_w / float(donor.shape[1])
+	target_h = max(18, int(round(donor.shape[0] * scale)))
+	scaled = Image.fromarray(donor, "RGBA").resize((target_w, target_h), Image.Resampling.LANCZOS)
+	scroll = np.array(scaled)
+	## Rest pose: majority of scroll body below the rim (occluded by front lip).
+	dst_x = int(round(cx - target_w * 0.5))
+	dst_y = int(round(rim_y - target_h * 0.18))
+	layer = np.zeros_like(open_placed)
+	h, w = layer.shape[:2]
+	src_x0 = src_y0 = 0
+	src_x1, src_y1 = target_w, target_h
+	if dst_x < 0:
+		src_x0 = -dst_x
+		dst_x = 0
+	if dst_y < 0:
+		src_y0 = -dst_y
+		dst_y = 0
+	if dst_x + (src_x1 - src_x0) > w:
+		src_x1 = src_x0 + (w - dst_x)
+	if dst_y + (src_y1 - src_y0) > h:
+		src_y1 = src_y0 + (h - dst_y)
+	if src_x1 > src_x0 and src_y1 > src_y0:
+		patch = scroll[src_y0:src_y1, src_x0:src_x1]
+		## Gentle warm lift only — keep parchment readable as paper, not metal.
+		warm = patch.copy()
+		rgb = warm[:, :, :3].astype(np.float32)
+		rgb[:, :, 0] = np.clip(rgb[:, :, 0] * 1.03 + 3, 0, 255)
+		rgb[:, :, 1] = np.clip(rgb[:, :, 1] * 1.01 + 1, 0, 255)
+		warm[:, :, :3] = rgb.astype(np.uint8)
+		layer[dst_y : dst_y + patch.shape[0], dst_x : dst_x + patch.shape[1]] = warm
+	## Keep donor alpha as-is (already parchment-only). Do not reclassify by hue —
+	## spindle tips are legitimately gold and must remain.
+	return layer
+
+
+def extract_scroll_layer(open_placed: np.ndarray, scroll_placed: np.ndarray | None = None) -> np.ndarray:
+	"""Build a parchment-only scroll layer. Ignores contaminated sheet diffs."""
+	_ = scroll_placed  ## retained for call-site compat; never used for chest pixels
+	return build_clean_scroll_layer(open_placed)
 
 
 def extract_front_rim(open_placed: np.ndarray) -> np.ndarray:
-	"""Front lip occlusion — prefer the gold/wood rim band, not the cavity glow."""
+	"""Thin front-lip occlusion only — never the full chest front/body."""
 	a = open_placed[:, :, 3]
 	ys, xs = np.where(a > 40)
 	if len(ys) == 0:
@@ -439,26 +448,27 @@ def extract_front_rim(open_placed: np.ndarray) -> np.ndarray:
 	g = open_placed[:, :, 1].astype(np.float32)
 	b = open_placed[:, :, 2].astype(np.float32)
 	lum = (r + g + b) / 3.0
-	## Gold lip + darker wood just below; exclude bright cavity glow.
+	## Narrow gold lip (+ tiny wood just under it). Exclude cavity glow + body.
 	gold_lip = (
 		(a > 60)
 		& (yy >= rim_y - 1)
-		& (yy <= rim_y + 18)
-		& (np.abs(xx - cx) < 100)
+		& (yy <= rim_y + 12)
+		& (np.abs(xx - cx) < 92)
 		& (r > 120)
 		& (g > 85)
 		& ((r - b) > 30)
-		& (lum < 210)
+		& (lum < 205)
 	)
-	wood_front = (
+	wood_lip = (
 		(a > 60)
-		& (yy >= rim_y + 8)
-		& (yy <= chest_bot)
-		& (np.abs(xx - cx) < 100)
-		& (lum < 140)
+		& (yy >= rim_y + 6)
+		& (yy <= rim_y + 16)
+		& (np.abs(xx - cx) < 88)
+		& (lum < 130)
 		& (r > 40)
+		& (r > b)
 	)
-	front_mask = gold_lip | wood_front
+	front_mask = gold_lip | wood_lip
 	front = np.zeros_like(open_placed)
 	front[front_mask] = open_placed[front_mask]
 	return front
@@ -587,42 +597,48 @@ def process(path: Path, prefix: str, picks: list[int], sub: str, labels: list[st
 	return meta
 
 
-def process_scroll_with_rise(path: Path) -> list[dict]:
-	"""Opening poses from the sheet, then raised scroll-rise stages (rim-occluded)."""
-	rgb = load_rgb(path)
+def process_scroll_with_rise(_magic_path: Path | None = None) -> list[dict]:
+	"""Shared empty-sheet opening poses, then clean parchment scroll-rise stages.
+
+	Opening uses the glowing (empty) sheet so empty + unread share identical chest
+	geometry. Rise stages composite a chest-pixel-free scroll onto the fully-open
+	empty pose — guaranteeing exactly one visible chest at every moment.
+	"""
+	_ = _magic_path  ## magical sheet retained in repo; not used for contaminated scroll extract
+	rgb = load_rgb(GLOW_SHEET)
 	out_dir = OUT / "scroll"
 	out_dir.mkdir(parents=True, exist_ok=True)
 	for p in out_dir.glob("*.png"):
 		p.unlink()
 
-	## Clean opening / pre-scroll poses only (skip top-sheared 16–23 and bleedy 10).
-	open_picks = [0, 3, 5, 7, 8, 9, 11, 12]
+	## Same clean glowing-sheet opening arc as empty — subsampled to 8 poses so
+	## unread opening cadence matches empty until fully open, then diverges.
+	open_picks = [0, 7, 9, 11, 13, 15, 16, 17]
 	open_labels = [
 		"closed",
-		"pre_crack",
 		"crack",
-		"early_glow",
 		"early_open",
-		"opening",
 		"opening_more",
+		"half_open",
+		"three_quarter",
+		"nearly_open",
 		"open_ready",
 	]
 	## Progressive scroll rise: dy>0 lowers (behind rim); dy<0 lifts.
 	## Final target ~55–70% of the rolled scroll body above the front rim.
-	## Exclude magical src 16–23 — cell tops shear the scroll/seal.
 	rise_stages = [
-		(14, "scroll_peek"),  ## small crest just above the rim
-		(4, "scroll_partial"),
-		(-8, "scroll_rising"),
-		(-22, "scroll_halfway"),
-		(-40, "scroll_fully"),  ## unmistakable reward — majority above rim
+		(8, "scroll_peek"),  ## tiny crest just above / at the rim
+		(-4, "scroll_partial"),
+		(-16, "scroll_rising"),
+		(-30, "scroll_halfway"),
+		(-48, "scroll_fully"),  ## unmistakable reward — ~55–70%+ above rim
 	]
 
 	placed_open: list[tuple[np.ndarray, int, int, str]] = []
 	for src, label in zip(open_picks, open_labels):
 		cell = cell_at(rgb, src)
 		if cell_top_clipped(cell, threshold=48):
-			raise RuntimeError(f"Damaged scroll open cell src={src}")
+			raise RuntimeError(f"Damaged shared open cell src={src}")
 		placed, _a, crop_h = place_aligned(cell)
 		placed_open.append((placed, crop_h, src, label))
 
@@ -631,35 +647,51 @@ def process_scroll_with_rise(path: Path) -> list[dict]:
 		raise RuntimeError("Could not find scroll closed-frame base")
 	target_cx, target_y = anchor_m
 	target_visual_cx = float(CANVAS_W) * 0.5
-	target_body_w = lower_body_width(placed_open[0][0]) or 165.0
+	target_body_w = lower_body_width(placed_open[0][0]) or 180.0
 	print(
 		f"scroll lock foot=({target_cx:.1f},{target_y:.1f}) "
 		f"body_w0={target_body_w:.1f} → visual_cx={target_visual_cx:.1f} "
-		f"canvas={CANVAS_W}x{CANVAS_H}"
+		f"canvas={CANVAS_W}x{CANVAS_H} (shared empty sheet)"
 	)
 
-	## Normalize opening poses to closed body width.
 	norm_open: list[tuple[np.ndarray, int, int | str, str]] = []
 	for placed, crop_h, src, label in placed_open:
 		scaled = normalize_body_scale(placed, target_body_w, target_cx, target_y)
 		norm_open.append((scaled, crop_h, src, label))
 
 	open_ready_placed = finalize_locked(norm_open[-1][0], target_cx, target_y, target_visual_cx)
-	## Donor for scroll layer: clean natural src 15 (fullest unsheared scroll).
-	donor_cell = cell_at(rgb, 15)
-	if cell_top_clipped(donor_cell, threshold=48):
-		raise RuntimeError("Scroll donor src=15 is top-clipped")
-	donor_placed, _a, _ch = place_aligned(donor_cell)
-	donor_placed = normalize_body_scale(donor_placed, target_body_w, target_cx, target_y)
-	donor_placed = finalize_locked(donor_placed, target_cx, target_y, target_visual_cx)
-	scroll_layer = extract_scroll_layer(open_ready_placed, donor_placed)
+	## Clean parchment-only layer — never diff-extract from magical sheet.
+	scroll_layer = build_clean_scroll_layer(open_ready_placed)
 	front_rim = extract_front_rim(open_ready_placed)
 	Image.fromarray(scroll_layer, "RGBA").save(ART / "scroll_rolled.png")
 	Image.fromarray(front_rim, "RGBA").save(ART / "chest_front_rim.png")
-	print(
-		f"wrote scroll_rolled.png + chest_front_rim.png "
-		f"(scroll_px={(scroll_layer[:, :, 3] > 40).sum()})"
+	scroll_px = int((scroll_layer[:, :, 3] > 40).sum())
+	print(f"wrote scroll_rolled.png + chest_front_rim.png (scroll_px={scroll_px})")
+	if scroll_px < 400:
+		raise RuntimeError(f"Clean scroll layer too sparse ({scroll_px} px)")
+
+	## Sanity: reject a wide horizontal gold/wood BAR below the scroll (chest rim ghost).
+	a = scroll_layer[:, :, 3]
+	r = scroll_layer[:, :, 0].astype(np.float32)
+	g = scroll_layer[:, :, 1].astype(np.float32)
+	b = scroll_layer[:, :, 2].astype(np.float32)
+	lum = (r + g + b) / 3.0
+	ys, xs = np.where(a > 40)
+	if len(ys) == 0:
+		raise RuntimeError("Clean scroll layer empty after place")
+	y0, y1 = int(ys.min()), int(ys.max())
+	scroll_h = max(1, y1 - y0 + 1)
+	below = (np.arange(a.shape[0])[:, None] > (y0 + int(scroll_h * 0.85))) & (a > 40)
+	rimish = below & (
+		((r > 140) & (g > 90) & ((r - b) > 40) & (lum < 210))
+		| ((lum < 100) & (r > 35) & (r > b))
 	)
+	## A true chest rim ghost spans most of the scroll width as a flat bar.
+	rim_rows = int((rimish.sum(axis=1) > int(target_body_w * 0.35)).sum())
+	if rim_rows >= 3 or int(rimish.sum()) > 280:
+		raise RuntimeError(
+			f"Scroll layer still has chest-rim ghost (rim_px={int(rimish.sum())} rim_rows={rim_rows})"
+		)
 
 	frames: list[tuple[np.ndarray, int, int | str, str]] = []
 	for placed, crop_h, src, label in norm_open:
@@ -726,7 +758,7 @@ def main() -> None:
 	]
 	print("EMPTY")
 	process(GLOW_SHEET, "empty", empty_picks, "empty", empty_labels)
-	print("SCROLL")
+	print("SCROLL (shared empty opening + clean parchment rise)")
 	process_scroll_with_rise(MAGIC_SHEET)
 
 

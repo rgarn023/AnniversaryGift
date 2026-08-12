@@ -44,6 +44,9 @@ var _req_notifier: RequirementNotifier = RequirementNotifier.new()
 var _perm_setup_status: Dictionary = {} ## kind -> Label
 var _perm_setup_actions: Dictionary = {} ## kind -> Button
 var _perm_manage_live: bool = false
+## Global starfield — hidden on Chest so beach is the dominant environment.
+var _starfield: TextureRect
+var _chrome_bg: ColorRect
 
 
 func _ready() -> void:
@@ -168,21 +171,22 @@ func _log_nav_paint(screen: String, t0_ms: int) -> void:
 
 
 func _build_chrome() -> void:
-	var bg := ColorRect.new()
-	bg.color = Color(0.05, 0.03, 0.12)
-	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(bg)
+	_chrome_bg = ColorRect.new()
+	_chrome_bg.color = Color(0.05, 0.03, 0.12)
+	_chrome_bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_chrome_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_chrome_bg)
 	if ResourceLoader.exists("res://assets/art/background/starfield.png"):
 		## Single full-bleed texture (not per-star Control nodes).
-		var stars := TextureRect.new()
-		stars.texture = load("res://assets/art/background/starfield.png")
-		stars.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-		stars.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		stars.stretch_mode = TextureRect.STRETCH_SCALE
-		stars.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
-		stars.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		add_child(stars)
+		_starfield = TextureRect.new()
+		_starfield.name = "GlobalStarfield"
+		_starfield.texture = load("res://assets/art/background/starfield.png")
+		_starfield.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		_starfield.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		_starfield.stretch_mode = TextureRect.STRETCH_SCALE
+		_starfield.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+		_starfield.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		add_child(_starfield)
 
 	_banner = Label.new()
 	## Never show "Private Onboarding Build" / demo watermarks in test APKs.
@@ -278,6 +282,8 @@ func _clear_screen() -> void:
 	_friend_action_busy = false
 	for c in _screen_host.get_children():
 		c.queue_free()
+	## Leaving any screen restores default chrome; Chest re-hides for beach.
+	_set_chest_environment_active(false)
 
 
 func _title_font() -> Font:
@@ -835,6 +841,14 @@ func _counts_from_chest_cache() -> Dictionary:
 	return counts
 
 
+func _set_chest_environment_active(active: bool) -> void:
+	## Beach owns the Chest screen; purple starfield must not dominate.
+	if _starfield != null and is_instance_valid(_starfield):
+		_starfield.visible = not active
+	if _chrome_bg != null and is_instance_valid(_chrome_bg):
+		_chrome_bg.visible = not active
+
+
 func _show_main_chest() -> void:
 	if not _guard_private_chest():
 		return
@@ -849,32 +863,44 @@ func _show_main_chest() -> void:
 	_last_chest_counts = counts.duplicate()
 
 	_begin_nav_transition()
+	_set_chest_environment_active(true)
 	## Chest-only default twilight beach — modular, replaceable later (no IAP/store).
 	var chest_env := ChestEnvironment.new()
 	chest_env.name = "ChestEnvironment"
 	chest_env.environment_id = ChestEnvironment.ENV_DEFAULT_BEACH
 	chest_env.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	chest_env.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	chest_env.z_index = -2
+	chest_env.z_index = 0
 	_screen_host.add_child(chest_env)
 
 	var margin := MarginContainer.new()
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	MobileUi.apply_safe_margins(margin, _nav_content_inset())
+	margin.z_index = 2
 	_screen_host.add_child(margin)
 	var root := VBoxContainer.new()
 	root.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	root.add_theme_constant_override("separation", 10)
+	root.add_theme_constant_override("separation", 8)
 	margin.add_child(root)
 
-	## Title centered on the viewport — not in the asymmetric gap beside refresh.
+	## Deterministic header hierarchy:
+	## 1) title row (viewport-centered CHEST + dedicated right refresh)
+	## 2) stats below title
+	## 3) filters below stats
+	## 4) chest content below
+	## Refresh never shares a row that can push the title off-center, and never
+	## draws under the stats panel (own row + higher z-index).
 	var header := Control.new()
-	header.custom_minimum_size.y = MobileUi.font_touch(48)
+	header.name = "ChestHeaderRow"
+	header.custom_minimum_size.y = MobileUi.font_touch(52)
 	header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.clip_contents = false
+	header.mouse_filter = Control.MOUSE_FILTER_PASS
 	root.add_child(header)
 	var title := MobileUi.make_page_title("Chest", _title_font())
 	title.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	title.z_index = 1
 	## Stronger outline so CHEST stays readable over the beach sky.
 	title.add_theme_color_override("font_shadow_color", Color(0.02, 0.03, 0.08, 0.85))
 	title.add_theme_constant_override("shadow_offset_x", 0)
@@ -883,19 +909,26 @@ func _show_main_chest() -> void:
 	title.add_theme_color_override("font_outline_color", Color(0.03, 0.04, 0.10, 0.72))
 	header.add_child(title)
 	var refresh_btn := Button.new()
+	refresh_btn.name = "ChestRefreshButton"
 	refresh_btn.text = "↻"
 	refresh_btn.tooltip_text = "Refresh"
 	refresh_btn.focus_mode = Control.FOCUS_NONE
-	refresh_btn.custom_minimum_size = Vector2(MobileUi.font_touch(48), MobileUi.font_touch(48))
+	var refresh_sz := MobileUi.font_touch(48)
+	refresh_btn.custom_minimum_size = Vector2(refresh_sz, refresh_sz)
 	MobileUi.style_button(refresh_btn, 48)
-	refresh_btn.set_anchors_preset(Control.PRESET_CENTER_RIGHT)
+	## Dedicated right-side slot inside the header row only (never overlaps stats).
+	refresh_btn.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
 	refresh_btn.anchor_left = 1.0
 	refresh_btn.anchor_right = 1.0
+	refresh_btn.anchor_top = 0.0
+	refresh_btn.anchor_bottom = 0.0
 	refresh_btn.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-	refresh_btn.offset_left = -MobileUi.font_touch(48)
+	refresh_btn.offset_left = -refresh_sz
 	refresh_btn.offset_right = 0.0
-	refresh_btn.offset_top = 0.0
-	refresh_btn.offset_bottom = MobileUi.font_touch(48)
+	refresh_btn.offset_top = 2.0
+	refresh_btn.offset_bottom = 2.0 + refresh_sz
+	refresh_btn.z_index = 20
+	refresh_btn.mouse_filter = Control.MOUSE_FILTER_STOP
 	refresh_btn.pressed.connect(func() -> void:
 		state.invalidate_cache("chest")
 		_show_main_chest()
@@ -903,6 +936,9 @@ func _show_main_chest() -> void:
 	header.add_child(refresh_btn)
 
 	var summary := PanelContainer.new()
+	summary.name = "ChestStatsPanel"
+	summary.z_index = 1
+	summary.mouse_filter = Control.MOUSE_FILTER_STOP
 	summary.add_theme_stylebox_override("panel", MobileUi.card_style())
 	root.add_child(summary)
 	var sum_row := HBoxContainer.new()
@@ -931,8 +967,12 @@ func _show_main_chest() -> void:
 		sum_row.add_child(cell)
 		count_labels[str(item[0]).to_lower()] = num
 
+	## Filter chips below stats — same sibling set (Saved/Hidden always visible).
+	_add_inventory_filter_rows(root, "all")
+
 	## Intentionally composed chest stage — less empty air, still chest-first.
 	var chest_area := Control.new()
+	chest_area.name = "ChestStage"
 	chest_area.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	chest_area.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	root.add_child(chest_area)
@@ -942,8 +982,8 @@ func _show_main_chest() -> void:
 	your.set_anchors_preset(Control.PRESET_CENTER_TOP)
 	your.anchor_left = 0.0
 	your.anchor_right = 1.0
-	your.offset_top = 8
-	your.offset_bottom = 36
+	your.offset_top = 4
+	your.offset_bottom = 32
 	MobileUi.apply_label(your, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY)
 	your.add_theme_color_override("font_shadow_color", Color(0.02, 0.03, 0.08, 0.75))
 	your.add_theme_constant_override("shadow_offset_y", 1)
@@ -960,9 +1000,11 @@ func _show_main_chest() -> void:
 	_chest.custom_minimum_size = Vector2(chest_w, chest_h)
 	_chest.size = Vector2(chest_w, chest_h)
 	_chest.clip_contents = false
-	## Bias downward so the planted base meets the beach sand (not floating in water).
-	## Keep enough headroom above for open lid + raised scroll.
-	_chest.position = Vector2(-chest_w * 0.5, -chest_h * 0.18)
+	## Plant on sand: bias downward toward ChestEnvironment.sand_contact_y_frac().
+	## Keep enough headroom above for open lid + raised scroll (do not shrink chest).
+	var sand_frac := chest_env.sand_contact_y_frac() if chest_env != null else 0.72
+	## Stage-local plant: center X, feet toward lower sand band of the content area.
+	_chest.position = Vector2(-chest_w * 0.5, chest_h * (sand_frac - 0.62))
 	_chest.z_index = 5
 	_chest.tapped.connect(_on_chest_tapped)
 	chest_area.clip_contents = false
@@ -1357,7 +1399,7 @@ func _fill_inventory_list_deferred(list: VBoxContainer, screen_name: String, loa
 		loading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		MobileUi.apply_label(loading, MobileUi.SIZE_BODY, MobileUi.COLOR_HELPER)
 		list.add_child(loading)
-	var loading_timer := get_tree().create_timer(0.14)
+	var loading_timer := get_tree().create_timer(0.28)
 	loading_timer.timeout.connect(show_loading)
 	var items: Array[Dictionary] = await load_cb.call()
 	if _current_screen != screen_name:
