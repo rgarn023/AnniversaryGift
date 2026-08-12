@@ -106,6 +106,17 @@ Deno.serve(async (req) => {
     const userOne = fr.sender_id < fr.recipient_id ? fr.sender_id : fr.recipient_id;
     const userTwo = fr.sender_id < fr.recipient_id ? fr.recipient_id : fr.sender_id;
 
+    // Explicit NEW accept may reconnect a previously disconnected pair.
+    // Clear durable tombstone BEFORE insert (trigger blocks insert while present).
+    const { error: clearEndErr } = await service.rpc("clear_my_person_pair_end", {
+      p_a: fr.sender_id,
+      p_b: fr.recipient_id,
+    });
+    if (clearEndErr) {
+      console.warn("clear_my_person_pair_end", clearEndErr);
+      // Continue — table may not exist until migration; insert may still succeed.
+    }
+
     const { error: friendErr } = await service.from("friendships").insert({
       user_one_id: userOne,
       user_two_id: userTwo,
@@ -117,6 +128,13 @@ Deno.serve(async (req) => {
         throw new AppError(
           "already_has_person",
           "Only one Person connection is allowed.",
+          409,
+        );
+      }
+      if (msg.includes("pair_disconnected")) {
+        throw new AppError(
+          "pair_disconnected",
+          "Could not connect. Please send a new connection request.",
           409,
         );
       }

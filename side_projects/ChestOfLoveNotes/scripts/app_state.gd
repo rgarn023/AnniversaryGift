@@ -22,11 +22,25 @@ var cached_chest: Dictionary = {}
 var cached_saved: Dictionary = {}
 var cached_sent: Dictionary = {}
 var cached_friends: Dictionary = {}
+## True after a successful get-friends / disconnect apply — sticky disk must not invent Person.
+var friends_backend_authoritative: bool = false
 ## Soft-refresh timestamps (unix) — avoid refetching on every tab tap.
 var cache_fetched_at: Dictionary = {"chest": 0, "friends": 0, "sent": 0, "profile": 0}
 const CACHE_SOFT_TTL_SEC := 45
 ## Last-known My Person identity (survives brief profile lookup failures).
+## NEVER authority to recreate a pairing on the backend.
 const LAST_PERSON_PATH := "user://coln_last_person.json"
+## DEBUG-only relationship lifecycle labels (no UUIDs / secrets).
+var relationship_debug: Dictionary = {
+	"last_event": "",
+	"active_pair_backend": false,
+	"relationship_status": "none",
+	"pair_end_tombstone": false,
+	"historical_accepted_request": false,
+	"legacy_migration_eligible": false,
+	"reconciliation_last_result": "no_change",
+	"verified_disconnected": false,
+}
 
 ## Local hide list for Sent history (recoverable; not permanent deletion).
 const SENT_HIDDEN_PATH := "user://coln_sent_hidden.json"
@@ -98,13 +112,25 @@ func clear_private_caches() -> void:
 	cached_saved.clear()
 	cached_sent.clear()
 	cached_friends.clear()
+	friends_backend_authoritative = false
 	hidden_sent_ids.clear()
 	cache_fetched_at = {"chest": 0, "friends": 0, "sent": 0, "profile": 0}
 	clear_last_person_cache()
+	relationship_debug = {
+		"last_event": "signed_out",
+		"active_pair_backend": false,
+		"relationship_status": "none",
+		"pair_end_tombstone": false,
+		"historical_accepted_request": false,
+		"legacy_migration_eligible": false,
+		"reconciliation_last_result": "no_change",
+		"verified_disconnected": false,
+	}
 
 
 func remember_person(person: Dictionary) -> void:
 	## Persist pairing identity separately from soft cache / profile hydration.
+	## Display optimization only — never written back to create a pairing.
 	if person.is_empty() or str(person.get("id", "")).is_empty():
 		return
 	var payload := {
@@ -146,7 +172,10 @@ func clear_last_person_cache() -> void:
 func apply_friends_payload(data: Dictionary) -> void:
 	## Merge get-friends payload; keep last-known Person if profile hydration is pending/missing.
 	## Never invent a pairing when the server reports none.
+	## Backend relationship state is canonical — local cache is display-only.
+	friends_backend_authoritative = true
 	cached_friends = data.duplicate(true) if not data.is_empty() else {}
+	_update_relationship_debug_from_payload(cached_friends)
 	var person: Dictionary = {}
 	if typeof(cached_friends.get("person")) == TYPE_DICTIONARY:
 		person = cached_friends.get("person")
@@ -165,11 +194,53 @@ func apply_friends_payload(data: Dictionary) -> void:
 				cached_friends["person"] = person
 				cached_friends["friends"] = [person]
 		remember_person(person)
+		relationship_debug["active_pair_backend"] = true
+		relationship_debug["relationship_status"] = "active"
+		relationship_debug["verified_disconnected"] = false
 		return
 	## Server says no Person — clear sticky identity so Compose/My Person stay empty.
 	clear_last_person_cache()
 	cached_friends["person"] = null
 	cached_friends["friends"] = []
+	relationship_debug["active_pair_backend"] = false
+	if str(relationship_debug.get("relationship_status", "")) != "disconnected":
+		relationship_debug["relationship_status"] = str(cached_friends.get("relationship_status", "none"))
+
+
+func _update_relationship_debug_from_payload(data: Dictionary) -> void:
+	relationship_debug["pair_end_tombstone"] = bool(data.get("pair_end_tombstone", false))
+	relationship_debug["historical_accepted_request"] = bool(data.get("historical_accepted_request", false))
+	relationship_debug["legacy_migration_eligible"] = bool(data.get("legacy_migration_eligible", false))
+	relationship_debug["reconciliation_last_result"] = str(data.get("reconciliation_last_result", "no_change"))
+	if data.has("relationship_status"):
+		relationship_debug["relationship_status"] = str(data.get("relationship_status", "none"))
+	relationship_debug["active_pair_backend"] = bool(data.get("active_pairing", false)) \
+		or (typeof(data.get("person")) == TYPE_DICTIONARY and not str((data.get("person") as Dictionary).get("id", "")).is_empty())
+
+
+func mark_verified_disconnected() -> void:
+	friends_backend_authoritative = true
+	clear_last_person_cache()
+	cached_friends = {
+		"person": null,
+		"friends": [],
+		"incoming_requests": [],
+		"outgoing_requests": [],
+		"active_pairing": false,
+		"relationship_status": "disconnected",
+		"pair_end_tombstone": true,
+		"historical_accepted_request": false,
+		"legacy_migration_eligible": false,
+		"reconciliation_last_result": "no_change",
+	}
+	relationship_debug["last_event"] = "disconnect_verified"
+	relationship_debug["active_pair_backend"] = false
+	relationship_debug["relationship_status"] = "disconnected"
+	relationship_debug["pair_end_tombstone"] = true
+	relationship_debug["legacy_migration_eligible"] = false
+	relationship_debug["reconciliation_last_result"] = "no_change"
+	relationship_debug["verified_disconnected"] = true
+	invalidate_cache("friends")
 
 
 func cache_is_fresh(key: String) -> bool:

@@ -66,7 +66,7 @@ func _run() -> void:
 	_assert(not bool(stale.get("ok", false)), "very stale rejected")
 
 	## MY PERSON — migrate + profile delay + compose
-	_assert(getf.contains("reconcileAcceptedPairing"), "get-friends reconciles accepted requests")
+	_assert(not getf.contains("reconcileAcceptedPairing"), "get-friends must NOT reconcile/recreate pairings")
 	_assert(getf.contains("profile_pending"), "pairing survives profile lookup delay")
 	_assert(getf.contains("My Person"), "fallback display name when profile missing")
 	_assert(not getf.contains("public_connection_token") or getf.contains("meProfile"), "person select does not require their token")

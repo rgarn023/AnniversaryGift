@@ -4,60 +4,13 @@ import { createServiceClient } from "../_shared/supabase.ts";
 import { AppError, errorResponse } from "../_shared/errors.ts";
 
 /**
- * Missed-accept repair ONLY.
- * Disconnect sets friend_requests.status='cancelled' for the pair, so those rows
- * never match status='accepted' here and cannot resurrect a deliberate disconnect.
- * Declined / cancelled / pending history must never create an active Person.
+ * Canonical active My Person = presence of a friendships row involving me.
+ *
+ * CRITICAL: Do NOT reconcile / recreate friendships from historical
+ * friend_requests.status='accepted'. That path auto-reconnected Mandy after
+ * disconnect. Accept already inserts the friendship once; reconnect requires
+ * a NEW pending request + NEW accept (which clears my_person_pair_ends).
  */
-async function reconcileAcceptedPairing(
-  service: ReturnType<typeof createServiceClient>,
-  me: string,
-): Promise<void> {
-  const { data: accepted } = await service
-    .from("friend_requests")
-    .select("id, sender_id, recipient_id, status, responded_at, created_at")
-    .eq("status", "accepted")
-    .or(`sender_id.eq.${me},recipient_id.eq.${me}`)
-    .order("responded_at", { ascending: true, nullsFirst: false })
-    .limit(20);
-
-  if (!accepted || accepted.length === 0) return;
-
-  const { data: existing } = await service
-    .from("friendships")
-    .select("id, user_one_id, user_two_id")
-    .or(`user_one_id.eq.${me},user_two_id.eq.${me}`)
-    .limit(1);
-
-  if (existing && existing.length > 0) return;
-
-  for (const fr of accepted) {
-    // Defense: never trust non-accepted rows even if a filter regresses.
-    if (String(fr.status) !== "accepted") continue;
-    const a = String(fr.sender_id);
-    const b = String(fr.recipient_id);
-    if (!a || !b || a === b) continue;
-    const userOne = a < b ? a : b;
-    const userTwo = a < b ? b : a;
-
-    const { data: aHas } = await service.rpc("has_active_person", { p_user: a });
-    const { data: bHas } = await service.rpc("has_active_person", { p_user: b });
-    if (aHas || bHas) continue;
-
-    const { error: insErr } = await service.from("friendships").insert({
-      user_one_id: userOne,
-      user_two_id: userTwo,
-    });
-    if (!insErr) {
-      console.log("reconciled accepted friend_request into friendship", fr.id);
-      return;
-    }
-    console.warn("reconcile insert skipped", insErr.message ?? insErr);
-    return;
-  }
-}
-
-/** Returns My Person (0 or 1) + pending connection requests. */
 Deno.serve(async (req) => {
   const cors = handleCors(req);
   if (cors) return cors;
@@ -72,7 +25,8 @@ Deno.serve(async (req) => {
     const me = callerId(user);
     const service = createServiceClient();
 
-    await reconcileAcceptedPairing(service, me);
+    // Intentionally NO reconcileAcceptedPairing / no friendship INSERT here.
+    const reconciliation_last_result = "no_change";
 
     const { data: friendships, error } = await service
       .from("friendships")
@@ -89,13 +43,15 @@ Deno.serve(async (req) => {
     let connectedAt: string | null = null;
     let pairingId: string | null = null;
     let personId: string | null = null;
+    let pairEnded = false;
+    let historicalAcceptedPresent = false;
+
     if (friendships && friendships.length > 0) {
       const f = friendships[0];
       pairingId = f.id as string;
       connectedAt = f.created_at as string;
       personId = (f.user_one_id === me ? f.user_two_id : f.user_one_id) as string;
 
-      // Profile hydration is separate from pairing existence — never drop a valid pair.
       const { data: profile, error: pErr } = await service
         .from("profiles")
         .select("id, username, display_name, friend_code, avatar_url")
@@ -118,7 +74,6 @@ Deno.serve(async (req) => {
           profile_pending: false,
         };
       } else {
-        // Pairing exists; profile temporarily unavailable — keep Person, not empty state.
         person = {
           id: personId,
           username: "",
@@ -130,6 +85,27 @@ Deno.serve(async (req) => {
           profile_pending: true,
         };
       }
+    } else {
+      // Diagnostics only — never recreate from these.
+      const { data: ends, error: endsErr } = await service
+        .from("my_person_pair_ends")
+        .select("user_one_id, user_two_id")
+        .or(`user_one_id.eq.${me},user_two_id.eq.${me}`)
+        .limit(1);
+      if (endsErr) {
+        // Table missing until migration applied — treat as no tombstone for diagnostics.
+        pairEnded = false;
+      } else {
+        pairEnded = !!(ends && ends.length > 0);
+      }
+
+      const { data: acceptedHist } = await service
+        .from("friend_requests")
+        .select("id")
+        .eq("status", "accepted")
+        .or(`sender_id.eq.${me},recipient_id.eq.${me}`)
+        .limit(1);
+      historicalAcceptedPresent = !!(acceptedHist && acceptedHist.length > 0);
     }
 
     const { data: meProfile } = await service
@@ -168,14 +144,20 @@ Deno.serve(async (req) => {
       .eq("status", "pending")
       .order("created_at", { ascending: false });
 
-    // Compat: "friends" array is 0 or 1 person for older clients.
     const friends = person ? [person] : [];
+    const relationship_status = person ? "active" : (pairEnded ? "disconnected" : "none");
 
     return jsonResponse({
       person,
       friends,
       connected_at: connectedAt,
       pairing_id: pairingId,
+      active_pairing: !!person,
+      relationship_status,
+      pair_end_tombstone: pairEnded,
+      historical_accepted_request: historicalAcceptedPresent,
+      legacy_migration_eligible: false,
+      reconciliation_last_result,
       me: meProfile
         ? {
           id: meProfile.id,

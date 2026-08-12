@@ -84,6 +84,13 @@ Deno.serve(async (req) => {
       .eq("status", "accepted")
       .or(pairOr);
 
+    // Durable end tombstone so get-friends cannot rehydrate this pair.
+    await service.rpc("record_my_person_pair_end", {
+      p_a: me,
+      p_b: body.blocked_id,
+      p_ended_by: me,
+    });
+
     return jsonResponse({ blocked_id: body.blocked_id, status: "blocked" });
   } catch (err) {
     return errorResponse(err);

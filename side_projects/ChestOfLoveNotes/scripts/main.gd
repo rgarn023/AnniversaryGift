@@ -140,6 +140,13 @@ func _log_secure_debug(tag: String) -> void:
 	)
 
 
+func _log_relationship_debug(label: String) -> void:
+	## STATE LABELS only — never UUIDs / JWTs / emails / secrets.
+	if not OS.is_debug_build():
+		return
+	print("[COLN-REL:%s]" % label)
+
+
 func _on_session_invalidated() -> void:
 	_clear_compose_draft()
 	await _sign_out_cleanup()
@@ -2129,6 +2136,9 @@ func _person_from_friends_cache() -> Dictionary:
 			return demo_friends[0]
 		return person
 	var data: Dictionary = state.cached_friends if typeof(state.cached_friends) == TYPE_DICTIONARY else {}
+	## Authoritative empty from backend — NEVER invent Person from sticky disk.
+	if state.friends_backend_authoritative and data.has("person") and typeof(data.get("person")) != TYPE_DICTIONARY:
+		return {}
 	if typeof(data.get("person")) == TYPE_DICTIONARY:
 		person = data.get("person")
 	elif typeof(data.get("friends")) == TYPE_ARRAY and not (data.get("friends") as Array).is_empty():
@@ -2145,8 +2155,10 @@ func _person_from_friends_cache() -> Dictionary:
 				if str(person.get("username", "")).is_empty():
 					person["username"] = str(cached2.get("username", ""))
 		return person
-	## Empty person in a non-empty payload (or cold start): use sticky identity for Compose.
-	## Cleared explicitly on disconnect via clear_last_person_cache().
+	## Sticky identity ONLY before the first authoritative backend friends payload.
+	## After disconnect / get-friends(null), sticky must not resurrect Mandy.
+	if state.friends_backend_authoritative:
+		return {}
 	var cached := state.load_last_person_cache()
 	if not cached.is_empty() and not str(cached.get("id", "")).is_empty():
 		return cached
@@ -2607,17 +2619,52 @@ func _confirm_disconnect_person(person: Dictionary) -> void:
 		if state.is_demo():
 			_show_toast("Demo: disconnect not persisted.")
 			return
+		_log_relationship_debug("disconnect_requested")
+		state.relationship_debug["last_event"] = "disconnect_requested"
+		state.relationship_debug["active_pair_before"] = not _person_from_friends_cache().is_empty()
+		_log_relationship_debug("disconnect_backend_call_started")
 		var result: Dictionary = await state.friends.disconnect_person()
-		if bool(result.get("ok", false)):
-			## Only clear local Person after backend confirms durable disconnect.
-			state.clear_last_person_cache()
-			state.cached_friends = {"person": null, "friends": [], "incoming_requests": [], "outgoing_requests": []}
-			state.invalidate_cache("friends")
-			_show_toast("Disconnected from %s" % name)
-			_show_friends()
-		else:
-			## Keep current pairing visible on failure.
+		var data: Dictionary = result.get("data", {}) if typeof(result.get("data")) == TYPE_DICTIONARY else {}
+		var verified := bool(result.get("ok", false)) and (
+			bool(data.get("verified_disconnected", false))
+			or data.get("person") == null
+			or bool(data.get("ok", false))
+		)
+		_log_relationship_debug(
+			"disconnect_backend_result=%s" % ("success" if verified else "failure")
+		)
+		if not verified:
+			## Keep current pairing visible on failure — never optimistic clear.
+			_log_relationship_debug("active_pair_after_backend=true")
 			_show_toast("Couldn't disconnect right now. Please try again.")
+			return
+		## Only clear local Person after backend confirms durable disconnect.
+		state.mark_verified_disconnected()
+		_log_relationship_debug("active_pair_after_backend=false")
+		## Immediate backend re-query — must still be None (proves no reconcile resurrect).
+		var confirm: Dictionary = await state.friends.get_my_person()
+		if bool(confirm.get("ok", false)):
+			var cdata: Dictionary = confirm.get("data", {}) if typeof(confirm.get("data")) == TYPE_DICTIONARY else {}
+			state.apply_friends_payload(cdata)
+			var still := typeof(cdata.get("person")) == TYPE_DICTIONARY \
+				and not str((cdata.get("person") as Dictionary).get("id", "")).is_empty()
+			_log_relationship_debug("active_pair_after_refresh=%s" % ("true" if still else "false"))
+			_log_relationship_debug(
+				"reconciliation_ran=true result=%s" % str(cdata.get("reconciliation_last_result", "no_change"))
+			)
+			if still:
+				_log_relationship_debug("pair_recreated=true recreation_source=get-friends")
+				_show_toast("Couldn't disconnect right now. Please try again.")
+				return
+			_log_relationship_debug("pair_recreated=false")
+			_log_relationship_debug(
+				"legacy_friend_candidate=%s" % ("true" if bool(cdata.get("legacy_migration_eligible", false)) else "false")
+			)
+			_log_relationship_debug(
+				"accepted_request_candidate=%s" % ("true" if bool(cdata.get("historical_accepted_request", false)) else "false")
+			)
+		_show_toast("Disconnected from %s" % name)
+		_show_friends()
 	)
 	col.add_child(yes)
 	var no := Button.new()
@@ -2637,13 +2684,8 @@ func _ensure_my_connection_token(me: Dictionary) -> Dictionary:
 	var fr: Dictionary = await state.friends.get_my_person()
 	if bool(fr.get("ok", false)):
 		var data: Dictionary = fr.get("data", {}) if typeof(fr.get("data")) == TYPE_DICTIONARY else {}
-		## Never clear / replace active Person from a QR token lookup.
-		if typeof(data.get("person")) == TYPE_DICTIONARY:
-			var person_keep: Dictionary = data.get("person")
-			if typeof(state.cached_friends) != TYPE_DICTIONARY:
-				state.cached_friends = {}
-			if typeof(state.cached_friends.get("person")) != TYPE_DICTIONARY and not person_keep.is_empty():
-				state.cached_friends["person"] = person_keep
+		## Apply full payload (including person=null) — never patch sticky Mandy over a null backend.
+		state.apply_friends_payload(data)
 		if typeof(data.get("me")) == TYPE_DICTIONARY:
 			me = (data.get("me") as Dictionary).duplicate(true)
 			token = str(me.get("public_connection_token", "")).strip_edges()
@@ -3731,6 +3773,34 @@ func _show_diagnostics() -> void:
 			str(snap.get("last_persist_error", "")) if str(snap.get("last_persist_error", "")) != "" else "(none)",
 		]
 	refresh_status.call()
+	var rel_title := Label.new()
+	rel_title.text = "Relationship"
+	rel_title.add_theme_font_size_override("font_size", 28)
+	rel_title.add_theme_color_override("font_color", Color(0.98, 0.86, 0.45))
+	root.add_child(rel_title)
+	var rel_status := Label.new()
+	rel_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	rel_status.add_theme_font_size_override("font_size", 22)
+	rel_status.add_theme_color_override("font_color", Color(0.92, 0.88, 0.96))
+	root.add_child(rel_status)
+	var refresh_rel := func() -> void:
+		rel_status.text = _relationship_diagnostics_text()
+	refresh_rel.call()
+	root.add_child(_make_button("Refresh My Person State", func() -> void:
+		if not state.is_online():
+			_show_toast("Backend is not configured.")
+			return
+		var fr: Dictionary = await state.friends.get_my_person()
+		if bool(fr.get("ok", false)):
+			var data: Dictionary = fr.get("data", {}) if typeof(fr.get("data")) == TYPE_DICTIONARY else {}
+			state.apply_friends_payload(data)
+			state.mark_cache_fresh("friends")
+			_show_toast("My Person state refreshed")
+		else:
+			_show_toast(str(fr.get("error", "Could not refresh My Person.")))
+		refresh_rel.call()
+		refresh_status.call()
+	))
 	root.add_child(_make_button("Test Backend", func() -> void:
 		if not state.config.is_configured():
 			_show_toast("Backend is not configured.")
@@ -3835,6 +3905,38 @@ func _android_diagnostics_my_person_label() -> String:
 	if person.is_empty() or str(person.get("id", "")).is_empty():
 		return "None"
 	return IdentityHelper.display_name_from_profile(person, ProductStrings.PERSON)
+
+
+func _relationship_diagnostics_text() -> String:
+	## DEBUG only — safe labels, no UUIDs.
+	var rd: Dictionary = state.relationship_debug if typeof(state.relationship_debug) == TYPE_DICTIONARY else {}
+	var active_name := _android_diagnostics_my_person_label()
+	var status := str(rd.get("relationship_status", "none"))
+	if status.is_empty():
+		status = "None"
+	else:
+		status = status.capitalize()
+	var recon := str(rd.get("reconciliation_last_result", "no_change"))
+	var recon_label := "No change"
+	if recon == "created_pairing":
+		recon_label = "Created pairing"
+	elif recon == "error":
+		recon_label = "Error"
+	return (
+		"Active Person: %s\n"
+		+ "Active pairing backend: %s\n"
+		+ "Relationship status: %s\n"
+		+ "Legacy migration eligible: %s\n"
+		+ "Historical accepted request: %s\n"
+		+ "Reconciliation last result: %s"
+	) % [
+		active_name,
+		"Yes" if bool(rd.get("active_pair_backend", false)) else "No",
+		status,
+		"Yes" if bool(rd.get("legacy_migration_eligible", false)) else "No",
+		"Present" if bool(rd.get("historical_accepted_request", false)) else "None",
+		recon_label,
+	]
 
 
 func _android_diagnostics_public_token_available() -> bool:
