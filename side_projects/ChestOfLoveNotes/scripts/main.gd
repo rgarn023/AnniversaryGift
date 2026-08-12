@@ -946,17 +946,19 @@ func _show_main_chest() -> void:
 	_chest.custom_minimum_size = Vector2(chest_w, chest_h)
 	_chest.size = Vector2(chest_w, chest_h)
 	_chest.clip_contents = false
-	## Responsive plant: center X, lower-middle sand so the chest base sits on the ground
-	## plane with room below for nav — not floating mid-scene.
+	## Mechanical ground: align chest FOOT to ChestEnvironment.CHEST_GROUND_Y.
+	## Horizontal placement preserved (centered). Only vertical plant is corrected.
+	var ground_y := ChestEnvironment.CHEST_GROUND_Y
+	var foot_in_host := LoveNotesChest.CHEST_FOOT_Y_FRAC
 	_chest.set_anchors_preset(Control.PRESET_CENTER)
 	_chest.anchor_left = 0.5
 	_chest.anchor_right = 0.5
-	_chest.anchor_top = 0.70
-	_chest.anchor_bottom = 0.70
+	_chest.anchor_top = ground_y
+	_chest.anchor_bottom = ground_y
 	_chest.offset_left = -chest_w * 0.5
 	_chest.offset_right = chest_w * 0.5
-	_chest.offset_top = -chest_h * 0.52
-	_chest.offset_bottom = chest_h * 0.48
+	_chest.offset_top = -chest_h * foot_in_host
+	_chest.offset_bottom = chest_h * (1.0 - foot_in_host)
 	_chest.z_index = 5
 	_chest.tapped.connect(_on_chest_tapped)
 	chest_area.add_child(_chest)

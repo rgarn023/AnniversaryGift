@@ -42,48 +42,46 @@ const FRONT_RIM := "res://assets/art/chest/chest_front_rim.png"
 const CONTACT_SHADOW := "res://assets/art/chest/chest_contact_shadow.png"
 ## Taller transparent canvas (foot locked at y=367) — extra headroom, no plant drift.
 const FRAME_CANVAS := Vector2(384, 496)
-const EMPTY_FRAME_COUNT := 13
-const SCROLL_FRAME_COUNT := 13
-## Shared open cadence for empty + unread: closed→crack→quarter→half→late→open.
-const OPEN_DURATION_SEC := 1.68
-const OPEN_DURATION_RM := 0.36
-const ANTICIPATION_SEC := 0.08
-const SETTLE_SEC := 0.12
-const MAGICAL_SWELL_SEC := 0.14
-## Scroll emerge after fully open — peek→partial→halfway→clear→final.
-const SCROLL_EMERGE_SEC := 1.28
+## Absolute plant row in authored frames (matches prepare lock foot / BASE_Y).
+const CHEST_FOOT_CANVAS_Y := 394.0
+## Foot as fraction of FRAME_CANVAS height — scene grounding uses this.
+const CHEST_FOOT_Y_FRAC := CHEST_FOOT_CANVAS_Y / 496.0
+## Clean geometrically-compatible opening only (v46 audit): closed→crack→early→half→open.
+const EMPTY_FRAME_COUNT := 5
+## Scroll sheet: 5 shared open poses + 5 layered rise composites (preload only).
+const SCROLL_FRAME_COUNT := 10
+## Deliberate reward cadence — shorter clean arc beats longer mismatched swaps.
+const OPEN_DURATION_SEC := 1.42
+const OPEN_DURATION_RM := 0.32
+const ANTICIPATION_SEC := 0.10
+const SETTLE_SEC := 0.11
+const MAGICAL_SWELL_SEC := 0.12
+## Scroll emerge after fully open — peek→25%→50%→65–70%→final.
+const SCROLL_EMERGE_SEC := 1.20
 ## Intentional hold on the completed reward pose before note handoff.
 const REWARD_HOLD_SEC := 0.45
 ## Tiny settle pulse only — must not read as the chest growing while opening.
 const EMPHASIS_SCALE := 1.003
 ## Progress split when sampling combined unread progress (validation / short path).
-const SCROLL_REVEAL_START_PROGRESS := 0.54
-## Compat index marker (legacy baked scroll frames start at 08; runtime uses layers).
-const SCROLL_REVEAL_START_INDEX := 8
+const SCROLL_REVEAL_START_PROGRESS := 0.52
+## Compat index marker (legacy baked scroll frames; runtime uses layers).
+const SCROLL_REVEAL_START_INDEX := 5
 ## Canvas-pixel rise of the separate scroll layer (matches prep final dy span).
 const SCROLL_RISE_CANVAS_PX := 72.0
 ## Soft glow peaks — warm accent only; never washes out rim/scroll/wood.
-const GLOW_OPEN_A := 0.028
-const GLOW_SETTLE_A := 0.040
-const GLOW_RETAP_A := 0.070
-const GLOW_REWARD_HOLD_A := 0.022
+const GLOW_OPEN_A := 0.016
+const GLOW_SETTLE_A := 0.024
+const GLOW_RETAP_A := 0.048
+const GLOW_REWARD_HOLD_A := 0.012
 
-## Relative dwell weights per empty pose — similar poses advance faster; larger
-## lid motion gets more intermediate time. Normalized at playback.
+## Relative dwell weights for the 5 compatible poses — anticipation dwells short;
+## larger lid motion (early→half→open) gets more time. Normalized at playback.
 const EMPTY_POSE_WEIGHTS := [
-	0.42, ## 0 closed
-	0.50, ## 1 pre_crack
-	0.58, ## 2 crack
-	0.62, ## 3 early_glow
-	0.92, ## 4 early_open
-	1.10, ## 5 opening
-	1.18, ## 6 opening_more
-	1.28, ## 7 half_open
-	1.20, ## 8 more_open
-	1.14, ## 9 near_full
-	1.08, ## 10 three_quarter
-	0.98, ## 11 nearly_open
-	0.72, ## 12 fully_open
+	0.48, ## 0 closed
+	0.72, ## 1 early_crack
+	1.05, ## 2 early_open
+	1.28, ## 3 half_open
+	0.90, ## 4 fully_open
 ]
 
 @export var reduced_motion: bool = false
@@ -144,8 +142,8 @@ static func preload_assets() -> void:
 	_load_cached(SCROLL_LAYER)
 	_load_cached(FRONT_RIM)
 	_load_cached(CONTACT_SHADOW)
-	_sprite_frames_empty = _build_sprite_frames("empty_open", _empty_cache, 12.0)
-	_sprite_frames_scroll = _build_sprite_frames("scroll_open", _scroll_cache, 13.0)
+	_sprite_frames_empty = _build_sprite_frames("empty_open", _empty_cache, 8.0)
+	_sprite_frames_scroll = _build_sprite_frames("scroll_open", _scroll_cache, 10.0)
 	_preloaded = true
 
 
@@ -231,7 +229,8 @@ func _build_visuals() -> void:
 	_shadow_view.stretch_mode = TextureRect.STRETCH_SCALE
 	_shadow_view.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	_shadow_view.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_shadow_view.modulate = Color(1, 1, 1, 0.78)
+	## Soft / restrained — never a hard blot that reads as a hover gap.
+	_shadow_view.modulate = Color(1, 1, 1, 0.62)
 	_shadow_view.z_index = 1
 	_root_visual.add_child(_shadow_view)
 
@@ -354,6 +353,13 @@ func _make_particles(
 	return p
 
 
+func foot_y_in_control() -> float:
+	## Visible base / plant Y inside this control after layout.
+	if _anchor_rect.size.y <= 1.0:
+		return size.y * CHEST_FOOT_Y_FRAC
+	return _anchor_rect.position.y + _anchor_rect.size.y * CHEST_FOOT_Y_FRAC
+
+
 func _layout_frames() -> void:
 	if not _ready_visuals:
 		return
@@ -366,28 +372,32 @@ func _layout_frames() -> void:
 	_fit_scale = fit
 	var draw_w: float = FRAME_CANVAS.x * fit
 	var draw_h: float = FRAME_CANVAS.y * fit
-	## Slight vertical bias so the planted chest sits on the sand plane.
+	## Plant the authored foot on a fixed ground line inside this control.
+	## CHEST_FOOT_Y_FRAC is the sand contact within the chest host; scene code
+	## aligns that host line to ChestEnvironment.sand_contact_y_frac().
 	var left: float = (area.x - draw_w) * 0.5
-	var top: float = (area.y - draw_h) * 0.48
+	var foot_y: float = area.y * CHEST_FOOT_Y_FRAC
+	var top: float = foot_y - draw_h * CHEST_FOOT_Y_FRAC
 	_anchor_rect = Rect2(left, top, draw_w, draw_h)
 	_place_rect(_frame_view, _anchor_rect)
 	_place_scroll_and_rim()
-	## Tight elliptical contact shadow directly under the foot (not a hover blot).
+	## Contact shadow: directly under the foot, kissing the base (no hover gap).
 	if _shadow_view:
-		var sh_w := draw_w * 0.58
-		var sh_h := draw_h * 0.055
+		var sh_w := draw_w * 0.62
+		var sh_h := draw_h * 0.048
+		var sh_y := foot_y - sh_h * 0.22
 		_place_rect(_shadow_view, Rect2(
 			_anchor_rect.position.x + (draw_w - sh_w) * 0.5,
-			_anchor_rect.position.y + draw_h * 0.742,
+			sh_y,
 			sh_w,
 			sh_h
 		))
 	## Soft radial pulse over the cavity — circular texture, not a box.
 	_place_rect(_glow_pulse, Rect2(
-		_anchor_rect.position.x + draw_w * 0.28,
-		_anchor_rect.position.y + draw_h * 0.38,
-		draw_w * 0.44,
-		draw_h * 0.26
+		_anchor_rect.position.x + draw_w * 0.30,
+		_anchor_rect.position.y + draw_h * 0.40,
+		draw_w * 0.40,
+		draw_h * 0.22
 	))
 	var cavity_center := Vector2(area.x * 0.5, _anchor_rect.position.y + draw_h * 0.48)
 	_dust.position = cavity_center
@@ -408,12 +418,12 @@ func _place_scroll_and_rim() -> void:
 		return
 	var draw_w := _anchor_rect.size.x
 	var draw_h := _anchor_rect.size.y
-	## Cavity clip window: from above the open lid down to the front lip.
-	## Scroll content below the lip is clipped away (hidden inside the chest).
-	var clip_x := _anchor_rect.position.x + draw_w * 0.22
-	var clip_w := draw_w * 0.56
-	var clip_y := _anchor_rect.position.y + draw_h * 0.18
-	var clip_h := draw_h * 0.40
+	## Cavity clip: lid top stays clear; front rim is the only occluder.
+	## Narrower than the lid so the love-note proportion stays believable.
+	var clip_x := _anchor_rect.position.x + draw_w * 0.30
+	var clip_w := draw_w * 0.40
+	var clip_y := _anchor_rect.position.y + draw_h * 0.16
+	var clip_h := draw_h * 0.42
 	if _scroll_clip:
 		_place_rect(_scroll_clip, Rect2(clip_x, clip_y, clip_w, clip_h))
 	var rise_px := -_scroll_rise * SCROLL_RISE_CANVAS_PX * _fit_scale
@@ -425,6 +435,7 @@ func _place_scroll_and_rim() -> void:
 		_place_rect(_scroll_view, Rect2(local_x, local_y, draw_w, draw_h))
 	if _rim_view:
 		## Rim stays planted with the chest — gold lip sits over the clip bottom.
+		## Draw order: beach → chest → scroll (clip) → front rim → glow/particles → UI.
 		_place_rect(_rim_view, _anchor_rect)
 
 
@@ -918,6 +929,7 @@ func _open_full() -> void:
 		chest_state = ChestState.OPEN_SCROLL_EMERGING
 		_set_scroll_layers_visible(true)
 		_set_scroll_rise_amount(0.0)
+		## Smooth Y rise with easing: peek → 25% → 50% → 65–70% → final.
 		var rise := create_tween()
 		rise.tween_method(_set_scroll_rise_amount, 0.0, 1.0, SCROLL_EMERGE_SEC).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 		await rise.finished

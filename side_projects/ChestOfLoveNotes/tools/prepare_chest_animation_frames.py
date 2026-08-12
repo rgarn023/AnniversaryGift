@@ -11,16 +11,16 @@ Outputs:
   assets/art/chest/scroll_rolled.png   (clean parchment-only scroll layer)
   assets/art/chest/chest_front_rim.png (thin front-lip occlusion for scroll rise)
 
-v45 polish:
+v46 polish:
+  - HARD GEOMETRY: only use source poses with matching body construction
+  - primary-mass crop rejects next-cell lid bleed (row-3 base corruption)
+  - fewer compatible opening poses (clean 5-stage) over dense mismatched sets
   - empty + unread share glowing-sheet opening geometry (one chest family)
-  - scroll rise uses ONE upright vertical love-note (rotated high-res rolled parchment)
+  - scroll rise uses ONE upright vertical love-note (standalone parchment)
   - never stacked horizontal rollers / white plank slabs
   - never magical-sheet chest pixels in the scroll layer
   - runtime prefers separate scroll + rim layers over baked late frames
-  - normalize body exposure across opening poses
-  - rim-occluded peek → rise → final reward stages
-  - normalize lower-body visual scale across poses (foot-locked)
-  - preserve absolute foot lock (BASE_Y) and canvas center
+  - normalize body exposure / lower-body scale (foot-locked)
   - reject top-sheared source cells
 """
 
@@ -30,7 +30,7 @@ import json
 from pathlib import Path
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFilter
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "assets" / "art" / "chest" / "frames"
@@ -43,7 +43,7 @@ MAGIC_SHEET = ROOT / "assets" / "chest" / "animation" / "magical_treasure_chest_
 CANVAS_W = 384
 CANVAS_H = 496
 BASE_X = CANVAS_W // 2
-BASE_Y = 367  ## absolute plant row — unchanged so centering holds
+BASE_Y = 394  ## absolute plant row — v46 primary-mass foot lock
 
 
 def load_rgb(path: Path) -> np.ndarray:
@@ -79,6 +79,62 @@ def bg_mask(arr: np.ndarray) -> np.ndarray:
 	near_bg = (diff < 22) & (~chestish)
 	black_matte = (lum < 12) & (diff < 40) & (~chestish)
 	return near_bg | black_matte
+
+
+def _body_mask_rgb(arr: np.ndarray) -> np.ndarray:
+	"""Wood/gold body mask that ignores sparse glow dust and sheet matte."""
+	is_bg = bg_mask(arr)
+	r = arr[:, :, 0].astype(np.float32)
+	g = arr[:, :, 1].astype(np.float32)
+	b = arr[:, :, 2].astype(np.float32)
+	lum = (r + g + b) / 3.0
+	body = ~is_bg
+	wood = body & (lum < 175) & (r > 40) & (r > b) & (g > b * 0.65)
+	gold = body & (lum >= 70) & (lum < 215) & (r > 115) & (g > 75) & ((r - b) > 35)
+	return wood | gold
+
+
+def primary_mass_crop_h(arr: np.ndarray) -> int:
+	"""Crop to the primary chest mass — drop next-cell lid bleed under a gap.
+
+	Row-3 source cells (src 12–17) often include the top of the next sprite under
+	a dark band. Using that fragment as the foot anchor warps geometry. Keep the
+	largest contiguous wood/gold mass and cut below its true base.
+	"""
+	solid = _body_mask_rgb(arr)
+	row_sum = solid.sum(axis=1).astype(np.int32)
+	h = arr.shape[0]
+	if int(row_sum.max()) < 20:
+		return h
+	thresh = max(20, int(row_sum.max() * 0.15))
+	best: tuple[int, int, int] | None = None
+	i = 0
+	while i < h:
+		if row_sum[i] >= thresh:
+			j = i
+			while j + 1 < h and row_sum[j + 1] >= max(8, int(thresh * 0.45)):
+				j += 1
+			score = int(row_sum[i : j + 1].sum())
+			if best is None or score > best[2]:
+				best = (i, j, score)
+			i = j + 1
+		else:
+			i += 1
+	if best is None:
+		return h
+	_y0, y1, _score = best
+	## Keep a tiny pad under the feet; never keep a detached lower fragment.
+	crop_h = min(h, y1 + 3)
+	## If a dark gap then another mass exists below, force cut at the gap.
+	lum = arr.mean(axis=2)
+	energy = (lum > 30).sum(axis=1).astype(np.int32)
+	for y in range(max(int(h * 0.45), y1 - 2), min(h - 6, y1 + 24)):
+		if energy[y : y + 3].mean() < 22 and energy[y + 3 :].sum() > 180:
+			## Only cut when the upper mass is already substantial.
+			if energy[:y].sum() > 900:
+				crop_h = min(crop_h, y)
+				break
+	return crop_h
 
 
 def crop_bleed(arr: np.ndarray) -> tuple[np.ndarray, int]:
@@ -126,22 +182,49 @@ def crop_bleed(arr: np.ndarray) -> tuple[np.ndarray, int]:
 					best_y = y
 			if best_y is not None and energy[best_y:].sum() > 200:
 				crop_h = best_y
+	## Primary-mass crop wins when it is stricter — kills row-3 next-cell feet.
+	mass_h = primary_mass_crop_h(arr)
+	crop_h = min(crop_h, mass_h)
 	if crop_h < h:
 		return arr[:crop_h].copy(), crop_h
 	return arr, h
 
 
 def find_base(arr: np.ndarray) -> tuple[float, float] | None:
-	is_bg = bg_mask(arr)
-	r = arr[:, :, 0].astype(np.float32)
-	g = arr[:, :, 1].astype(np.float32)
-	b = arr[:, :, 2].astype(np.float32)
-	lum = (r + g + b) / 3.0
-	body = ~is_bg
-	wood = body & (lum < 175) & (r > 40) & (r > b) & (g > b * 0.65)
-	gold = body & (lum >= 70) & (lum < 215) & (r > 115) & (g > 75) & ((r - b) > 35)
-	solid = wood | gold
+	solid = _body_mask_rgb(arr)
 	h = arr.shape[0]
+	## Prefer the primary mass base so next-cell fragments never win.
+	row_sum = solid.sum(axis=1).astype(np.int32)
+	if int(row_sum.max()) >= 20:
+		thresh = max(20, int(row_sum.max() * 0.15))
+		best: tuple[int, int, int] | None = None
+		i = 0
+		while i < h:
+			if row_sum[i] >= thresh:
+				j = i
+				while j + 1 < h and row_sum[j + 1] >= max(8, int(thresh * 0.45)):
+					j += 1
+				score = int(row_sum[i : j + 1].sum())
+				if best is None or score > best[2]:
+					best = (i, j, score)
+				i = j + 1
+			else:
+				i += 1
+		if best is not None:
+			y0, y1, _s = best
+			local = row_sum[y0 : y1 + 1]
+			peak = int(local.max())
+			base_local = len(local) - 1
+			for k in range(len(local) - 1, -1, -1):
+				if local[k] >= max(8, int(peak * 0.22)):
+					base_local = k
+					break
+			y_max = y0 + base_local
+			band = max(y0, y_max - 14)
+			band_m = solid & (np.arange(h)[:, None] >= band) & (np.arange(h)[:, None] <= y_max)
+			_bys, bxs = np.where(band_m)
+			if len(bxs) >= 5:
+				return float(np.median(bxs)), float(y_max)
 	lower = np.zeros_like(solid)
 	lower[int(h * 0.40) :, :] = solid[int(h * 0.40) :, :]
 	ys, xs = np.where(lower)
@@ -154,7 +237,7 @@ def find_base(arr: np.ndarray) -> tuple[float, float] | None:
 	band_m = lower & (np.arange(h)[:, None] >= band)
 	_bys, bxs = np.where(band_m)
 	if len(bxs) < 5:
-		band_m = body & (np.arange(h)[:, None] >= band)
+		band_m = solid & (np.arange(h)[:, None] >= band)
 		_bys, bxs = np.where(band_m)
 	cx = float(np.median(bxs)) if len(bxs) else float(np.median(xs))
 	return cx, float(y_max)
@@ -676,8 +759,8 @@ def build_clean_scroll_layer(open_placed: np.ndarray) -> np.ndarray:
 	body_w = lower_body_width(open_placed) or 180.0
 	## Narrower than the chest opening — believable love-note width/height.
 	## Keep short enough that the final rise stays inside the cavity (not a pillar).
-	target_w = max(46, int(round(body_w * 0.34)))
-	target_h = max(100, int(round(chest_h * 0.55)))
+	target_w = max(44, int(round(body_w * 0.30)))
+	target_h = max(96, int(round(chest_h * 0.52)))
 
 	try:
 		scroll = build_vertical_love_note(target_w, target_h)
@@ -1052,17 +1135,14 @@ def process_scroll_with_rise(_magic_path: Path | None = None) -> list[dict]:
 	for p in out_dir.glob("*.png"):
 		p.unlink()
 
-	## Same clean glowing-sheet opening arc as empty — subsampled to 8 poses so
-	## unread opening cadence matches empty until fully open, then diverges.
-	open_picks = [0, 7, 9, 11, 13, 15, 16, 17]
+	## Same clean glowing-sheet opening arc as empty — geometrically compatible
+	## subset only (matches empty_picks). Longer mismatched sets glitch worse.
+	open_picks = [0, 6, 7, 11, 15]
 	open_labels = [
 		"closed",
-		"crack",
+		"early_crack",
 		"early_open",
-		"opening_more",
 		"half_open",
-		"three_quarter",
-		"nearly_open",
 		"open_ready",
 	]
 	## Progressive scroll rise: dy>0 lowers (behind rim); dy<0 lifts.
@@ -1186,29 +1266,56 @@ def process_scroll_with_rise(_magic_path: Path | None = None) -> list[dict]:
 	return meta
 
 
+def write_contact_shadow() -> None:
+	"""Soft elliptical contact shadow — densest at the top (under feet), no hover gap."""
+	w, h = 1024, 160
+	img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+	# Multi-pass soft ellipse; bias opacity toward the top edge so it kisses the feet.
+	layers = [
+		(0.92, 0.78, 55),
+		(0.78, 0.55, 42),
+		(0.58, 0.34, 34),
+		(0.38, 0.18, 26),
+	]
+	for rw, rh, a in layers:
+		layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+		d = ImageDraw.Draw(layer)
+		cx, cy = w * 0.5, h * 0.28
+		d.ellipse(
+			[cx - w * rw * 0.5, cy - h * rh * 0.5, cx + w * rw * 0.5, cy + h * rh * 0.5],
+			fill=(18, 12, 8, a),
+		)
+		layer = layer.filter(ImageFilter.GaussianBlur(14 if rw > 0.7 else 9))
+		img = Image.alpha_composite(img, layer)
+	out = ART / "chest_contact_shadow.png"
+	img.save(out, "PNG", optimize=True)
+	print(f"wrote {out} ({out.stat().st_size} bytes)")
+
+
 def main() -> None:
-	## Denser clean opening poses. Skip near-duplicate closed wobble 1–5.
-	## Exclude glow src 18–23 — cell tops physically shear the lid tip.
-	empty_picks = [0, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
+	## v46: ONLY geometrically compatible opening poses.
+	## Audited all glowing-sheet cells 0–23:
+	##   KEEP: 0 (closed), 6 (early crack), 7 (early open), 11 (half), 15 (late open)
+	##   REJECT closed wobble 1–5 (near-duplicates of 0)
+	##   REJECT 8–10 (redundant mid; slight lid-thickness wobble vs neighbors)
+	##   REJECT 12–14 (next-cell bleed historically corrupted feet; near 11→15)
+	##   REJECT 16–17 (near-duplicates of 15; no new clean lid stage)
+	##   REJECT 18–23 (top-sheared lids)
+	## Additional true fully-open in-betweens with matching body/camera are needed
+	## for a longer fluid arc — do not invent them by warping mismatched cells.
+	empty_picks = [0, 6, 7, 11, 15]
 	empty_labels = [
 		"closed",
-		"pre_crack",
-		"crack",
-		"early_glow",
+		"early_crack",
 		"early_open",
-		"opening",
-		"opening_more",
 		"half_open",
-		"more_open",
-		"near_full",
-		"three_quarter",
-		"nearly_open",
 		"fully_open",
 	]
 	print("EMPTY")
 	process(GLOW_SHEET, "empty", empty_picks, "empty", empty_labels)
 	print("SCROLL (shared empty opening + clean parchment rise)")
 	process_scroll_with_rise(MAGIC_SHEET)
+	write_contact_shadow()
 
 
 if __name__ == "__main__":

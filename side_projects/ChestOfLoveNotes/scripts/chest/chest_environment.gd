@@ -128,7 +128,11 @@ func _process(delta: float) -> void:
 	_horizon_sheen.color.a = pulse
 
 
-## Sand contact band as a fraction of this control's height (for chest grounding).
+## Sand contact / ground plane as a fraction of this control's height.
+## Main chest host aligns LoveNotesChest foot to this constant (CHEST_GROUND_Y).
+const CHEST_GROUND_Y := 0.76
+
+
 func sand_contact_y_frac() -> float:
-	## Chest plant target: lower-middle sand with room below for ground + nav.
-	return 0.74
+	## Chest plant target: lower sand plane with room below for ground + nav.
+	return CHEST_GROUND_Y

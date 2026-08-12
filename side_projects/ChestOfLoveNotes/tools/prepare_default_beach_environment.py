@@ -4,9 +4,9 @@
 Output:
   assets/art/background/environments/default_beach.png
 
-v45: stylized-realistic romantic twilight beach — sharper sand grain/dunes,
-natural shoreline with foam/wet edge, calmer non-striped water, soft atmosphere.
-Complements the opaque fantasy chest without fighting it.
+v46: polish-only pass on the v45 twilight beach — finer foam edge, wet-sand
+transition, low-amplitude water variation/reflection, restrained sand grounding
+under the chest. Do NOT redesign sky/composition.
 Mobile-friendly baked raster (no expensive runtime shaders).
 """
 
@@ -151,14 +151,24 @@ def paint_ocean(base, shore_ys, rng):
 			refl = max(0.0, 1.0 - rx*2.4) * max(0.0, 1.0 - (y-horizon)/max(h*0.12,1))
 			col = col*(1-refl*0.26) + reflect*(refl*0.26)
 			img[y, x] = np.clip(col, 0, 255)
-	# soft glints
+	# soft glints + low-amplitude wave crests (natural, not striped)
 	gl = Image.new("RGBA", (w, h), (0,0,0,0))
 	gd = ImageDraw.Draw(gl)
-	for _ in range(48):
+	for _ in range(56):
 		x = int(np.clip(rng.normal(w*0.64, w*0.12), 6, w-6))
 		y = int(rng.integers(horizon+8, int(np.mean(shore_ys))-10))
 		gd.ellipse([x,y,x+2,y+1], fill=(255,220,180,int(rng.integers(12,32))))
-	gl = gl.filter(ImageFilter.GaussianBlur(1.3))
+	for _ in range(18):
+		y0 = int(rng.integers(horizon + 14, int(np.mean(shore_ys)) - 18))
+		phase = float(rng.uniform(0, 6.28))
+		amp = float(rng.uniform(1.2, 2.8))
+		pts = []
+		for x in range(0, w, 6):
+			yy = y0 + int(amp * np.sin(x * 0.018 + phase) + 0.7 * np.sin(x * 0.041 + phase * 1.3))
+			pts.append((x, yy))
+		if len(pts) > 2:
+			gd.line(pts, fill=(210, 230, 245, int(rng.integers(10, 22))), width=1)
+	gl = gl.filter(ImageFilter.GaussianBlur(1.35))
 	out = Image.alpha_composite(Image.fromarray(np.clip(img,0,255).astype(np.uint8),"RGB").convert("RGBA"), gl)
 	# atmospheric haze
 	haze = Image.new("RGBA", (w,h), (0,0,0,0))
@@ -225,42 +235,56 @@ def paint_sand(base, shore_ys, rng):
 		delta = np.array([rng.uniform(-8,10), rng.uniform(-6,7), rng.uniform(-8,3)], np.float32)
 		img[mask] = np.clip(img[mask] + delta, 0, 255)
 	rgba = Image.fromarray(np.clip(img,0,255).astype(np.uint8), "RGB").convert("RGBA")
-	# wet band
+	# wet-sand transition — softer, less artificial hard boundary
 	wetb = Image.new("RGBA", (w,h), (0,0,0,0))
 	wd = ImageDraw.Draw(wetb)
-	pts_hi = [(x, int(shore_ys[x]-1+1.5*np.sin(x*0.05))) for x in range(w)]
-	pts_lo = [(x, int(shore_ys[x]+22+2.2*np.sin(x*0.035+0.7))) for x in range(w-1,-1,-1)]
-	wd.polygon(pts_hi+pts_lo, fill=(65,78,86,60))
-	wetb = wetb.filter(ImageFilter.GaussianBlur(4.0))
+	pts_hi = [(x, int(shore_ys[x]-2+1.8*np.sin(x*0.05))) for x in range(w)]
+	pts_lo = [(x, int(shore_ys[x]+28+2.6*np.sin(x*0.033+0.7))) for x in range(w-1,-1,-1)]
+	wd.polygon(pts_hi+pts_lo, fill=(62,76,84,68))
+	pts_mid = [(x, int(shore_ys[x]+8+1.8*np.sin(x*0.04+1.2))) for x in range(w)]
+	pts_mid_lo = [(x, int(shore_ys[x]+18+2.0*np.sin(x*0.038+0.4))) for x in range(w-1,-1,-1)]
+	wd.polygon(pts_mid+pts_mid_lo, fill=(90,88,78,36))
+	wetb = wetb.filter(ImageFilter.GaussianBlur(5.0))
 	rgba = Image.alpha_composite(rgba, wetb)
-	# foam
+	# natural foam edge — thin broken lace, not a hard white stroke
 	foam = Image.new("RGBA", (w,h), (0,0,0,0))
 	fd = ImageDraw.Draw(foam)
-	pts_hi2 = [(x, int(shore_ys[x]-2+1.7*np.sin(x*0.06))) for x in range(w)]
-	pts_lo2 = [(x, int(shore_ys[x]+5+1.2*np.sin(x*0.045+1.0))) for x in range(w-1,-1,-1)]
-	fd.polygon(pts_hi2+pts_lo2, fill=(236,230,220,50))
-	for x in range(0,w,4):
-		y=int(shore_ys[x])
-		fd.ellipse([x-2,y-1,x+3,y+2], fill=(245,240,230,int(rng.integers(20,50))))
-	foam = foam.filter(ImageFilter.GaussianBlur(2.0))
+	pts_hi2 = [(x, int(shore_ys[x]-3+2.1*np.sin(x*0.055)+0.9*np.sin(x*0.13))) for x in range(w)]
+	pts_lo2 = [(x, int(shore_ys[x]+4+1.4*np.sin(x*0.048+1.0))) for x in range(w-1,-1,-1)]
+	fd.polygon(pts_hi2+pts_lo2, fill=(238,232,222,42))
+	for x in range(0, w, 3):
+		y = int(shore_ys[x] + 0.8 * np.sin(x * 0.09))
+		if rng.random() < 0.72:
+			fd.ellipse(
+				[x - 2, y - 1, x + int(rng.integers(2, 5)), y + int(rng.integers(1, 3))],
+				fill=(248, 244, 234, int(rng.integers(18, 56))),
+			)
+		if rng.random() < 0.22:
+			fd.ellipse(
+				[x - 1, y + 2, x + 2, y + 4],
+				fill=(220, 214, 200, int(rng.integers(10, 28))),
+			)
+	foam = foam.filter(ImageFilter.GaussianBlur(1.6))
 	rgba = Image.alpha_composite(rgba, foam)
-	# warm chest spill
+	# restrained warm spill + ambient darkening under chest plant point
 	glow = Image.new("RGBA", (w,h), (0,0,0,0))
 	gd = ImageDraw.Draw(glow)
-	cx, cy = int(w*0.50), int(h*0.74)
-	for r,a in [(160,14),(105,20),(60,28)]:
-		gd.ellipse([cx-int(r*1.55), cy-int(r*0.48), cx+int(r*1.55), cy+int(r*0.48)], fill=(255,168,88,a))
-	glow = glow.filter(ImageFilter.GaussianBlur(18))
+	cx, cy = int(w*0.50), int(h*0.76)
+	for r,a in [(150,12),(96,18),(52,24)]:
+		gd.ellipse([cx-int(r*1.55), cy-int(r*0.42), cx+int(r*1.55), cy+int(r*0.42)], fill=(255,168,88,a))
+	for r,a in [(120,16),(70,22)]:
+		gd.ellipse([cx-int(r*1.35), cy-int(r*0.30), cx+int(r*1.35), cy+int(r*0.34)], fill=(28,18,10,a))
+	glow = glow.filter(ImageFilter.GaussianBlur(16))
 	rgba = Image.alpha_composite(rgba, glow)
 	return np.array(rgba.convert("RGB"))
 
 
 def main():
 	OUT.parent.mkdir(parents=True, exist_ok=True)
-	rng = np.random.default_rng(45)
+	rng = np.random.default_rng(46)
 	horizon_frac = 0.455
 	shore_base = 0.565
-	shore_amp = 24.0
+	shore_amp = 26.0
 	sky = paint_sky(rng)
 	shore_ys = np.array([shoreline_y(float(x), H*shore_base, shore_amp) for x in range(W)], np.float32)
 	# soft horizon glow band with slight undulation
