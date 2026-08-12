@@ -128,8 +128,14 @@ func _test_chest_empty_and_new_scroll_contracts() -> void:
 	var chest := FileAccess.get_file_as_string("res://scripts/chest/treasure_chest.gd")
 	_assert(chest.contains("emerge_scroll: bool = false"), "scroll emerge gated by flag")
 	_assert(chest.contains("play_open_empty_pulse"), "empty already-open pulse")
-	_assert(chest.contains("_show_frame_progress"), "frame progress open")
-	_assert(chest.contains("FRAME_FILES"), "frame file list")
+	_assert(
+		chest.contains("_set_frame_progress") or chest.contains("_show_frame_progress"),
+		"frame progress open"
+	)
+	_assert(
+		chest.contains("assets/art/chest/frames/") or chest.contains("FRAME_FILES"),
+		"frame file list"
+	)
 	_assert(not chest.contains("FRAME_KEYS"), "static pose table removed")
 	var main := FileAccess.get_file_as_string("res://scripts/main.gd")
 	_assert(main.contains("has_new"), "main distinguishes new-scroll path")

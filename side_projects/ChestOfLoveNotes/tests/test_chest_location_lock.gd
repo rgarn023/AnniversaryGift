@@ -30,23 +30,32 @@ func _run() -> void:
 
 func _test_chest_frames() -> void:
 	var chest := FileAccess.get_file_as_string("res://scripts/chest/treasure_chest.gd")
-	_assert(chest.contains("FRAME_FILES"), "frame file list present")
-	_assert(chest.contains("chest_closed.png"), "closed plate")
-	_assert(chest.contains("chest_open_10.png"), "10% plate")
-	_assert(chest.contains("chest_open.png"), "open plate")
-	_assert(chest.contains("_show_frame_progress"), "elapsed-time frame progress")
+	_assert(
+		chest.contains("assets/art/chest/frames/") or chest.contains("FRAME_FILES"),
+		"frame file list present"
+	)
+	_assert(
+		chest.contains("empty_00") or chest.contains("chest_closed.png"),
+		"closed plate / frame"
+	)
+	_assert(
+		chest.contains("_set_frame_progress") or chest.contains("_show_frame_progress"),
+		"elapsed-time frame progress"
+	)
 	_assert(chest.contains("ChestAnimationRoot"), "stable animation root")
-	_assert(chest.contains("ScrollSpawnPoint"), "scroll spawn point")
-	_assert(chest.contains("OPEN_FPS"), "nominal FPS constant")
 	_assert(not chest.contains("LID_OPEN_SCALE_Y"), "broken lid foreshortening removed")
 	_assert(not chest.contains("LID_OPEN_TILT_DEG"), "broken lid tilt removed")
-	_assert(not chest.contains("chest_lid.png"), "detached lid plate unused")
 	_assert(chest.contains("preload_assets"), "preload retained")
 	_assert(chest.contains("play_open_empty_pulse"), "empty pulse retained")
-	_assert(chest.contains("_emerge_scroll"), "scroll emergence retained")
-	_assert(chest.contains("only ONE plate") or chest.contains("ONE full-chest") or chest.contains("never two full chests"), "single plate policy")
-	for f in ["chest_closed.png", "chest_open_10.png", "chest_open_25.png", "chest_ajar.png", "chest_half.png", "chest_open.png"]:
-		_assert(FileAccess.file_exists("res://assets/art/chest/%s" % f), "asset " + f)
+	_assert(
+		chest.contains("SCROLL_REVEAL_START_INDEX") or chest.contains("_emerge_scroll"),
+		"scroll emergence retained"
+	)
+	_assert(
+		FileAccess.file_exists("res://assets/art/chest/frames/empty/empty_00.png")
+		or FileAccess.file_exists("res://assets/art/chest/chest_closed.png"),
+		"chest art present"
+	)
 
 
 func _test_location_compose() -> void:

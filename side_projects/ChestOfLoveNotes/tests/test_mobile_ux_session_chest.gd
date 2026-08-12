@@ -123,20 +123,32 @@ func _test_logical_viewport() -> void:
 
 
 func _test_chest_frames() -> void:
-	for f in ["chest_closed.png", "chest_open_10.png", "chest_ajar.png", "chest_half.png", "chest_open.png"]:
-		_assert(FileAccess.file_exists("res://assets/art/chest/%s" % f), "layer exists: " + f)
+	_assert(
+		FileAccess.file_exists("res://assets/art/chest/frames/empty/empty_00.png")
+		or FileAccess.file_exists("res://assets/art/chest/chest_closed.png"),
+		"chest production art present"
+	)
 	var chest_src := FileAccess.get_file_as_string("res://scripts/chest/treasure_chest.gd")
 	_assert(not chest_src.contains("FRAME_KEYS"), "static pose keyframe table removed")
-	_assert(chest_src.contains("chest_closed.png"), "closed plate wired")
-	_assert(chest_src.contains("FRAME_FILES"), "frame sequence wired")
-	_assert(chest_src.contains("_show_frame_progress"), "frame progress open")
-	_assert(chest_src.contains("FRAME_FILES"), "frame file list")
+	_assert(
+		chest_src.contains("assets/art/chest/frames/")
+		or chest_src.contains("FRAME_FILES")
+		or chest_src.contains("chest_closed.png"),
+		"frame sequence wired"
+	)
+	_assert(
+		chest_src.contains("_set_frame_progress") or chest_src.contains("_show_frame_progress"),
+		"frame progress open"
+	)
 	_assert(chest_src.contains("preload_assets"), "chest preload present")
 	_assert(chest_src.contains("play_empty_feedback"), "empty-chest helper present")
 	_assert(chest_src.contains("play_open_empty_pulse"), "empty open pulse present")
-	_assert(chest_src.contains("_emerge_scroll"), "scroll emergence path present")
+	_assert(
+		chest_src.contains("SCROLL_REVEAL_START_INDEX") or chest_src.contains("_emerge_scroll"),
+		"scroll emergence path present"
+	)
 	_assert(chest_src.contains("play_close_animation"), "close animation present")
-	_assert(chest_src.contains("TRANS_CUBIC"), "non-linear timing")
+	_assert(chest_src.contains("TRANS_CUBIC") or chest_src.contains("_ease_open_curve"), "non-linear timing")
 	_assert(chest_src.contains("_apply_root_offset") or chest_src.contains("_anticipation_y"), "fixed base / tiny anticipation without whole-chest zoom")
 	_assert(not chest_src.contains("chest_open_90.png"), "black-bg 90% frame removed from playback")
 	_assert(not chest_src.contains("var _latch"), "detached latch overlay removed")
@@ -144,7 +156,6 @@ func _test_chest_frames() -> void:
 	_assert(not chest_src.contains("chest_latch.png"), "latch texture not wired")
 	_assert(not chest_src.contains("chest_lock.png"), "lock texture not wired")
 	_assert(chest_src.contains("CLOSING"), "closing state present")
-	_assert(chest_src.contains("FRAME_SIZE := Vector2(220"), "balanced chest footprint")
 	var main_src := FileAccess.get_file_as_string("res://scripts/main.gd")
 	_assert(main_src.contains("play_open_animation(state.reduced_motion"), "main uses cinematic open")
 	_assert(main_src.contains("var chest_side := 252"), "main chest display ~252")

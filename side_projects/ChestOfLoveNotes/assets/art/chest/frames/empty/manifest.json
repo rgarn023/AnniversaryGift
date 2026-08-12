@@ -1,0 +1,62 @@
+[
+  {
+    "file": "empty_00.png",
+    "src_index": 0,
+    "label": "closed",
+    "crop_h": 256
+  },
+  {
+    "file": "empty_01.png",
+    "src_index": 7,
+    "label": "crack",
+    "crop_h": 256
+  },
+  {
+    "file": "empty_02.png",
+    "src_index": 9,
+    "label": "early_open",
+    "crop_h": 256
+  },
+  {
+    "file": "empty_03.png",
+    "src_index": 11,
+    "label": "opening",
+    "crop_h": 256
+  },
+  {
+    "file": "empty_04.png",
+    "src_index": 13,
+    "label": "half_open",
+    "crop_h": 201
+  },
+  {
+    "file": "empty_05.png",
+    "src_index": 15,
+    "label": "more_open",
+    "crop_h": 201
+  },
+  {
+    "file": "empty_06.png",
+    "src_index": 17,
+    "label": "near_full",
+    "crop_h": 201
+  },
+  {
+    "file": "empty_07.png",
+    "src_index": 19,
+    "label": "fully_open",
+    "crop_h": 256
+  },
+  {
+    "file": "empty_08.png",
+    "src_index": 21,
+    "label": "open_glow",
+    "crop_h": 256
+  },
+  {
+    "file": "empty_09.png",
+    "src_index": 23,
+    "label": "open_peak",
+    "crop_h": 256
+  }
+]

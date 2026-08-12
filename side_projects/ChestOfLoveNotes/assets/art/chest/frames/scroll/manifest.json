@@ -1,0 +1,80 @@
+[
+  {
+    "file": "scroll_00.png",
+    "src_index": 0,
+    "label": "closed",
+    "crop_h": 256
+  },
+  {
+    "file": "scroll_01.png",
+    "src_index": 7,
+    "label": "crack",
+    "crop_h": 256
+  },
+  {
+    "file": "scroll_02.png",
+    "src_index": 9,
+    "label": "early_open",
+    "crop_h": 256
+  },
+  {
+    "file": "scroll_03.png",
+    "src_index": 11,
+    "label": "opening",
+    "crop_h": 192
+  },
+  {
+    "file": "scroll_04.png",
+    "src_index": 12,
+    "label": "open_ready",
+    "crop_h": 161
+  },
+  {
+    "file": "scroll_05.png",
+    "src_index": 13,
+    "label": "scroll_peek",
+    "crop_h": 162
+  },
+  {
+    "file": "scroll_06.png",
+    "src_index": 14,
+    "label": "scroll_rising",
+    "crop_h": 163
+  },
+  {
+    "file": "scroll_07.png",
+    "src_index": 15,
+    "label": "scroll_mid",
+    "crop_h": 163
+  },
+  {
+    "file": "scroll_08.png",
+    "src_index": 16,
+    "label": "scroll_high",
+    "crop_h": 163
+  },
+  {
+    "file": "scroll_09.png",
+    "src_index": 17,
+    "label": "scroll_higher",
+    "crop_h": 163
+  },
+  {
+    "file": "scroll_10.png",
+    "src_index": 18,
+    "label": "scroll_full",
+    "crop_h": 256
+  },
+  {
+    "file": "scroll_11.png",
+    "src_index": 20,
+    "label": "scroll_present",
+    "crop_h": 256
+  },
+  {
+    "file": "scroll_12.png",
+    "src_index": 22,
+    "label": "scroll_complete",
+    "crop_h": 256
+  }
+]

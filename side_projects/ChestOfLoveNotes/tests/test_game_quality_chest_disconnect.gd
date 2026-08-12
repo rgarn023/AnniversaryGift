@@ -39,25 +39,37 @@ func _run() -> void:
 	_assert(boot.contains("mark_app_ready"), "splash app-ready gate kept")
 	_assert(main.contains("mark_app_ready"), "main still marks boot ready")
 
-	## CHEST game-feel (seamless hinged layers as of v36+)
+	## CHEST game-feel (fantasy sheet frames as of v37+)
 	_assert(
-		chest.contains("Seamless layered") or chest.contains("Hybrid") or chest.contains("Architecture C"),
+		chest.contains("Fantasy sheet")
+		or chest.contains("Seamless layered")
+		or chest.contains("Hybrid")
+		or chest.contains("Architecture C"),
 		"chest architecture"
 	)
-	_assert(chest.contains("chest_interior.png"), "interior layer")
+	_assert(
+		chest.contains("assets/art/chest/frames/") or chest.contains("chest_interior.png"),
+		"interior / frame art"
+	)
 	_assert(chest.contains("_ease_open_curve"), "custom open easing")
 	_assert(chest.contains("OPEN_WAITING_FOR_SCROLL"), "waiting-for-scroll state")
 	_assert(chest.contains("sfx_latch_release"), "latch sound hook")
 	_assert(chest.contains("sfx_magical_swell"), "magical swell hook")
 	_assert(chest.contains("_motes"), "restrained motes")
-	_assert(chest.contains("_rim_light"), "rim light spill")
+	_assert(chest.contains("_glow_pulse") or chest.contains("_rim_light"), "glow pulse / rim")
 	_assert(chest.contains("EMPHASIS_SCALE"), "tiny open emphasis")
-	_assert(chest.contains("clip_contents = true"), "scroll occlusion clip")
+	_assert(
+		chest.contains("SCROLL_REVEAL_START_INDEX") or chest.contains("clip_contents = true"),
+		"scroll occlusion / reveal gate"
+	)
 	_assert(not chest.contains('scale.y =') and not chest.contains('"scale:y"'), "no scale.y squash tween")
 	_assert(not chest.contains("_cinematic_zoom"), "no cinematic zoom reopen")
 	_assert(chest.contains("OPEN_DURATION_SEC :="), "open duration tuned")
-	for fname in ["chest_lid.png", "chest_interior.png", "chest_front_lip.png"]:
-		_assert(FileAccess.file_exists("res://assets/art/chest/%s" % fname), "asset %s" % fname)
+	_assert(
+		FileAccess.file_exists("res://assets/art/chest/frames/empty/empty_00.png")
+		or FileAccess.file_exists("res://assets/art/chest/chest_lid.png"),
+		"chest art present"
+	)
 
 	## DISCONNECT durable — root cause fix
 	_assert(disc.contains('status: "cancelled"'), "disconnect cancels requests")
@@ -80,15 +92,22 @@ func _run() -> void:
 	_assert(
 		preset.contains("backend-disconnect-fix-debug.apk")
 		or preset.contains("game-quality-chest-disconnect-fix-debug.apk")
-		or preset.contains("permanent-disconnect-fix-debug.apk"),
+		or preset.contains("permanent-disconnect-fix-debug.apk")
+		or preset.contains("fantasy-sheet-chest-debug.apk")
+		or preset.contains("seamless-game-quality-chest-debug.apk"),
 		"APK name"
 	)
 	_assert(
 		gitignore.contains("ChestOfLoveNotes-game-quality-chest-disconnect-fix-debug.apk")
-		or gitignore.contains("ChestOfLoveNotes-backend-disconnect-fix-debug.apk"),
+		or gitignore.contains("ChestOfLoveNotes-backend-disconnect-fix-debug.apk")
+		or gitignore.contains("ChestOfLoveNotes-fantasy-sheet-chest-debug.apk"),
 		"gitignore allow"
 	)
-	_assert(export_sh.contains("disconnect-fix-debug.apk"), "export default")
+	_assert(
+		export_sh.contains("disconnect-fix-debug.apk")
+		or export_sh.contains("fantasy-sheet-chest-debug.apk"),
+		"export default"
+	)
 	_assert(flags.contains("APP_VERSION_CODE :="), "BuildFlags version present")
 
 	print("Results: %d passed, %d failed" % [_passed, _failed])

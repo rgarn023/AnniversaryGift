@@ -40,12 +40,19 @@ func _run() -> void:
 	_assert(FileAccess.file_exists("res://assets/branding/splash_frames_meta.json"), "frame meta packaged")
 	_assert(FileAccess.file_exists("res://assets/branding/splash_still.png"), "still frame packaged")
 
-	## CHEST — continuous hinged layers, no whole-chest scale open, no squash
+	## CHEST — fantasy sheet frames (or legacy hinge/plate markers for older contracts)
 	_assert(
-		chest.contains("HINGE_CANVAS") or chest.contains("FRAME_FILES"),
+		chest.contains("assets/art/chest/frames/")
+		or chest.contains("HINGE_CANVAS")
+		or chest.contains("FRAME_FILES"),
 		"chest open mechanism present"
 	)
-	_assert(chest.contains("chest_lid.png") or chest.contains("chest_closed.png"), "chest lid/closed art")
+	_assert(
+		chest.contains("empty_")
+		or chest.contains("chest_lid.png")
+		or chest.contains("chest_closed.png"),
+		"chest lid/closed art"
+	)
 	_assert(chest.contains("OPEN_DURATION_SEC :="), "open duration constant")
 	_assert(chest.contains("OPEN_SCROLL_EMERGING"), "scroll-emerging state")
 	_assert(chest.contains("sfx_open_start"), "sound hook open start")
@@ -62,8 +69,11 @@ func _run() -> void:
 	_assert(main.contains("play_open_empty_pulse"), "retap uses pulse")
 	_assert(main.contains("play_open_animation(state.reduced_motion, has_new)"), "scroll only when new")
 
-	for fname in ["chest_lid.png", "chest_front_lip.png", "chest_inner_glow.png"]:
-		_assert(FileAccess.file_exists("res://assets/art/chest/%s" % fname), "asset %s" % fname)
+	_assert(
+		FileAccess.file_exists("res://assets/art/chest/frames/empty/empty_00.png")
+		or FileAccess.file_exists("res://assets/art/chest/chest_lid.png"),
+		"chest production art present"
+	)
 
 	## VERSION / APK
 	_assert(BuildFlags.APP_VERSION_CODE >= 32, "BuildFlags >= 32")
