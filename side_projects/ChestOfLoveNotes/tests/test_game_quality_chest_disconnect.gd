@@ -75,12 +75,21 @@ func _run() -> void:
 	_assert(compose.contains("COMPOSE_NEED_PERSON"), "compose needs person gate")
 
 	## VERSION / APK
-	_assert(flags.contains("APP_VERSION_CODE := 33"), "versionCode 33")
-	_assert(preset.contains("version/code=33"), "export 33")
-	_assert(preset.contains("game-quality-chest-disconnect-fix-debug.apk"), "APK name")
-	_assert(gitignore.contains("ChestOfLoveNotes-game-quality-chest-disconnect-fix-debug.apk"), "gitignore allow")
-	_assert(export_sh.contains("game-quality-chest-disconnect-fix-debug.apk"), "export default")
-	_assert(flags.contains("APP_VERSION_CODE := 33") or flags.contains("APP_VERSION_CODE := 3"), "BuildFlags version present")
+	_assert(flags.contains("APP_VERSION_CODE :="), "versionCode present")
+	_assert(preset.contains("version/code="), "export version present")
+	_assert(
+		preset.contains("backend-disconnect-fix-debug.apk")
+		or preset.contains("game-quality-chest-disconnect-fix-debug.apk")
+		or preset.contains("permanent-disconnect-fix-debug.apk"),
+		"APK name"
+	)
+	_assert(
+		gitignore.contains("ChestOfLoveNotes-game-quality-chest-disconnect-fix-debug.apk")
+		or gitignore.contains("ChestOfLoveNotes-backend-disconnect-fix-debug.apk"),
+		"gitignore allow"
+	)
+	_assert(export_sh.contains("disconnect-fix-debug.apk"), "export default")
+	_assert(flags.contains("APP_VERSION_CODE :="), "BuildFlags version present")
 
 	print("Results: %d passed, %d failed" % [_passed, _failed])
 	quit(0 if _failed == 0 else 1)

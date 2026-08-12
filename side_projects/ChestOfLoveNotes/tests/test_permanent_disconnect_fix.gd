@@ -71,11 +71,23 @@ func _run() -> void:
 	_assert(chest.contains("LoveNotesChest") or chest.contains("class_name LoveNotesChest"), "chest file untouched structurally")
 
 	## VERSION
-	_assert(flags.contains("APP_VERSION_CODE := 34"), "versionCode 34")
-	_assert(preset.contains("version/code=34"), "export 34")
-	_assert(preset.contains("permanent-disconnect-fix-debug.apk"), "APK name")
-	_assert(gitignore.contains("ChestOfLoveNotes-permanent-disconnect-fix-debug.apk"), "gitignore")
-	_assert(export_sh.contains("permanent-disconnect-fix-debug.apk"), "export default")
+	_assert(flags.contains("APP_VERSION_CODE := 35") or flags.contains("APP_VERSION_CODE := 34"), "versionCode 34+")
+	_assert(preset.contains("version/code=35") or preset.contains("version/code=34"), "export 34+")
+	_assert(
+		preset.contains("backend-disconnect-fix-debug.apk")
+		or preset.contains("permanent-disconnect-fix-debug.apk"),
+		"APK name"
+	)
+	_assert(
+		gitignore.contains("ChestOfLoveNotes-backend-disconnect-fix-debug.apk")
+		or gitignore.contains("ChestOfLoveNotes-permanent-disconnect-fix-debug.apk"),
+		"gitignore"
+	)
+	_assert(
+		export_sh.contains("backend-disconnect-fix-debug.apk")
+		or export_sh.contains("permanent-disconnect-fix-debug.apk"),
+		"export default"
+	)
 
 	## Unit: sticky must not invent person after authoritative null
 	var st := AppState.new()

@@ -40,6 +40,12 @@ var relationship_debug: Dictionary = {
 	"legacy_migration_eligible": false,
 	"reconciliation_last_result": "no_change",
 	"verified_disconnected": false,
+	"canonical_pair_found": false,
+	"disconnect_mechanism": "Edge Function",
+	"last_disconnect_request": "Not attempted",
+	"last_disconnect_failure_category": "None",
+	"last_disconnect_affected_relationship": false,
+	"post_disconnect_active_pair": false,
 }
 
 ## Local hide list for Sent history (recoverable; not permanent deletion).
@@ -125,6 +131,12 @@ func clear_private_caches() -> void:
 		"legacy_migration_eligible": false,
 		"reconciliation_last_result": "no_change",
 		"verified_disconnected": false,
+		"canonical_pair_found": false,
+		"disconnect_mechanism": "Edge Function",
+		"last_disconnect_request": "Not attempted",
+		"last_disconnect_failure_category": "None",
+		"last_disconnect_affected_relationship": false,
+		"post_disconnect_active_pair": false,
 	}
 
 
@@ -240,7 +252,37 @@ func mark_verified_disconnected() -> void:
 	relationship_debug["legacy_migration_eligible"] = false
 	relationship_debug["reconciliation_last_result"] = "no_change"
 	relationship_debug["verified_disconnected"] = true
+	relationship_debug["canonical_pair_found"] = false
+	relationship_debug["last_disconnect_request"] = "Success"
+	relationship_debug["last_disconnect_failure_category"] = "None"
+	relationship_debug["last_disconnect_affected_relationship"] = true
+	relationship_debug["post_disconnect_active_pair"] = false
 	invalidate_cache("friends")
+
+
+func record_disconnect_attempt_started(mechanism_hint: String = "RPC") -> void:
+	relationship_debug["last_disconnect_request"] = "Started"
+	relationship_debug["last_disconnect_failure_category"] = "None"
+	relationship_debug["disconnect_mechanism"] = mechanism_hint
+	relationship_debug["canonical_pair_found"] = not _person_from_cached_friends().is_empty()
+
+
+func record_disconnect_failure(category: String, mechanism: String, pair_found: bool) -> void:
+	relationship_debug["last_disconnect_request"] = "Failed"
+	relationship_debug["last_disconnect_failure_category"] = category if not category.is_empty() else "Unknown"
+	relationship_debug["disconnect_mechanism"] = mechanism if not mechanism.is_empty() else "Edge Function"
+	relationship_debug["last_disconnect_affected_relationship"] = false
+	relationship_debug["post_disconnect_active_pair"] = true
+	relationship_debug["canonical_pair_found"] = pair_found
+	relationship_debug["verified_disconnected"] = false
+
+
+func _person_from_cached_friends() -> Dictionary:
+	if typeof(cached_friends.get("person")) == TYPE_DICTIONARY:
+		var p: Dictionary = cached_friends.get("person")
+		if not str(p.get("id", "")).is_empty():
+			return p
+	return {}
 
 
 func cache_is_fresh(key: String) -> bool:

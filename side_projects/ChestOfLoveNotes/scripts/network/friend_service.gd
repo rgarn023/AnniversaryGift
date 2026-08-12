@@ -82,7 +82,88 @@ func respond_to_friend_request(request_id: String, accept: bool) -> Dictionary:
 
 
 func disconnect_person() -> Dictionary:
-	return await api.call_edge_function("disconnect-person", {}, "POST")
+	## Preferred: authenticated PostgreSQL RPC (auth.uid(), transactional).
+	## Fallback: Edge Function disconnect-person (same semantics).
+	var rpc: Dictionary = await api.rest_rpc("disconnect_my_person", {})
+	if bool(rpc.get("ok", false)):
+		var data: Dictionary = rpc.get("data", {}) if typeof(rpc.get("data")) == TYPE_DICTIONARY else {}
+		## PostgREST may return jsonb object directly as data.
+		if data.is_empty() and typeof(rpc.get("data")) == TYPE_DICTIONARY:
+			data = rpc.get("data")
+		var success := bool(data.get("success", false)) or bool(data.get("verified_disconnected", false))
+		var found := bool(data.get("relationship_found", false))
+		if success and found:
+			data["disconnect_mechanism"] = "RPC"
+			data["failure_category"] = "None"
+			data["active_pair_found"] = true
+			data["ok"] = true
+			data["verified_disconnected"] = true
+			data["person"] = null
+			return {"ok": true, "status": int(rpc.get("status", 200)), "data": data, "error": ""}
+		## Visible My Person + not_connected means lookup mismatch — treat as failure.
+		var category := str(data.get("failure_category", "No Row"))
+		if category.is_empty():
+			category = "No Row"
+		return {
+			"ok": false,
+			"status": 404 if not found else 500,
+			"data": {
+				"ok": false,
+				"verified_disconnected": false,
+				"relationship_found": found,
+				"disconnect_mechanism": "RPC",
+				"failure_category": category,
+				"active_pair_found": found,
+				"error_code": str(data.get("error_code", "not_connected")),
+			},
+			"error": "Could not disconnect.",
+		}
+	## RPC missing / network / schema — try Edge Function.
+	var rpc_err := str(rpc.get("error", "")).to_lower()
+	var rpc_status := int(rpc.get("status", 0))
+	var rpc_missing := (
+		rpc_status == 404
+		or rpc_err.contains("could not find")
+		or rpc_err.contains("does not exist")
+		or rpc_err.contains("pgrst202")
+		or rpc_err.contains("schema cache")
+	)
+	var edge: Dictionary = await api.call_edge_function("disconnect-person", {}, "POST")
+	if typeof(edge.get("data")) == TYPE_DICTIONARY:
+		var edata: Dictionary = edge.get("data")
+		if not edata.has("disconnect_mechanism"):
+			edata["disconnect_mechanism"] = "Edge Function"
+		if bool(edge.get("ok", false)):
+			edata["failure_category"] = "None"
+			edata["active_pair_found"] = true
+		elif not edata.has("failure_category"):
+			edata["failure_category"] = disconnect_failure_category(edge, rpc_missing)
+		edge["data"] = edata
+	return edge
+
+
+func disconnect_failure_category(result: Dictionary, rpc_was_missing: bool = false) -> String:
+	var status := int(result.get("status", 0))
+	var err := str(result.get("error", "")).to_lower()
+	var data: Dictionary = result.get("data", {}) if typeof(result.get("data")) == TYPE_DICTIONARY else {}
+	var code := ""
+	if typeof(data.get("error")) == TYPE_DICTIONARY:
+		code = str((data.get("error") as Dictionary).get("code", "")).to_lower()
+	if status == 0:
+		return "Network"
+	if status == 401 or status == 403 or code == "unauthorized" or code == "forbidden":
+		return "Unauthorized"
+	if status == 404 or code == "not_connected":
+		return "No Row"
+	if err.contains("rls") or code.contains("rls") or err.contains("permission"):
+		return "RLS"
+	if rpc_was_missing or err.contains("could not find") or err.contains("does not exist"):
+		return "RPC Missing"
+	if err.contains("schema"):
+		return "Schema"
+	if status >= 500:
+		return "Function Error"
+	return "Unknown"
 
 
 func regenerate_connection_token() -> Dictionary:

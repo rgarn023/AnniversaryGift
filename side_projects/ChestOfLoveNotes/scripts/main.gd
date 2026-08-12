@@ -2621,26 +2621,46 @@ func _confirm_disconnect_person(person: Dictionary) -> void:
 			return
 		_log_relationship_debug("disconnect_requested")
 		state.relationship_debug["last_event"] = "disconnect_requested"
-		state.relationship_debug["active_pair_before"] = not _person_from_friends_cache().is_empty()
+		var had_local_person := not _person_from_friends_cache().is_empty()
+		state.relationship_debug["active_pair_before"] = had_local_person
+		state.record_disconnect_attempt_started("RPC")
+		_log_relationship_debug("active_pair_found=%s" % ("true" if had_local_person else "false"))
 		_log_relationship_debug("disconnect_backend_call_started")
 		var result: Dictionary = await state.friends.disconnect_person()
 		var data: Dictionary = result.get("data", {}) if typeof(result.get("data")) == TYPE_DICTIONARY else {}
-		var verified := bool(result.get("ok", false)) and (
-			bool(data.get("verified_disconnected", false))
-			or data.get("person") == null
-			or bool(data.get("ok", false))
-		)
+		var mechanism := str(data.get("disconnect_mechanism", "Edge Function"))
+		if mechanism.is_empty():
+			mechanism = "Edge Function"
+		state.relationship_debug["disconnect_mechanism"] = mechanism
+		var http_status := int(result.get("status", 0))
+		var safe_err := str(result.get("error", ""))
+		_log_relationship_debug("disconnect_http_status=%d" % http_status)
+		if not safe_err.is_empty():
+			_log_relationship_debug("disconnect_safe_error=%s" % safe_err.substr(0, 120))
+		## Success requires explicit verified disconnect — not merely HTTP 200 / null person.
+		## If My Person UI showed an active pair, "not_connected" is a lookup failure.
+		var verified := bool(result.get("ok", false)) and bool(data.get("verified_disconnected", false))
+		if verified and had_local_person and data.has("relationship_found") and not bool(data.get("relationship_found", true)):
+			verified = false
 		_log_relationship_debug(
 			"disconnect_backend_result=%s" % ("success" if verified else "failure")
 		)
 		if not verified:
 			## Keep current pairing visible on failure — never optimistic clear.
+			var category := str(data.get("failure_category", ""))
+			if category.is_empty():
+				category = state.friends.disconnect_failure_category(result, false)
+			state.record_disconnect_failure(category, mechanism, had_local_person)
+			_log_relationship_debug("disconnect_failure_category=%s" % category)
+			_log_relationship_debug("disconnect_rows_affected=%s" % str(data.get("rows_affected", 0)))
 			_log_relationship_debug("active_pair_after_backend=true")
 			_show_toast("Couldn't disconnect right now. Please try again.")
 			return
 		## Only clear local Person after backend confirms durable disconnect.
 		state.mark_verified_disconnected()
+		state.relationship_debug["disconnect_mechanism"] = mechanism
 		_log_relationship_debug("active_pair_after_backend=false")
+		_log_relationship_debug("disconnect_rows_affected=%s" % str(data.get("rows_affected", 1)))
 		## Immediate backend re-query — must still be None (proves no reconcile resurrect).
 		var confirm: Dictionary = await state.friends.get_my_person()
 		if bool(confirm.get("ok", false)):
@@ -2648,12 +2668,14 @@ func _confirm_disconnect_person(person: Dictionary) -> void:
 			state.apply_friends_payload(cdata)
 			var still := typeof(cdata.get("person")) == TYPE_DICTIONARY \
 				and not str((cdata.get("person") as Dictionary).get("id", "")).is_empty()
+			state.relationship_debug["post_disconnect_active_pair"] = still
 			_log_relationship_debug("active_pair_after_refresh=%s" % ("true" if still else "false"))
 			_log_relationship_debug(
 				"reconciliation_ran=true result=%s" % str(cdata.get("reconciliation_last_result", "no_change"))
 			)
 			if still:
 				_log_relationship_debug("pair_recreated=true recreation_source=get-friends")
+				state.record_disconnect_failure("Function Error", mechanism, true)
 				_show_toast("Couldn't disconnect right now. Please try again.")
 				return
 			_log_relationship_debug("pair_recreated=false")
@@ -2663,6 +2685,8 @@ func _confirm_disconnect_person(person: Dictionary) -> void:
 			_log_relationship_debug(
 				"accepted_request_candidate=%s" % ("true" if bool(cdata.get("historical_accepted_request", false)) else "false")
 			)
+		else:
+			state.relationship_debug["post_disconnect_active_pair"] = false
 		_show_toast("Disconnected from %s" % name)
 		_show_friends()
 	)
@@ -3922,17 +3946,41 @@ func _relationship_diagnostics_text() -> String:
 		recon_label = "Created pairing"
 	elif recon == "error":
 		recon_label = "Error"
+	var mech := str(rd.get("disconnect_mechanism", "Edge Function"))
+	if mech.is_empty():
+		mech = "Edge Function"
+	var last_req := str(rd.get("last_disconnect_request", "Not attempted"))
+	if last_req.is_empty():
+		last_req = "Not attempted"
+	var fail_cat := str(rd.get("last_disconnect_failure_category", "None"))
+	if fail_cat.is_empty():
+		fail_cat = "None"
+	var canonical := bool(rd.get("canonical_pair_found", false)) \
+		or bool(rd.get("active_pair_backend", false)) \
+		or active_name != "None"
 	return (
 		"Active Person: %s\n"
 		+ "Active pairing backend: %s\n"
+		+ "Active pair found by canonical query: %s\n"
 		+ "Relationship status: %s\n"
+		+ "Disconnect mechanism: %s\n"
+		+ "Last disconnect request: %s\n"
+		+ "Last disconnect failure category: %s\n"
+		+ "Last disconnect affected relationship: %s\n"
+		+ "Post-disconnect active pair: %s\n"
 		+ "Legacy migration eligible: %s\n"
 		+ "Historical accepted request: %s\n"
 		+ "Reconciliation last result: %s"
 	) % [
 		active_name,
 		"Yes" if bool(rd.get("active_pair_backend", false)) else "No",
+		"Yes" if canonical else "No",
 		status,
+		mech,
+		last_req,
+		fail_cat,
+		"Yes" if bool(rd.get("last_disconnect_affected_relationship", false)) else "No",
+		"Yes" if bool(rd.get("post_disconnect_active_pair", false)) else "No",
 		"Yes" if bool(rd.get("legacy_migration_eligible", false)) else "No",
 		"Present" if bool(rd.get("historical_accepted_request", false)) else "None",
 		recon_label,

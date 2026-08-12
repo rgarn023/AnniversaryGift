@@ -62,6 +62,7 @@ android/build/.cxx/
 !build/ChestOfLoveNotes-splash-timing-chest-animation-fix-debug.apk
 !build/ChestOfLoveNotes-game-quality-chest-disconnect-fix-debug.apk
 !build/ChestOfLoveNotes-permanent-disconnect-fix-debug.apk
+!build/ChestOfLoveNotes-backend-disconnect-fix-debug.apk
 # Derived splash frames from approved GIF (source GIF is tracked when present)
 !assets/branding/splash_frames/
 !assets/branding/splash_frames/**
