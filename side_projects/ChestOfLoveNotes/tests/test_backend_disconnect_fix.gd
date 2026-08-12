@@ -73,7 +73,7 @@ func _run() -> void:
 
 	## NO CHEST / version / APK
 	_assert(chest.contains("class_name LoveNotesChest") or chest.contains("LoveNotesChest"), "chest untouched")
-	_assert(flags.contains("APP_VERSION_CODE := 38") or flags.contains("APP_VERSION_CODE := 35"), "versionCode 35+")
+	_assert(flags.contains("APP_VERSION_CODE := 39") or flags.contains("APP_VERSION_CODE := 35"), "versionCode 35+")
 	_assert(preset.contains("version/code=38") or preset.contains("version/code=35"), "export 35+")
 	_assert(preset.contains("backend-disconnect-fix-debug.apk"), "APK name")
 	_assert(gitignore.contains("ChestOfLoveNotes-backend-disconnect-fix-debug.apk"), "gitignore allow")

@@ -33,18 +33,23 @@ enum ChestState {
 const FRAME_ART := "res://assets/art/chest/frames/"
 const EMPTY_DIR := FRAME_ART + "empty/"
 const SCROLL_DIR := FRAME_ART + "scroll/"
-const FRAME_CANVAS := Vector2(384, 384)
-## Total empty open timing (~1.05s of frame advance + settle).
-const OPEN_DURATION_SEC := 1.00
+const SOFT_GLOW := "res://assets/art/chest/soft_glow_pulse.png"
+const FRAME_CANVAS := Vector2(384, 448)
+const EMPTY_FRAME_COUNT := 14
+const SCROLL_FRAME_COUNT := 13
+## Slightly longer, variable-feel open (easing holds key poses).
+const OPEN_DURATION_SEC := 1.18
 const OPEN_DURATION_RM := 0.36
 const ANTICIPATION_SEC := 0.10
-const SETTLE_SEC := 0.12
-const MAGICAL_SWELL_SEC := 0.14
+const SETTLE_SEC := 0.14
+const MAGICAL_SWELL_SEC := 0.16
 ## Scroll emerge portion after chest is open enough (frame path).
-const SCROLL_EMERGE_SEC := 0.68
-const EMPHASIS_SCALE := 1.008
-## First scroll-peek frame index in the scroll sequence.
-const SCROLL_REVEAL_START_INDEX := 5
+const SCROLL_EMERGE_SEC := 0.82
+## Short intentional hold on the completed reward pose before note handoff.
+const REWARD_HOLD_SEC := 0.40
+const EMPHASIS_SCALE := 1.006
+## First scroll-peek frame index in the scroll sequence (scroll_08).
+const SCROLL_REVEAL_START_INDEX := 8
 
 @export var reduced_motion: bool = false
 
@@ -56,7 +61,7 @@ var _input_locked: bool = false
 var _label: Label
 var _root_visual: Control
 var _frame_view: TextureRect
-var _glow_pulse: ColorRect
+var _glow_pulse: TextureRect
 var _dust: CPUParticles2D
 var _sparks: CPUParticles2D
 var _motes: CPUParticles2D
@@ -64,6 +69,7 @@ var _button: Button
 var _ready_visuals: bool = false
 var _badge: Label
 var _unread_count: int = 0
+var _badge_suppressed: bool = false
 var _open_amount: float = 0.0
 var _show_scroll_on_finish: bool = false
 var _anchor_rect: Rect2 = Rect2()
@@ -88,10 +94,11 @@ static var _sprite_frames_scroll: SpriteFrames = null
 static func preload_assets() -> void:
 	if _preloaded:
 		return
-	_empty_cache = _load_sequence(EMPTY_DIR, "empty_", 10)
-	_scroll_cache = _load_sequence(SCROLL_DIR, "scroll_", 13)
-	_sprite_frames_empty = _build_sprite_frames("empty_open", _empty_cache, 10.0)
-	_sprite_frames_scroll = _build_sprite_frames("scroll_open", _scroll_cache, 11.0)
+	_empty_cache = _load_sequence(EMPTY_DIR, "empty_", EMPTY_FRAME_COUNT)
+	_scroll_cache = _load_sequence(SCROLL_DIR, "scroll_", SCROLL_FRAME_COUNT)
+	_load_cached(SOFT_GLOW)
+	_sprite_frames_empty = _build_sprite_frames("empty_open", _empty_cache, 12.0)
+	_sprite_frames_scroll = _build_sprite_frames("scroll_open", _scroll_cache, 13.0)
 	_preloaded = true
 
 
@@ -129,7 +136,7 @@ static func _load_cached(path: String) -> Texture2D:
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	clip_contents = false
-	custom_minimum_size = Vector2(220, 220)
+	custom_minimum_size = Vector2(220, 260)
 	modulate.a = 1.0
 	visible = true
 	preload_assets()
@@ -160,6 +167,7 @@ func _build_visuals() -> void:
 	_root_visual.name = "ChestAnimationRoot"
 	_root_visual.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_root_visual.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_root_visual.clip_contents = false
 	add_child(_root_visual)
 
 	_frame_view = TextureRect.new()
@@ -171,10 +179,13 @@ func _build_visuals() -> void:
 	_frame_view.z_index = 2
 	_root_visual.add_child(_frame_view)
 
-	## Soft warm pulse overlay for empty retap — does not redraw the chest.
-	_glow_pulse = ColorRect.new()
+	## Soft radial pulse — never a rectangular ColorRect (that read as a white box).
+	_glow_pulse = TextureRect.new()
 	_glow_pulse.name = "GlowPulse"
-	_glow_pulse.color = Color(1.0, 0.78, 0.42, 0.0)
+	_glow_pulse.texture = _load_cached(SOFT_GLOW)
+	_glow_pulse.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_glow_pulse.stretch_mode = TextureRect.STRETCH_SCALE
+	_glow_pulse.modulate = Color(1.0, 0.86, 0.55, 0.0)
 	_glow_pulse.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_glow_pulse.z_index = 3
 	_root_visual.add_child(_glow_pulse)
@@ -244,27 +255,31 @@ func _layout_frames() -> void:
 		return
 	var area := size
 	if area.x < 8.0 or area.y < 8.0:
-		area = Vector2(220, 220)
+		area = Vector2(220, 260)
 	_root_visual.pivot_offset = area * 0.5
-	var side: float = minf(area.x, area.y) * 1.08
-	var top: float = (area.y - side) * 0.38
-	var left: float = (area.x - side) * 0.5
-	_anchor_rect = Rect2(left, top, side, side)
+	## Fit the taller production canvas; keep a little headroom so scroll tops are not clipped.
+	var fit: float = minf(area.x / FRAME_CANVAS.x, area.y / FRAME_CANVAS.y)
+	var draw_w: float = FRAME_CANVAS.x * fit
+	var draw_h: float = FRAME_CANVAS.y * fit
+	## Slight vertical bias so the planted chest sits naturally in the content area.
+	var left: float = (area.x - draw_w) * 0.5
+	var top: float = (area.y - draw_h) * 0.42
+	_anchor_rect = Rect2(left, top, draw_w, draw_h)
 	_place_rect(_frame_view, _anchor_rect)
-	## Soft radial-ish pulse sits over the cavity region only.
+	## Soft radial pulse over the cavity — circular texture, not a box.
 	_place_rect(_glow_pulse, Rect2(
-		_anchor_rect.position.x + side * 0.22,
-		_anchor_rect.position.y + side * 0.28,
-		side * 0.56,
-		side * 0.36
+		_anchor_rect.position.x + draw_w * 0.18,
+		_anchor_rect.position.y + draw_h * 0.30,
+		draw_w * 0.64,
+		draw_h * 0.42
 	))
-	var cavity_center := Vector2(area.x * 0.5, _anchor_rect.position.y + side * 0.42)
+	var cavity_center := Vector2(area.x * 0.5, _anchor_rect.position.y + draw_h * 0.48)
 	_dust.position = cavity_center
 	_sparks.position = cavity_center
 	_motes.position = cavity_center
 	_apply_root_transform()
 	if _badge:
-		_badge.position = Vector2(area.x * 0.72, top + side * 0.08)
+		_badge.position = Vector2(area.x * 0.72, top + draw_h * 0.12)
 		_badge.size = Vector2(40, 40)
 
 
@@ -289,18 +304,28 @@ func _apply_root_transform() -> void:
 
 func set_unread_badge(count: int) -> void:
 	_unread_count = count
+	_refresh_badge_visibility()
+
+
+func _refresh_badge_visibility() -> void:
 	if _badge == null:
 		return
-	if count <= 0:
+	if _badge_suppressed or _unread_count <= 0:
 		_badge.visible = false
-		_badge.text = ""
+		if _unread_count <= 0:
+			_badge.text = ""
 		return
 	_badge.visible = true
-	_badge.text = str(mini(count, 99))
+	_badge.text = str(mini(_unread_count, 99))
 	var bg := StyleBoxFlat.new()
 	bg.bg_color = Color(0.98, 0.78, 0.42, 1.0)
 	bg.set_corner_radius_all(20)
 	_badge.add_theme_stylebox_override("normal", bg)
+
+
+func _set_badge_suppressed(suppressed: bool) -> void:
+	_badge_suppressed = suppressed
+	_refresh_badge_visibility()
 
 
 func configure(state: ChestState, show_final_label: bool = false) -> void:
@@ -312,6 +337,7 @@ func configure(state: ChestState, show_final_label: bool = false) -> void:
 	_emphasis_scale = 1.0
 	_particles_armed = false
 	_scroll_emerged_emitted = false
+	_set_badge_suppressed(false)
 	_stop_motes()
 	_reset_pose()
 	match state:
@@ -337,10 +363,11 @@ func configure(state: ChestState, show_final_label: bool = false) -> void:
 
 func _ease_open_curve(t: float) -> float:
 	## Small resistance → smooth acceleration → gentle ease-out (no elastic bounce).
+	## Slightly heavier early ease so lid poses linger and read less stepped.
 	t = clampf(t, 0.0, 1.0)
 	var s := t * t * (3.0 - 2.0 * t)
 	var early := t * t * t
-	return lerpf(early, s, 0.70)
+	return lerpf(early, s, 0.78)
 
 
 func _select_sequence(emerge_scroll: bool) -> void:
@@ -370,16 +397,26 @@ func _set_frame_progress(raw_amount: float, emerge_scroll: bool) -> void:
 	var idx: int
 	if emerge_scroll and max_i >= SCROLL_REVEAL_START_INDEX:
 		## Hold opening poses until the chest is substantially open, then reveal scroll.
-		## First ~62% of eased time → frames before scroll peek; remainder → scroll rise.
+		## First ~58% of eased time → frames before scroll peek; remainder → scroll rise.
 		var open_end := SCROLL_REVEAL_START_INDEX - 1
-		if eased < 0.62:
-			var t_open := eased / 0.62
+		if eased < 0.58:
+			var t_open := eased / 0.58
+			## Bias toward spending more time on mid-open poses.
+			t_open = t_open * t_open * (3.0 - 2.0 * t_open)
 			idx = int(round(t_open * float(open_end)))
 		else:
-			var t_scroll := (eased - 0.62) / 0.38
+			var t_scroll := (eased - 0.58) / 0.42
+			## Smooth scroll rise — avoid jumping straight to a flat full sheet.
+			t_scroll = 1.0 - (1.0 - t_scroll) * (1.0 - t_scroll)
 			idx = open_end + int(round(t_scroll * float(max_i - open_end)))
 	else:
-		idx = int(round(eased * float(max_i)))
+		## Variable dwell: spend a bit more time near closed + near fully open.
+		var shaped := eased
+		if eased < 0.35:
+			shaped = eased * 0.85
+		elif eased > 0.75:
+			shaped = 0.75 + (eased - 0.75) * 0.72
+		idx = int(round(clampf(shaped, 0.0, 1.0) * float(max_i)))
 	_show_frame_index(idx)
 
 	## Particles after interior is visibly open.
@@ -387,6 +424,10 @@ func _set_frame_progress(raw_amount: float, emerge_scroll: bool) -> void:
 		_particles_armed = true
 		_emit_burst()
 		_start_motes()
+		## Soft cavity glow eases in with the open — radial, not rectangular.
+		if _glow_pulse:
+			var g := create_tween()
+			g.tween_property(_glow_pulse, "modulate:a", 0.16, 0.22).set_trans(Tween.TRANS_SINE)
 
 	## Scroll emerge signal once peek frames are reached.
 	if emerge_scroll and not _scroll_emerged_emitted and idx >= SCROLL_REVEAL_START_INDEX:
@@ -411,7 +452,7 @@ func _reset_pose() -> void:
 		_root_visual.rotation = 0.0
 		_root_visual.modulate = Color.WHITE
 	if _glow_pulse:
-		_glow_pulse.color.a = 0.0
+		_glow_pulse.modulate.a = 0.0
 	_layout_frames()
 	_select_sequence(false)
 	_show_frame_index(0)
@@ -484,8 +525,8 @@ func play_open_empty_pulse() -> void:
 	_show_frame_index(_empty_frames.size() - 1)
 	var pulse := create_tween()
 	if _glow_pulse:
-		pulse.tween_property(_glow_pulse, "color:a", 0.22, 0.14).set_trans(Tween.TRANS_SINE)
-		pulse.tween_property(_glow_pulse, "color:a", 0.0, 0.30).set_trans(Tween.TRANS_SINE)
+		pulse.tween_property(_glow_pulse, "modulate:a", 0.28, 0.14).set_trans(Tween.TRANS_SINE)
+		pulse.tween_property(_glow_pulse, "modulate:a", 0.0, 0.30).set_trans(Tween.TRANS_SINE)
 	if _frame_view:
 		var shimmer := create_tween()
 		shimmer.tween_property(_frame_view, "modulate", Color(1.08, 1.04, 0.95, 1.0), 0.12)
@@ -516,6 +557,7 @@ func play_open_animation(short: bool = false, emerge_scroll: bool = false) -> vo
 	_skip = false
 	_particles_armed = false
 	_scroll_emerged_emitted = false
+	_set_badge_suppressed(true)
 	set_process(false)
 	_show_scroll_on_finish = emerge_scroll
 	_select_sequence(emerge_scroll)
@@ -531,6 +573,7 @@ func play_open_animation(short: bool = false, emerge_scroll: bool = false) -> vo
 		chest_state = ChestState.TRANSITIONING
 	else:
 		chest_state = ChestState.OPEN_EMPTY
+		_set_badge_suppressed(false)
 	animating = false
 	_input_locked = false
 	sfx_fully_open.emit()
@@ -554,6 +597,7 @@ func play_close_animation() -> void:
 	_anticipation_y = 0.0
 	_emphasis_scale = 1.0
 	_apply_root_transform()
+	_set_badge_suppressed(false)
 	chest_state = ChestState.READY
 	animating = false
 	_input_locked = false
@@ -580,6 +624,8 @@ func finish_opening_safely() -> void:
 	animating = false
 	_input_locked = false
 	chest_state = ChestState.OPEN_EMPTY if not _show_scroll_on_finish else ChestState.TRANSITIONING
+	if not _show_scroll_on_finish:
+		_set_badge_suppressed(false)
 	open_finished.emit()
 
 
@@ -615,7 +661,10 @@ func _open_short() -> void:
 		OPEN_DURATION_RM
 	).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	await tw.finished
-	await get_tree().create_timer(0.06).timeout
+	if _show_scroll_on_finish and not _skip:
+		await get_tree().create_timer(REWARD_HOLD_SEC * 0.6).timeout
+	else:
+		await get_tree().create_timer(0.06).timeout
 
 
 func _open_full() -> void:
@@ -631,11 +680,11 @@ func _open_full() -> void:
 	sfx_latch_release.emit()
 	HapticHelper.lock_release()
 
-	## Hold closed briefly, then advance frames with hold-longer on key poses.
+	## Advance frames with easing so key poses dwell longer (less stepped).
 	var dur := OPEN_DURATION_SEC
 	if _show_scroll_on_finish:
 		## Extra time so scroll does not start rising until chest is open enough.
-		dur = OPEN_DURATION_SEC + SCROLL_EMERGE_SEC * 0.35
+		dur = OPEN_DURATION_SEC + SCROLL_EMERGE_SEC * 0.42
 
 	var lid := create_tween()
 	lid.tween_method(
@@ -643,7 +692,7 @@ func _open_full() -> void:
 		0.0,
 		1.0,
 		dur
-	).set_trans(Tween.TRANS_LINEAR)
+	).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN_OUT)
 	await lid.finished
 	if _skip:
 		_apply_finished_state()
@@ -666,7 +715,7 @@ func _open_full() -> void:
 		_apply_root_transform()
 	, 1.0, EMPHASIS_SCALE, SETTLE_SEC * 0.55).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	if _glow_pulse:
-		settle.tween_property(_glow_pulse, "color:a", 0.10, SETTLE_SEC).set_trans(Tween.TRANS_SINE)
+		settle.tween_property(_glow_pulse, "modulate:a", 0.22, SETTLE_SEC).set_trans(Tween.TRANS_SINE)
 	await settle.finished
 
 	sfx_magical_swell.emit()
@@ -677,14 +726,15 @@ func _open_full() -> void:
 		_apply_root_transform()
 	, EMPHASIS_SCALE, 1.0, MAGICAL_SWELL_SEC).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	if _glow_pulse:
-		swell.tween_property(_glow_pulse, "color:a", 0.0, MAGICAL_SWELL_SEC)
+		swell.tween_property(_glow_pulse, "modulate:a", 0.10 if _show_scroll_on_finish else 0.0, MAGICAL_SWELL_SEC)
 	await swell.finished
 	_emphasis_scale = 1.0
 	_apply_root_transform()
 
 	if _show_scroll_on_finish and not _skip:
 		chest_state = ChestState.OPEN_WAITING_FOR_SCROLL
-		await get_tree().create_timer(0.08).timeout
+		## Intentional reward hold so the completed scroll reads before note transition.
+		await get_tree().create_timer(REWARD_HOLD_SEC).timeout
 	else:
 		await get_tree().create_timer(0.06).timeout
 		_stop_motes()
@@ -697,7 +747,7 @@ func get_scroll_global_center() -> Vector2:
 	if _anchor_rect.size != Vector2.ZERO:
 		return global_position + _anchor_rect.position + Vector2(
 			_anchor_rect.size.x * 0.5,
-			_anchor_rect.size.y * 0.38
+			_anchor_rect.size.y * 0.42
 		)
 	return global_position + size * 0.5
 
@@ -713,7 +763,7 @@ func _apply_finished_state() -> void:
 	_emphasis_scale = 1.0
 	_apply_root_transform()
 	if _glow_pulse:
-		_glow_pulse.color.a = 0.0
+		_glow_pulse.modulate.a = 0.0
 
 
 func _emit_burst() -> void:

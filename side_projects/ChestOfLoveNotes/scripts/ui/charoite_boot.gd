@@ -6,13 +6,14 @@ class_name CharoiteBoot
 ## Session/backend restore runs in parallel during this presentation.
 ##
 ## Timing model (minimum-visible, not force-close):
-##   fade in → hold until (≈2.0s visible AND app ready) → short fade out → finished
-## If startup needs longer than 2.0s, splash stays until mark_app_ready().
+##   fade in → hold until (≈4.0s visible AND app ready) → short fade out → finished
+## If startup needs longer than 4.0s, splash stays until mark_app_ready().
 
 signal finished
 
-## Branded CG must remain visibly presented ≈2.0s before transition begins.
-const MIN_VISIBLE_SEC := 2.0
+## Branded CG must remain visibly presented ≈4.0s before transition begins.
+## (Physical Galaxy tests: previous 2.0s felt too short; +2.0s of actual logo visibility.)
+const MIN_VISIBLE_SEC := 4.0
 const FADE_IN_SEC := 0.28
 ## Short smooth handoff into the app (150–250 ms).
 const FADE_OUT_SEC := 0.20
@@ -43,6 +44,12 @@ var _app_ready: bool = false
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_STOP
+	## Paint black immediately so no clear-color / theme flash shows through.
+	var instant_bg := ColorRect.new()
+	instant_bg.color = Color(0.0, 0.0, 0.0, 1.0)
+	instant_bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	instant_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(instant_bg)
 	_started_usec = Time.get_ticks_usec()
 	_build()
 	_play()
@@ -187,7 +194,7 @@ func _play() -> void:
 	await fade_in.finished
 	_visible_usec = Time.get_ticks_usec()
 	## Hold while branded splash is fully visible.
-	## Exit only when: ≈2.0s visible AND Main has marked app ready.
+	## Exit only when: ≈4.0s visible AND Main has marked app ready.
 	## Never force-close early if restore/init still running.
 	while true:
 		var visible_elapsed := (Time.get_ticks_usec() - _visible_usec) / 1_000_000.0

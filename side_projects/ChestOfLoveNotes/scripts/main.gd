@@ -48,6 +48,13 @@ var _perm_manage_live: bool = false
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	## Dark plane first — prevent any engine clear-color / white flash before splash.
+	var cold_bg := ColorRect.new()
+	cold_bg.color = Color(0.0, 0.0, 0.0, 1.0)
+	cold_bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	cold_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	cold_bg.z_index = -10
+	add_child(cold_bg)
 	MobileUi.ensure_loaded()
 	## Preload chest art before first tap to avoid decode hitch.
 	LoveNotesChest.preload_assets()
@@ -66,12 +73,12 @@ func _ready() -> void:
 	add_child(_image_preview)
 	if state.api:
 		state.api.session_invalidated.connect(_on_session_invalidated)
-	# Cold start: short Charoite boot while session/backend init runs in parallel.
+	# Cold start: Charoite boot while session/backend init runs in parallel.
 	await _startup_navigate()
 
 
 func _startup_navigate() -> void:
-	## Charoite Games cold boot: min ≈2.0s visible + app ready, then short fade.
+	## Charoite Games cold boot: min ≈4.0s visible + app ready, then short fade.
 	## Session restore runs concurrently; splash never force-closes early.
 	_startup_done = false
 	var boot := CharoiteBoot.new()
@@ -894,12 +901,16 @@ func _show_main_chest() -> void:
 	_chest = LoveNotesChest.new()
 	_chest.reduced_motion = state.reduced_motion
 	_chest.set_anchors_preset(Control.PRESET_CENTER)
-	var chest_side := 252
-	_chest.custom_minimum_size = Vector2(chest_side, chest_side)
-	_chest.size = Vector2(chest_side, chest_side)
-	_chest.position = Vector2(-chest_side * 0.5, -chest_side * 0.42)
+	## Slightly taller host so the taller production canvas / rising scroll is not clipped.
+	var chest_w := 252
+	var chest_h := 292
+	_chest.custom_minimum_size = Vector2(chest_w, chest_h)
+	_chest.size = Vector2(chest_w, chest_h)
+	_chest.clip_contents = false
+	_chest.position = Vector2(-chest_w * 0.5, -chest_h * 0.46)
 	_chest.z_index = 5
 	_chest.tapped.connect(_on_chest_tapped)
+	chest_area.clip_contents = false
 	chest_area.add_child(_chest)
 	_chest.configure(LoveNotesChest.ChestState.READY, false)
 	_chest.set_unread_badge(int(counts.unread))

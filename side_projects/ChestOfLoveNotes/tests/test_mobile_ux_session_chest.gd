@@ -174,7 +174,7 @@ func _test_startup_charoite() -> void:
 	_assert(FileAccess.file_exists("res://assets/branding/charoite_games_cg_logo.png"), "official CG logo packaged")
 	_assert(FileAccess.file_exists("res://scripts/ui/charoite_boot.gd"), "CharoiteBoot script")
 	var boot_src := FileAccess.get_file_as_string("res://scripts/ui/charoite_boot.gd")
-	_assert(boot_src.contains("MIN_VISIBLE_SEC := 2.0"), "boot minimum visible ~2.0 seconds")
+	_assert(boot_src.contains("MIN_VISIBLE_SEC := 4.0"), "boot minimum visible ~4.0 seconds")
 	_assert(boot_src.contains("mark_app_ready"), "boot waits for app-ready gate")
 	_assert(boot_src.contains("FADE_OUT_SEC := 0.20"), "short fade-out into app")
 	_assert(boot_src.contains("splash_frames"), "approved animated CG frames")
@@ -209,7 +209,7 @@ func _test_build_version() -> void:
 		or preset.contains("splash-timing-chest-animation-fix-debug.apk"),
 		"export APK name"
 	)
-	_assert(preset.contains("version/code=38") or preset.contains("version/code=37") or preset.contains("version/code=33") or preset.contains("version/code=32"), "export versionCode recent")
+	_assert(preset.contains("version/code=39") or preset.contains("version/code=37") or preset.contains("version/code=33") or preset.contains("version/code=32"), "export versionCode recent")
 	_assert(BuildFlags.PRIVATE_ONBOARDING_BUILD == true, "private onboarding still enabled")
 	_assert(BuildFlags.SHOW_ONBOARDING_BANNER == false, "onboarding banner hidden in APKs")
 	_assert(FileAccess.file_exists("res://assets/icons/app_icon_1024.png"), "app icon present")

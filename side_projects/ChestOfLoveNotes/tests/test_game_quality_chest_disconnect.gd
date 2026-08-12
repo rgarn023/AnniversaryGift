@@ -35,7 +35,7 @@ func _run() -> void:
 	var strings := FileAccess.get_file_as_string("res://scripts/ui/product_strings.gd")
 
 	## SPLASH unchanged timing
-	_assert(boot.contains("MIN_VISIBLE_SEC := 2.0"), "splash min 2.0s kept")
+	_assert(boot.contains("MIN_VISIBLE_SEC := 4.0"), "splash min 4.0s")
 	_assert(boot.contains("mark_app_ready"), "splash app-ready gate kept")
 	_assert(main.contains("mark_app_ready"), "main still marks boot ready")
 

@@ -29,7 +29,7 @@ func _run() -> void:
 	var export_sh := FileAccess.get_file_as_string("res://tools/export_android_apk.sh")
 
 	## SPLASH — timing only; approved artwork untouched
-	_assert(boot.contains("MIN_VISIBLE_SEC := 2.0"), "min visible 2.0s")
+	_assert(boot.contains("MIN_VISIBLE_SEC := 4.0"), "min visible 4.0s")
 	_assert(boot.contains("FADE_OUT_SEC := 0.20"), "fade out ~200ms")
 	_assert(boot.contains("func mark_app_ready"), "app-ready gate")
 	_assert(boot.contains("visible_elapsed >= MIN_VISIBLE_SEC and _app_ready"), "min time AND ready")

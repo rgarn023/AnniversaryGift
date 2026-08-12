@@ -1,5 +1,5 @@
 extends SceneTree
-## v38: Fantasy sheet chest — locked base-aligned frames from authoritative sprite sheets.
+## v39: Fantasy sheet chest polish — splash timing, centering, scroll headroom, soft glow.
 
 var _passed: int = 0
 var _failed: int = 0
@@ -19,7 +19,7 @@ func _assert(cond: bool, label: String) -> void:
 
 
 func _run() -> void:
-	print("=== Fantasy sheet chest animation (v38) ===")
+	print("=== Fantasy sheet chest polish (v39) ===")
 	var chest := FileAccess.get_file_as_string("res://scripts/chest/treasure_chest.gd")
 	var main := FileAccess.get_file_as_string("res://scripts/main.gd")
 	var flags := FileAccess.get_file_as_string("res://scripts/build_flags.gd")
@@ -35,8 +35,12 @@ func _run() -> void:
 	_assert(chest.contains("_set_frame_progress"), "frame progress driver")
 	_assert(chest.contains("SpriteFrames"), "SpriteFrames prepared")
 	_assert(chest.contains("SCROLL_REVEAL_START_INDEX"), "scroll starts after open")
-	_assert(chest.contains("OPEN_DURATION_SEC := 1.00"), "open ~1.0s")
-	_assert(chest.contains("SCROLL_EMERGE_SEC := 0.68"), "scroll emerge duration")
+	_assert(chest.contains("OPEN_DURATION_SEC := 1.18"), "open ~1.18s")
+	_assert(chest.contains("SCROLL_EMERGE_SEC := 0.82"), "scroll emerge duration")
+	_assert(chest.contains("REWARD_HOLD_SEC := 0.40"), "reward hold before note")
+	_assert(chest.contains("_set_badge_suppressed"), "badge hidden during reward")
+	_assert(chest.contains("soft_glow_pulse.png"), "soft radial glow replaces ColorRect box")
+	_assert(not chest.contains("ColorRect.new()"), "no rectangular ColorRect glow")
 	_assert(chest.contains("_ease_open_curve"), "quality easing")
 	_assert(chest.contains("OPEN_WAITING_FOR_SCROLL"), "waiting state")
 	_assert(chest.contains("OPEN_SCROLL_EMERGING"), "emerging state")
@@ -53,7 +57,8 @@ func _run() -> void:
 	_assert(main.contains("No new scrolls today."), "empty copy")
 	_assert(main.contains("OPEN_EMPTY"), "retap handles OPEN_EMPTY")
 	_assert(main.contains("play_open_empty_pulse"), "retap pulse wired")
-	_assert(boot.contains("MIN_VISIBLE_SEC := 2.0"), "splash min 2s untouched")
+	_assert(boot.contains("MIN_VISIBLE_SEC := 4.0"), "splash min 4s")
+	_assert(preset.contains("splash_screen/background_color=Color(0, 0, 0, 1)"), "android splash bg black")
 
 	_assert(
 		FileAccess.file_exists(
@@ -67,7 +72,8 @@ func _run() -> void:
 		),
 		"magical source sheet"
 	)
-	for i in range(10):
+	_assert(FileAccess.file_exists("res://assets/art/chest/soft_glow_pulse.png"), "soft glow asset")
+	for i in range(14):
 		_assert(
 			FileAccess.file_exists("res://assets/art/chest/frames/empty/empty_%02d.png" % i),
 			"empty frame %02d" % i
@@ -78,16 +84,15 @@ func _run() -> void:
 			"scroll frame %02d" % i
 		)
 
-	_assert(flags.contains("APP_VERSION_CODE := 38"), "versionCode 38")
-	_assert(preset.contains("version/code=38"), "export 38")
-	_assert(preset.contains("fantasy-sheet-chest-debug.apk"), "APK name")
-	## Fantasy APK must remain ignored (GitHub 100MB); do not force-add via !build/ exception.
+	_assert(flags.contains("APP_VERSION_CODE := 39"), "versionCode 39")
+	_assert(preset.contains("version/code=39"), "export 39")
+	_assert(preset.contains("v39-chest-polish-debug.apk"), "APK name")
 	_assert(gitignore.contains("*.apk"), "apks ignored by default")
 	_assert(
-		not gitignore.contains("!build/ChestOfLoveNotes-fantasy-sheet-chest-debug.apk"),
-		"fantasy APK gitignore exception removed"
+		not gitignore.contains("!build/ChestOfLoveNotes-v39-chest-polish-debug.apk"),
+		"v39 APK gitignore exception absent"
 	)
-	_assert(export_sh.contains("fantasy-sheet-chest-debug.apk"), "export default")
+	_assert(export_sh.contains("v39-chest-polish-debug.apk"), "export default")
 	_assert(chest.contains("func play_open_animation"), "open API")
 	_assert(chest.contains("func play_open_empty_pulse"), "pulse API")
 
@@ -95,9 +100,9 @@ func _run() -> void:
 	LoveNotesChest.preload_assets()
 	var node := LoveNotesChest.new()
 	root.add_child(node)
-	node.size = Vector2(320, 320)
+	node.size = Vector2(320, 360)
 	await process_frame
-	_assert(node._empty_frames.size() == 10, "empty frames loaded")
+	_assert(node._empty_frames.size() == 14, "empty frames loaded")
 	_assert(node._scroll_frames.size() == 13, "scroll frames loaded")
 
 	var states := [
@@ -105,15 +110,11 @@ func _run() -> void:
 		{"name": "early_opening", "p": 0.22, "scroll": false},
 		{"name": "half_open", "p": 0.48, "scroll": false},
 		{"name": "fully_open", "p": 1.0, "scroll": false},
-		## Scroll reveal is gated until eased >= 0.62 (after chest is substantially open).
-		{"name": "scroll_begin", "p": 0.72, "scroll": true},
+		{"name": "scroll_begin", "p": 0.70, "scroll": true},
 		{"name": "scroll_halfway", "p": 0.86, "scroll": true},
 		{"name": "scroll_full", "p": 1.0, "scroll": true},
 	]
-	var out_dir := "res://../.cursor_tmp_chest_validate"
-	## Write under user:// for headless reliability.
-	var user_dir := "user://chest_validate_v38"
-	DirAccess.make_dir_recursive_absolute(OS.get_user_data_dir().path_join("chest_validate_v38"))
+	DirAccess.make_dir_recursive_absolute(OS.get_user_data_dir().path_join("chest_validate_v39"))
 	for s in states:
 		node._set_frame_progress(float(s["p"]), bool(s["scroll"]))
 		await process_frame
@@ -124,14 +125,20 @@ func _run() -> void:
 		if tex is ImageTexture or tex is CompressedTexture2D:
 			var img: Image = tex.get_image()
 			if img:
-				var path := OS.get_user_data_dir().path_join("chest_validate_v38/%s.png" % s["name"])
+				var path := OS.get_user_data_dir().path_join("chest_validate_v39/%s.png" % s["name"])
 				img.save_png(path)
 				print("WROTE ", path)
 		_assert(node._frame_index >= 0, "state %s frame index" % s["name"])
 
+	## Badge suppressed while reward animation is active.
+	node.set_unread_badge(3)
+	node._set_badge_suppressed(true)
+	_assert(node._badge.visible == false, "badge hidden during animation")
+	node._set_badge_suppressed(false)
+	_assert(node._badge.visible == true, "badge restored after animation")
+
 	## Rapid-tap guard
 	node.animating = true
-	var blocked := true
 	node.play_open_animation(false, false)
 	_assert(node.animating == true, "rapid tap blocked while animating")
 	node.animating = false

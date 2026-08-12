@@ -71,7 +71,7 @@ func _run() -> void:
 	_assert(chest.contains("LoveNotesChest") or chest.contains("class_name LoveNotesChest"), "chest file untouched structurally")
 
 	## VERSION
-	_assert(flags.contains("APP_VERSION_CODE := 38") or flags.contains("APP_VERSION_CODE := 35") or flags.contains("APP_VERSION_CODE := 34"), "versionCode 34+")
+	_assert(flags.contains("APP_VERSION_CODE := 39") or flags.contains("APP_VERSION_CODE := 35") or flags.contains("APP_VERSION_CODE := 34"), "versionCode 34+")
 	_assert(preset.contains("version/code=38") or preset.contains("version/code=35") or preset.contains("version/code=34"), "export 34+")
 	_assert(
 		preset.contains("backend-disconnect-fix-debug.apk")
