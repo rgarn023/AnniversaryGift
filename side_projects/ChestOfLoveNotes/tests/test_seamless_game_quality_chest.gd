@@ -102,11 +102,12 @@ func _run() -> void:
 
 	var states := [
 		{"name": "closed", "p": 0.0, "scroll": false},
-		{"name": "early_opening", "p": 0.18, "scroll": false},
-		{"name": "half_open", "p": 0.45, "scroll": false},
+		{"name": "early_opening", "p": 0.22, "scroll": false},
+		{"name": "half_open", "p": 0.48, "scroll": false},
 		{"name": "fully_open", "p": 1.0, "scroll": false},
-		{"name": "scroll_begin", "p": 0.55, "scroll": true},
-		{"name": "scroll_halfway", "p": 0.78, "scroll": true},
+		## Scroll reveal is gated until eased >= 0.62 (after chest is substantially open).
+		{"name": "scroll_begin", "p": 0.72, "scroll": true},
+		{"name": "scroll_halfway", "p": 0.86, "scroll": true},
 		{"name": "scroll_full", "p": 1.0, "scroll": true},
 	]
 	var out_dir := "res://../.cursor_tmp_chest_validate"
