@@ -64,8 +64,8 @@ android/build/.cxx/
 !build/ChestOfLoveNotes-permanent-disconnect-fix-debug.apk
 !build/ChestOfLoveNotes-backend-disconnect-fix-debug.apk
 !build/ChestOfLoveNotes-seamless-game-quality-chest-debug.apk
-!build/ChestOfLoveNotes-fantasy-sheet-chest-debug.apk
 # Derived splash frames from approved GIF (source GIF is tracked when present)
+# NOTE: fantasy-sheet-chest-debug.apk stays ignored under *.apk (do not force-add; GitHub 100MB limit)
 !assets/branding/splash_frames/
 !assets/branding/splash_frames/**
 !assets/branding/splash_still.png

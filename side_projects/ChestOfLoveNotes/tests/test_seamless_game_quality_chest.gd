@@ -1,5 +1,5 @@
 extends SceneTree
-## v37: Fantasy sheet chest — cropped frames from authoritative sprite sheets.
+## v38: Fantasy sheet chest — locked base-aligned frames from authoritative sprite sheets.
 
 var _passed: int = 0
 var _failed: int = 0
@@ -19,7 +19,7 @@ func _assert(cond: bool, label: String) -> void:
 
 
 func _run() -> void:
-	print("=== Fantasy sheet chest animation (v37) ===")
+	print("=== Fantasy sheet chest animation (v38) ===")
 	var chest := FileAccess.get_file_as_string("res://scripts/chest/treasure_chest.gd")
 	var main := FileAccess.get_file_as_string("res://scripts/main.gd")
 	var flags := FileAccess.get_file_as_string("res://scripts/build_flags.gd")
@@ -78,10 +78,15 @@ func _run() -> void:
 			"scroll frame %02d" % i
 		)
 
-	_assert(flags.contains("APP_VERSION_CODE := 37"), "versionCode 37")
-	_assert(preset.contains("version/code=37"), "export 37")
+	_assert(flags.contains("APP_VERSION_CODE := 38"), "versionCode 38")
+	_assert(preset.contains("version/code=38"), "export 38")
 	_assert(preset.contains("fantasy-sheet-chest-debug.apk"), "APK name")
-	_assert(gitignore.contains("ChestOfLoveNotes-fantasy-sheet-chest-debug.apk"), "gitignore")
+	## Fantasy APK must remain ignored (GitHub 100MB); do not force-add via !build/ exception.
+	_assert(gitignore.contains("*.apk"), "apks ignored by default")
+	_assert(
+		not gitignore.contains("!build/ChestOfLoveNotes-fantasy-sheet-chest-debug.apk"),
+		"fantasy APK gitignore exception removed"
+	)
 	_assert(export_sh.contains("fantasy-sheet-chest-debug.apk"), "export default")
 	_assert(chest.contains("func play_open_animation"), "open API")
 	_assert(chest.contains("func play_open_empty_pulse"), "pulse API")
@@ -106,8 +111,8 @@ func _run() -> void:
 	]
 	var out_dir := "res://../.cursor_tmp_chest_validate"
 	## Write under user:// for headless reliability.
-	var user_dir := "user://chest_validate_v37"
-	DirAccess.make_dir_recursive_absolute(OS.get_user_data_dir().path_join("chest_validate_v37"))
+	var user_dir := "user://chest_validate_v38"
+	DirAccess.make_dir_recursive_absolute(OS.get_user_data_dir().path_join("chest_validate_v38"))
 	for s in states:
 		node._set_frame_progress(float(s["p"]), bool(s["scroll"]))
 		await process_frame
@@ -118,7 +123,7 @@ func _run() -> void:
 		if tex is ImageTexture or tex is CompressedTexture2D:
 			var img: Image = tex.get_image()
 			if img:
-				var path := OS.get_user_data_dir().path_join("chest_validate_v37/%s.png" % s["name"])
+				var path := OS.get_user_data_dir().path_join("chest_validate_v38/%s.png" % s["name"])
 				img.save_png(path)
 				print("WROTE ", path)
 		_assert(node._frame_index >= 0, "state %s frame index" % s["name"])

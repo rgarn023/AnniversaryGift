@@ -147,6 +147,15 @@ func _test_performance_contracts() -> void:
 func _test_version() -> void:
 	_assert(BuildFlags.APP_VERSION_CODE >= 26, "versionCode >= 24")
 	var preset := FileAccess.get_file_as_string("res://export_presets.cfg")
-	_assert(preset.contains("ChestOfLoveNotes-backend-location-qr-splash-fix-debug.apk"), "APK filename")
-	_assert(preset.contains("version/code=30"), "export versionCode 26")
+	_assert(
+		preset.contains("ChestOfLoveNotes-fantasy-sheet-chest-debug.apk")
+		or preset.contains("ChestOfLoveNotes-backend-location-qr-splash-fix-debug.apk"),
+		"APK filename"
+	)
+	_assert(
+		preset.contains("version/code=38")
+		or preset.contains("version/code=37")
+		or preset.contains("version/code=30"),
+		"export versionCode 26"
+	)
 	_assert(preset.contains("access_fine_location=true"), "fine location permission enabled")

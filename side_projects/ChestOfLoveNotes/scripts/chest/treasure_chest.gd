@@ -530,7 +530,7 @@ func play_open_animation(short: bool = false, emerge_scroll: bool = false) -> vo
 	if emerge_scroll:
 		chest_state = ChestState.TRANSITIONING
 	else:
-		chest_state = ChestState.OPENED
+		chest_state = ChestState.OPEN_EMPTY
 	animating = false
 	_input_locked = false
 	sfx_fully_open.emit()
@@ -579,7 +579,7 @@ func finish_opening_safely() -> void:
 	_apply_finished_state()
 	animating = false
 	_input_locked = false
-	chest_state = ChestState.OPENED if not _show_scroll_on_finish else ChestState.TRANSITIONING
+	chest_state = ChestState.OPEN_EMPTY if not _show_scroll_on_finish else ChestState.TRANSITIONING
 	open_finished.emit()
 
 

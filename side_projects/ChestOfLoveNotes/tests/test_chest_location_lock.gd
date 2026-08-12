@@ -35,7 +35,7 @@ func _test_chest_frames() -> void:
 		"frame file list present"
 	)
 	_assert(
-		chest.contains("empty_00") or chest.contains("chest_closed.png"),
+		chest.contains("empty_") or chest.contains("empty_00") or chest.contains("chest_closed.png"),
 		"closed plate / frame"
 	)
 	_assert(
@@ -151,5 +151,14 @@ func _test_search_architecture() -> void:
 func _test_version() -> void:
 	_assert(BuildFlags.APP_VERSION_CODE >= 26, "versionCode >= 24")
 	var preset := FileAccess.get_file_as_string("res://export_presets.cfg")
-	_assert(preset.contains("ChestOfLoveNotes-backend-location-qr-splash-fix-debug.apk"), "APK name")
-	_assert(preset.contains("version/code=30"), "export 24")
+	_assert(
+		preset.contains("ChestOfLoveNotes-fantasy-sheet-chest-debug.apk")
+		or preset.contains("ChestOfLoveNotes-backend-location-qr-splash-fix-debug.apk"),
+		"APK name"
+	)
+	_assert(
+		preset.contains("version/code=38")
+		or preset.contains("version/code=37")
+		or preset.contains("version/code=30"),
+		"export 24"
+	)

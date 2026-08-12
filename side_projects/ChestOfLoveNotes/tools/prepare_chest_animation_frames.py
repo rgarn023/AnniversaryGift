@@ -165,19 +165,78 @@ def place_aligned(arr: np.ndarray) -> tuple[np.ndarray, tuple[float, float] | No
 	return out, anchor, crop_h
 
 
+def base_metrics(rgba: np.ndarray) -> tuple[float, float] | None:
+	alpha = rgba[:, :, 3]
+	ys, xs = np.where(alpha > 40)
+	if len(xs) == 0:
+		return None
+	y_max = int(ys.max())
+	band = ys >= (y_max - 8)
+	bx = xs[band]
+	cx = float(np.median(bx))
+	return cx, float(y_max)
+
+
+def lock_to_anchor(rgba: np.ndarray, target_cx: float, target_y: float) -> np.ndarray:
+	"""Translate so the base foot center matches the sequence's closed frame."""
+	m = base_metrics(rgba)
+	if m is None:
+		return rgba
+	cx, y = m
+	dx = int(round(target_cx - cx))
+	dy = int(round(target_y - y))
+	if dx == 0 and dy == 0:
+		return rgba
+	out = np.zeros_like(rgba)
+	h, w = rgba.shape[:2]
+	if dx >= 0:
+		dst_x0, src_x0, width = dx, 0, w - dx
+	else:
+		dst_x0, src_x0, width = 0, -dx, w + dx
+	if dy >= 0:
+		dst_y0, src_y0, height = dy, 0, h - dy
+	else:
+		dst_y0, src_y0, height = 0, -dy, h + dy
+	if width <= 0 or height <= 0:
+		return rgba
+	out[dst_y0 : dst_y0 + height, dst_x0 : dst_x0 + width] = rgba[
+		src_y0 : src_y0 + height, src_x0 : src_x0 + width
+	]
+	return out
+
+
 def process(path: Path, prefix: str, picks: list[int], sub: str, labels: list[str]) -> list[dict]:
 	rgb = load_rgb(path)
 	out_dir = OUT / sub
 	out_dir.mkdir(parents=True, exist_ok=True)
 	for p in out_dir.glob("*.png"):
 		p.unlink()
-	meta: list[dict] = []
-	for seq, src in enumerate(picks):
+	placed_list: list[tuple[np.ndarray, int, int]] = []
+	for src in picks:
 		placed, _anchor, crop_h = place_aligned(cell_at(rgb, src))
+		placed_list.append((placed, crop_h, src))
+	anchor_m = base_metrics(placed_list[0][0])
+	if anchor_m is None:
+		raise RuntimeError(f"Could not find base anchor for {sub} closed frame")
+	target_cx, target_y = anchor_m
+	print(f"{sub} lock target cx={target_cx:.1f} y={target_y:.1f}")
+	meta: list[dict] = []
+	for seq, (placed, crop_h, src) in enumerate(placed_list):
+		locked = lock_to_anchor(placed, target_cx, target_y)
 		fname = f"{prefix}_{seq:02d}.png"
-		Image.fromarray(placed, "RGBA").save(out_dir / fname)
+		Image.fromarray(locked, "RGBA").save(out_dir / fname)
 		label = labels[seq] if seq < len(labels) else ""
-		meta.append({"file": fname, "src_index": src, "label": label, "crop_h": crop_h})
+		m = base_metrics(locked)
+		meta.append(
+			{
+				"file": fname,
+				"src_index": src,
+				"label": label,
+				"crop_h": crop_h,
+				"base_cx": m[0] if m else None,
+				"base_y": m[1] if m else None,
+			}
+		)
 		print(f"{sub}/{fname} src={src:02d} crop_h={crop_h} [{label}]")
 	(out_dir / "manifest.json").write_text(json.dumps(meta, indent=2))
 	return meta
