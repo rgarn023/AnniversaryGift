@@ -37,6 +37,31 @@ Deno.serve(async (req) => {
       throw new AppError("disconnect_failed", "Could not disconnect.", 500);
     }
 
+    // Durable disconnect tombstone: cancel accepted/pending requests for this pair.
+    // Without this, get-friends reconcileAcceptedPairing rehydrates the friendship
+    // from leftover friend_requests.status='accepted' and auto-reconnects.
+    const now = new Date().toISOString();
+    const pairOr =
+      `and(sender_id.eq.${me},recipient_id.eq.${otherId}),and(sender_id.eq.${otherId},recipient_id.eq.${me})`;
+    const { error: cancelAcceptedErr } = await service
+      .from("friend_requests")
+      .update({ status: "cancelled", responded_at: now })
+      .eq("status", "accepted")
+      .or(pairOr);
+    if (cancelAcceptedErr) {
+      console.error("disconnect cancel accepted requests failed", cancelAcceptedErr);
+      throw new AppError("disconnect_failed", "Could not disconnect.", 500);
+    }
+    const { error: cancelPendingErr } = await service
+      .from("friend_requests")
+      .update({ status: "cancelled", responded_at: now })
+      .eq("status", "pending")
+      .or(pairOr);
+    if (cancelPendingErr) {
+      console.error("disconnect cancel pending requests failed", cancelPendingErr);
+      // Friendship already removed; still treat as disconnected but log.
+    }
+
     // Optional notify other party (privacy-safe).
     const name = String(meProfile?.display_name ?? "Your Person");
     if (await claimServerNotificationEvent(String(otherId), null, `disconnect:${f.id}`)) {

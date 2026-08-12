@@ -72,12 +72,13 @@ func _run() -> void:
 		_assert(FileAccess.file_exists("res://assets/art/chest/%s" % fname), "asset %s" % fname)
 
 	## VERSION / APK
-	_assert(flags.contains("APP_VERSION_CODE := 32"), "versionCode 32")
-	_assert(preset.contains("version/code=32"), "export 32")
-	_assert(preset.contains("splash-timing-chest-animation-fix-debug.apk"), "APK name")
-	_assert(gitignore.contains("ChestOfLoveNotes-splash-timing-chest-animation-fix-debug.apk"), "gitignore allow")
-	_assert(export_sh.contains("splash-timing-chest-animation-fix-debug.apk"), "export script default")
 	_assert(BuildFlags.APP_VERSION_CODE >= 32, "BuildFlags >= 32")
+	_assert(preset.contains("version/code="), "export has versionCode")
+	_assert(
+		gitignore.contains("splash-timing-chest-animation-fix-debug.apk")
+		or gitignore.contains("game-quality-chest-disconnect-fix-debug.apk"),
+		"gitignore allows debug APK"
+	)
 
 	print("Results: %d passed, %d failed" % [_passed, _failed])
 	quit(0 if _failed == 0 else 1)

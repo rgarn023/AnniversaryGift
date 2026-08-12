@@ -68,14 +68,21 @@ Deno.serve(async (req) => {
       .eq("user_one_id", userOne)
       .eq("user_two_id", userTwo);
 
-    // Cancel any pending requests either direction.
+    // Cancel pending AND accepted requests either direction so get-friends
+    // reconcile cannot resurrect a blocked / ended pairing.
+    const pairOr =
+      `and(sender_id.eq.${me},recipient_id.eq.${body.blocked_id}),and(sender_id.eq.${body.blocked_id},recipient_id.eq.${me})`;
+    const now = new Date().toISOString();
     await service
       .from("friend_requests")
-      .update({ status: "cancelled", responded_at: new Date().toISOString() })
+      .update({ status: "cancelled", responded_at: now })
       .eq("status", "pending")
-      .or(
-        `and(sender_id.eq.${me},recipient_id.eq.${body.blocked_id}),and(sender_id.eq.${body.blocked_id},recipient_id.eq.${me})`,
-      );
+      .or(pairOr);
+    await service
+      .from("friend_requests")
+      .update({ status: "cancelled", responded_at: now })
+      .eq("status", "accepted")
+      .or(pairOr);
 
     return jsonResponse({ blocked_id: body.blocked_id, status: "blocked" });
   } catch (err) {

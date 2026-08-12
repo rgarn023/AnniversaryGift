@@ -2609,13 +2609,15 @@ func _confirm_disconnect_person(person: Dictionary) -> void:
 			return
 		var result: Dictionary = await state.friends.disconnect_person()
 		if bool(result.get("ok", false)):
+			## Only clear local Person after backend confirms durable disconnect.
 			state.clear_last_person_cache()
-			state.cached_friends = {"person": null, "friends": []}
+			state.cached_friends = {"person": null, "friends": [], "incoming_requests": [], "outgoing_requests": []}
 			state.invalidate_cache("friends")
-			_show_toast("Disconnected.")
+			_show_toast("Disconnected from %s" % name)
 			_show_friends()
 		else:
-			_show_toast(str(result.get("error", "Could not disconnect.")))
+			## Keep current pairing visible on failure.
+			_show_toast("Couldn't disconnect right now. Please try again.")
 	)
 	col.add_child(yes)
 	var no := Button.new()

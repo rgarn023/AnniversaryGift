@@ -3,12 +3,16 @@ import { requireUser, callerId, requirePrivateMember } from "../_shared/auth.ts"
 import { createServiceClient } from "../_shared/supabase.ts";
 import { AppError, errorResponse } from "../_shared/errors.ts";
 
-/** Ensure an accepted friend_request has a corresponding mutual friendship row. */
+/**
+ * Missed-accept repair ONLY.
+ * Disconnect sets friend_requests.status='cancelled' for the pair, so those rows
+ * never match status='accepted' here and cannot resurrect a deliberate disconnect.
+ * Declined / cancelled / pending history must never create an active Person.
+ */
 async function reconcileAcceptedPairing(
   service: ReturnType<typeof createServiceClient>,
   me: string,
 ): Promise<void> {
-  // Legacy / missed-accept repair: accepted request exists but friendships row missing.
   const { data: accepted } = await service
     .from("friend_requests")
     .select("id, sender_id, recipient_id, status, responded_at, created_at")
@@ -27,15 +31,15 @@ async function reconcileAcceptedPairing(
 
   if (existing && existing.length > 0) return;
 
-  // Prefer the earliest accepted request involving me; normalize to one mutual row.
   for (const fr of accepted) {
+    // Defense: never trust non-accepted rows even if a filter regresses.
+    if (String(fr.status) !== "accepted") continue;
     const a = String(fr.sender_id);
     const b = String(fr.recipient_id);
     if (!a || !b || a === b) continue;
     const userOne = a < b ? a : b;
     const userTwo = a < b ? b : a;
 
-    // Skip if either party already has a different active person.
     const { data: aHas } = await service.rpc("has_active_person", { p_user: a });
     const { data: bHas } = await service.rpc("has_active_person", { p_user: b });
     if (aHas || bHas) continue;
@@ -48,7 +52,6 @@ async function reconcileAcceptedPairing(
       console.log("reconciled accepted friend_request into friendship", fr.id);
       return;
     }
-    // Unique / already_has_person → stop; another concurrent path created it.
     console.warn("reconcile insert skipped", insErr.message ?? insErr);
     return;
   }
