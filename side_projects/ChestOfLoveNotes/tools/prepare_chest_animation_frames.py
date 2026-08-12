@@ -141,6 +141,35 @@ def find_base(arr: np.ndarray) -> tuple[float, float] | None:
 	return cx, float(y_max)
 
 
+def harden_chest_opacity(rgba: np.ndarray) -> np.ndarray:
+	"""Force wood/gold chest body pixels fully opaque.
+
+	Soft mid-alpha must never make the physical chest see-through over beach.
+	Glow / soft fringe may stay translucent at the extreme outer edge only.
+	"""
+	out = rgba.copy()
+	a = out[:, :, 3].astype(np.float32)
+	r = out[:, :, 0].astype(np.float32)
+	g = out[:, :, 1].astype(np.float32)
+	b = out[:, :, 2].astype(np.float32)
+	lum = (r + g + b) / 3.0
+	present = a > 18
+	wood = present & (lum < 175) & (r > 35) & (r > b) & (g > b * 0.55)
+	gold = present & (lum >= 55) & (lum < 235) & (r > 100) & (g > 65) & ((r - b) > 28)
+	warm = present & (r > 90) & (g > 45) & ((r - b) > 20) & (lum < 220)
+	body = wood | gold | warm
+	## Interior fill that is clearly chest mass (not sparse glow dust).
+	interior = present & (a >= 90) & (lum >= 28)
+	solid = body | interior
+	out[solid, 3] = 255
+	## Collapse residual soft body fringe: if a mid-alpha pixel is surrounded by
+	## opaque body, promote it to opaque instead of letting beach show through.
+	opaque = out[:, :, 3] >= 250
+	near_body = _dilate(opaque, 1) & present & (out[:, :, 3] < 250) & (lum >= 24)
+	out[near_body, 3] = 255
+	return out
+
+
 def to_rgba(arr: np.ndarray) -> np.ndarray:
 	is_bg = bg_mask(arr)
 	rgba = np.zeros((arr.shape[0], arr.shape[1], 4), dtype=np.uint8)
@@ -150,10 +179,17 @@ def to_rgba(arr: np.ndarray) -> np.ndarray:
 	corners = np.stack([arr[1, 1], arr[1, -2], arr[-2, 1], arr[-2, -2]]).astype(np.float32)
 	bg = corners.mean(axis=0)
 	diff = np.abs(arr.astype(np.float32) - bg).sum(axis=2)
-	soft = (~is_bg) & (diff < 70) & (lum < 55)
+	## Only true near-bg fringe may be soft — never dark wood/gold body mass.
+	r = arr[:, :, 0].astype(np.float32)
+	g = arr[:, :, 1].astype(np.float32)
+	b = arr[:, :, 2].astype(np.float32)
+	bodyish = ((r > 40) & (r > b) & (g > b * 0.55) & (lum < 190)) | (
+		(lum >= 55) & (r > 100) & (g > 65) & ((r - b) > 28)
+	)
+	soft = (~is_bg) & (~bodyish) & (diff < 70) & (lum < 40)
 	alpha = alpha.copy()
-	alpha[soft] = 140
-	near_black = (lum < 22) & (alpha > 0) & (diff < 55)
+	alpha[soft] = 160
+	near_black = (lum < 18) & (alpha > 0) & (diff < 50) & (~bodyish)
 	alpha[near_black] = 0
 	rgba[:, :, 3] = alpha
 	## Feather a hard cell-top cut so a sliced lid/scroll does not read as a white bar.
@@ -165,7 +201,7 @@ def to_rgba(arr: np.ndarray) -> np.ndarray:
 			row[hit] = np.minimum(row[hit], fade)
 			alpha[y] = row.astype(np.uint8)
 		rgba[:, :, 3] = alpha
-	return rgba
+	return harden_chest_opacity(rgba)
 
 
 def cell_top_clipped(arr: np.ndarray, threshold: int = 40) -> bool:
@@ -302,7 +338,8 @@ def scale_about_foot(rgba: np.ndarray, scale: float, foot_x: float, foot_y: floa
 	paste_x = int(round(foot_x - fx))
 	paste_y = int(round(foot_y - fy))
 	canvas.paste(resized, (paste_x, paste_y), resized)
-	return np.array(canvas)
+	## LANCZOS introduces soft fringe — re-harden body so beach never shows through.
+	return harden_chest_opacity(np.array(canvas))
 
 
 def normalize_body_scale(rgba: np.ndarray, target_width: float, foot_x: float, foot_y: float) -> np.ndarray:
@@ -532,7 +569,7 @@ def finalize_locked(
 	if m2 is not None and abs(m2[1] - target_y) >= 1:
 		locked = lock_to_anchor(locked, m2[0], target_y, None)
 		locked = lock_to_anchor(locked, target_cx, target_y, target_visual_cx)
-	return locked
+	return harden_chest_opacity(locked)
 
 
 def process(path: Path, prefix: str, picks: list[int], sub: str, labels: list[str]) -> list[dict]:

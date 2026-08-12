@@ -73,10 +73,11 @@ func _run() -> void:
 
 	## NO CHEST / version / APK
 	_assert(chest.contains("class_name LoveNotesChest") or chest.contains("LoveNotesChest"), "chest untouched")
-	_assert(flags.contains("APP_VERSION_CODE := 42") or flags.contains("APP_VERSION_CODE := 41") or flags.contains("APP_VERSION_CODE := 40") or flags.contains("APP_VERSION_CODE := 39") or flags.contains("APP_VERSION_CODE := 35"), "versionCode 35+")
-	_assert(preset.contains("version/code=42") or preset.contains("version/code=41") or preset.contains("version/code=40") or preset.contains("version/code=39") or preset.contains("version/code=38") or preset.contains("version/code=35"), "export 35+")
+	_assert(flags.contains("APP_VERSION_CODE := 43") or flags.contains("APP_VERSION_CODE := 42") or flags.contains("APP_VERSION_CODE := 41") or flags.contains("APP_VERSION_CODE := 40") or flags.contains("APP_VERSION_CODE := 39") or flags.contains("APP_VERSION_CODE := 35"), "versionCode 35+")
+	_assert(preset.contains("version/code=43") or preset.contains("version/code=42") or preset.contains("version/code=41") or preset.contains("version/code=40") or preset.contains("version/code=39") or preset.contains("version/code=38") or preset.contains("version/code=35"), "export 35+")
 	_assert(
-		preset.contains("v42-one-chest-beach-layout-debug.apk")
+		preset.contains("v43-chest-hierarchy-beach-fix-debug.apk")
+		or preset.contains("v42-one-chest-beach-layout-debug.apk")
 		or preset.contains("v40-chest-smoothing-hidden-fix-debug.apk")
 		or preset.contains("v39-chest-polish-debug.apk")
 		or preset.contains("backend-disconnect-fix-debug.apk"),
@@ -84,7 +85,8 @@ func _run() -> void:
 	)
 	_assert(gitignore.contains("*.apk") or gitignore.contains("ChestOfLoveNotes-backend-disconnect-fix-debug.apk"), "gitignore allow")
 	_assert(
-		export_sh.contains("v42-one-chest-beach-layout-debug.apk")
+		export_sh.contains("v43-chest-hierarchy-beach-fix-debug.apk")
+		or export_sh.contains("v42-one-chest-beach-layout-debug.apk")
 		or export_sh.contains("v40-chest-smoothing-hidden-fix-debug.apk")
 		or export_sh.contains("v39-chest-polish-debug.apk")
 		or export_sh.contains("backend-disconnect-fix-debug.apk"),

@@ -114,8 +114,8 @@ func _layout() -> void:
 		_top_shade.position = Vector2.ZERO
 		_top_shade.size = Vector2(area.x, area.y * 0.18)
 	if _horizon_sheen:
-		## Horizon sits ~47% down the authored beach art.
-		_horizon_sheen.position = Vector2(0.0, area.y * 0.47)
+		## Horizon sits ~48% down the authored beach art.
+		_horizon_sheen.position = Vector2(0.0, area.y * 0.48)
 		_horizon_sheen.size = Vector2(area.x, area.y * 0.035)
 
 
@@ -130,4 +130,5 @@ func _process(delta: float) -> void:
 
 ## Sand contact band as a fraction of this control's height (for chest grounding).
 func sand_contact_y_frac() -> float:
-	return 0.72
+	## Chest plant target: lower-middle sand with room below for ground + nav.
+	return 0.70

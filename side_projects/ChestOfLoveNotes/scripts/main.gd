@@ -880,16 +880,14 @@ func _show_main_chest() -> void:
 	_screen_host.add_child(margin)
 	var root := VBoxContainer.new()
 	root.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	root.add_theme_constant_override("separation", 8)
+	root.add_theme_constant_override("separation", 6)
 	margin.add_child(root)
 
-	## Deterministic header hierarchy:
-	## 1) title row (viewport-centered CHEST + dedicated right refresh)
-	## 2) stats below title
-	## 3) filters below stats
-	## 4) chest content below
-	## Refresh never shares a row that can push the title off-center, and never
-	## draws under the stats panel (own row + higher z-index).
+	## Landing reward hierarchy (management UI lives only in YOUR CHEST):
+	## 1) header — viewport-centered CHEST + dedicated right refresh
+	## 2) message safe-zone — empty/status text never intersects chest/scroll
+	## 3) chest stage — interactive fantasy chest grounded on sand
+	## Do NOT mount Current/Unread/Locked/Requests/Saved/Hidden or stats here.
 	var header := Control.new()
 	header.name = "ChestHeaderRow"
 	header.custom_minimum_size.y = MobileUi.font_touch(52)
@@ -898,6 +896,7 @@ func _show_main_chest() -> void:
 	header.mouse_filter = Control.MOUSE_FILTER_PASS
 	root.add_child(header)
 	var title := MobileUi.make_page_title("Chest", _title_font())
+	title.name = "ChestTitle"
 	title.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	title.z_index = 1
@@ -916,7 +915,7 @@ func _show_main_chest() -> void:
 	var refresh_sz := MobileUi.font_touch(48)
 	refresh_btn.custom_minimum_size = Vector2(refresh_sz, refresh_sz)
 	MobileUi.style_button(refresh_btn, 48)
-	## Dedicated right-side slot inside the header row only (never overlaps stats).
+	## Dedicated right-side slot inside the header row only — title stays viewport-centered.
 	refresh_btn.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
 	refresh_btn.anchor_left = 1.0
 	refresh_btn.anchor_right = 1.0
@@ -935,98 +934,59 @@ func _show_main_chest() -> void:
 	)
 	header.add_child(refresh_btn)
 
-	var summary := PanelContainer.new()
-	summary.name = "ChestStatsPanel"
-	summary.z_index = 1
-	summary.mouse_filter = Control.MOUSE_FILTER_STOP
-	summary.add_theme_stylebox_override("panel", MobileUi.card_style())
-	root.add_child(summary)
-	var sum_row := HBoxContainer.new()
-	sum_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	sum_row.add_theme_constant_override("separation", 8)
-	summary.add_child(sum_row)
-	var count_labels: Dictionary = {}
-	for item in [
-		["Unread", counts.unread],
-		["Locked", counts.locked],
-		["Requests", counts.requests],
-	]:
-		var cell := VBoxContainer.new()
-		cell.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		cell.add_theme_constant_override("separation", 2)
-		var num := Label.new()
-		num.text = str(item[1])
-		num.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		MobileUi.apply_label(num, MobileUi.SIZE_STAT_NUMBER, MobileUi.COLOR_TITLE)
-		cell.add_child(num)
-		var lab := Label.new()
-		lab.text = str(item[0])
-		lab.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		MobileUi.apply_label(lab, MobileUi.SIZE_STAT_LABEL, MobileUi.COLOR_SECONDARY)
-		cell.add_child(lab)
-		sum_row.add_child(cell)
-		count_labels[str(item[0]).to_lower()] = num
-
-	## Filter chips below stats — same sibling set (Saved/Hidden always visible).
-	_add_inventory_filter_rows(root, "all")
-
-	## Intentionally composed chest stage — less empty air, still chest-first.
-	var chest_area := Control.new()
-	chest_area.name = "ChestStage"
-	chest_area.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	chest_area.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	root.add_child(chest_area)
-	var your := Label.new()
-	your.text = "Your Chest"
-	your.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	your.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	your.anchor_left = 0.0
-	your.anchor_right = 1.0
-	your.offset_top = 4
-	your.offset_bottom = 32
-	MobileUi.apply_label(your, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY)
-	your.add_theme_color_override("font_shadow_color", Color(0.02, 0.03, 0.08, 0.75))
-	your.add_theme_constant_override("shadow_offset_y", 1)
-	your.add_theme_constant_override("outline_size", 3)
-	your.add_theme_color_override("font_outline_color", Color(0.03, 0.04, 0.10, 0.65))
-	chest_area.add_child(your)
-
-	_chest = LoveNotesChest.new()
-	_chest.reduced_motion = state.reduced_motion
-	_chest.set_anchors_preset(Control.PRESET_CENTER)
-	## Host sized to the taller production canvas so scroll/lid headroom is not clipped.
-	var chest_w := 252
-	var chest_h := 326
-	_chest.custom_minimum_size = Vector2(chest_w, chest_h)
-	_chest.size = Vector2(chest_w, chest_h)
-	_chest.clip_contents = false
-	## Plant on sand: bias downward toward ChestEnvironment.sand_contact_y_frac().
-	## Keep enough headroom above for open lid + raised scroll (do not shrink chest).
-	var sand_frac := chest_env.sand_contact_y_frac() if chest_env != null else 0.72
-	## Stage-local plant: center X, feet toward lower sand band of the content area.
-	_chest.position = Vector2(-chest_w * 0.5, chest_h * (sand_frac - 0.62))
-	_chest.z_index = 5
-	_chest.tapped.connect(_on_chest_tapped)
-	chest_area.clip_contents = false
-	chest_area.add_child(_chest)
-	_chest.configure(LoveNotesChest.ChestState.READY, false)
-	_chest.set_unread_badge(int(counts.unread))
-
+	## Guaranteed message band above the chest (closed / open lid / raised scroll).
+	var message_zone := Control.new()
+	message_zone.name = "ChestMessageSafeZone"
+	message_zone.custom_minimum_size.y = MobileUi.font_touch(44)
+	message_zone.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	message_zone.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(message_zone)
 	_empty_chest_hint = Label.new()
+	_empty_chest_hint.name = "EmptyChestHint"
 	_empty_chest_hint.text = ""
 	_empty_chest_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_empty_chest_hint.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	_empty_chest_hint.anchor_left = 0.08
-	_empty_chest_hint.anchor_right = 0.92
-	_empty_chest_hint.offset_top = -48
-	_empty_chest_hint.offset_bottom = -8
+	_empty_chest_hint.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_empty_chest_hint.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_empty_chest_hint.modulate.a = 0.0
 	MobileUi.apply_label(_empty_chest_hint, MobileUi.SIZE_SECONDARY, MobileUi.COLOR_HELPER)
 	_empty_chest_hint.add_theme_color_override("font_shadow_color", Color(0.02, 0.03, 0.08, 0.80))
 	_empty_chest_hint.add_theme_constant_override("shadow_offset_y", 1)
 	_empty_chest_hint.add_theme_constant_override("outline_size", 3)
 	_empty_chest_hint.add_theme_color_override("font_outline_color", Color(0.03, 0.04, 0.10, 0.70))
-	chest_area.add_child(_empty_chest_hint)
+	message_zone.add_child(_empty_chest_hint)
+
+	## Reward stage — chest only (no management labels / filter chrome).
+	var chest_area := Control.new()
+	chest_area.name = "ChestStage"
+	chest_area.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	chest_area.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	chest_area.clip_contents = false
+	root.add_child(chest_area)
+
+	_chest = LoveNotesChest.new()
+	_chest.reduced_motion = state.reduced_motion
+	## Host sized to the taller production canvas so scroll/lid headroom is not clipped.
+	var chest_w := 252
+	var chest_h := 326
+	_chest.custom_minimum_size = Vector2(chest_w, chest_h)
+	_chest.size = Vector2(chest_w, chest_h)
+	_chest.clip_contents = false
+	## Responsive plant: center X, lower-middle of stage so sand reads below and
+	## open lid / raised scroll stay clear of the message zone + bottom nav.
+	_chest.set_anchors_preset(Control.PRESET_CENTER)
+	_chest.anchor_left = 0.5
+	_chest.anchor_right = 0.5
+	_chest.anchor_top = 0.58
+	_chest.anchor_bottom = 0.58
+	_chest.offset_left = -chest_w * 0.5
+	_chest.offset_right = chest_w * 0.5
+	_chest.offset_top = -chest_h * 0.50
+	_chest.offset_bottom = chest_h * 0.50
+	_chest.z_index = 5
+	_chest.tapped.connect(_on_chest_tapped)
+	chest_area.add_child(_chest)
+	_chest.configure(LoveNotesChest.ChestState.READY, false)
+	_chest.set_unread_badge(int(counts.unread))
 
 	if state.is_demo():
 		var demo_row := HBoxContainer.new()
@@ -1052,12 +1012,6 @@ func _show_main_chest() -> void:
 			state.mark_cache_fresh("chest")
 			var fresh := _counts_from_chest_cache()
 			_last_chest_counts = fresh.duplicate()
-			if count_labels.has("unread") and is_instance_valid(count_labels.unread):
-				count_labels.unread.text = str(fresh.unread)
-			if count_labels.has("locked") and is_instance_valid(count_labels.locked):
-				count_labels.locked.text = str(fresh.locked)
-			if count_labels.has("requests") and is_instance_valid(count_labels.requests):
-				count_labels.requests.text = str(fresh.requests)
 			if _chest != null and is_instance_valid(_chest):
 				_chest.set_unread_badge(int(fresh.unread))
 		else:
@@ -1355,13 +1309,51 @@ func _style_inventory_filter_chip(chip: Button, selected: bool) -> void:
 		chip.add_theme_stylebox_override("pressed", gold)
 
 
+func _add_inventory_stats_panel(root: VBoxContainer, counts: Dictionary) -> Dictionary:
+	## Management-only stats — never mounted on the landing Chest reward scene.
+	var summary := PanelContainer.new()
+	summary.name = "ChestStatsPanel"
+	summary.z_index = 1
+	summary.mouse_filter = Control.MOUSE_FILTER_STOP
+	summary.add_theme_stylebox_override("panel", MobileUi.card_style())
+	root.add_child(summary)
+	var sum_row := HBoxContainer.new()
+	sum_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	sum_row.add_theme_constant_override("separation", 8)
+	summary.add_child(sum_row)
+	var count_labels: Dictionary = {}
+	for item in [
+		["Unread", counts.get("unread", 0)],
+		["Locked", counts.get("locked", 0)],
+		["Requests", counts.get("requests", 0)],
+	]:
+		var cell := VBoxContainer.new()
+		cell.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		cell.add_theme_constant_override("separation", 2)
+		var num := Label.new()
+		num.text = str(item[1])
+		num.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		MobileUi.apply_label(num, MobileUi.SIZE_STAT_NUMBER, MobileUi.COLOR_TITLE)
+		cell.add_child(num)
+		var lab := Label.new()
+		lab.text = str(item[0])
+		lab.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		MobileUi.apply_label(lab, MobileUi.SIZE_STAT_LABEL, MobileUi.COLOR_SECONDARY)
+		cell.add_child(lab)
+		sum_row.add_child(cell)
+		count_labels[str(item[0]).to_lower()] = num
+	return count_labels
+
+
 func _add_inventory_filter_rows(root: VBoxContainer, selected_filter: String) -> void:
-	## Shared filter grid — every sibling chip stays visible regardless of selection.
+	## Shared filter grid for YOUR CHEST only — every sibling chip stays visible.
 	var chip_h := MobileUi.font_touch(MobileUi.FILTER_CHIP_H)
 	var row1 := HBoxContainer.new()
+	row1.name = "ChestFilterRow1"
 	row1.add_theme_constant_override("separation", 8)
 	root.add_child(row1)
 	var row2 := HBoxContainer.new()
+	row2.name = "ChestFilterRow2"
 	row2.add_theme_constant_override("separation", 8)
 	root.add_child(row2)
 	for f in [
@@ -1382,6 +1374,7 @@ func _add_inventory_filter_rows(root: VBoxContainer, selected_filter: String) ->
 				_inventory_filter = fname
 				_show_inventory()
 		, Vector2(0, chip_h))
+		chip.name = "FilterChip_%s" % fname
 		_style_inventory_filter_chip(chip, selected_filter == fname)
 		parent.add_child(chip)
 
@@ -1460,6 +1453,9 @@ func _show_inventory() -> void:
 		title.add_theme_font_override("font", _title_font())
 	header.add_child(title)
 
+	## Stats + filters belong only inside YOUR CHEST management.
+	var mgmt_counts := _counts_from_chest_cache()
+	_add_inventory_stats_panel(root, mgmt_counts)
 	_add_inventory_filter_rows(root, _inventory_filter)
 
 	var scroll := _wire_scroll(ScrollContainer.new())
@@ -1624,6 +1620,8 @@ func _show_saved() -> void:
 		title.add_theme_font_override("font", _title_font())
 	header.add_child(title)
 	## Same sibling filter set as inventory — Hidden must remain visible when Saved is selected.
+	var saved_counts := _counts_from_chest_cache()
+	_add_inventory_stats_panel(root, saved_counts)
 	_add_inventory_filter_rows(root, "saved")
 	var scroll := _wire_scroll(ScrollContainer.new())
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL

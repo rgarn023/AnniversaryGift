@@ -41,13 +41,13 @@ const FRAME_CANVAS := Vector2(384, 496)
 const EMPTY_FRAME_COUNT := 13
 const SCROLL_FRAME_COUNT := 13
 ## Shared open cadence for empty + unread: closed→crack→quarter→half→late→open.
-const OPEN_DURATION_SEC := 1.42
+const OPEN_DURATION_SEC := 1.48
 const OPEN_DURATION_RM := 0.36
 const ANTICIPATION_SEC := 0.10
 const SETTLE_SEC := 0.12
 const MAGICAL_SWELL_SEC := 0.14
 ## Scroll emerge after fully open — peek→partial→halfway→clear→final.
-const SCROLL_EMERGE_SEC := 1.16
+const SCROLL_EMERGE_SEC := 1.22
 ## Short intentional hold on the completed reward pose before note handoff.
 const REWARD_HOLD_SEC := 0.40
 ## Tiny settle pulse only — must not read as the chest growing while opening.
@@ -141,7 +141,9 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	clip_contents = false
 	custom_minimum_size = Vector2(220, 260)
-	modulate.a = 1.0
+	## Physical chest never fades — only glow/particles may be translucent.
+	modulate = Color(1, 1, 1, 1)
+	self_modulate = Color(1, 1, 1, 1)
 	visible = true
 	preload_assets()
 	_empty_frames.clear()
@@ -164,6 +166,7 @@ func _ready() -> void:
 	resized.connect(_layout_frames)
 	_layout_frames()
 	_set_frame_progress(0.0, false)
+	_enforce_chest_opaque()
 
 
 func _build_visuals() -> void:
@@ -180,6 +183,8 @@ func _build_visuals() -> void:
 	_frame_view.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	_frame_view.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	_frame_view.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_frame_view.modulate = Color(1, 1, 1, 1)
+	_frame_view.self_modulate = Color(1, 1, 1, 1)
 	_frame_view.z_index = 2
 	_root_visual.add_child(_frame_view)
 
@@ -332,6 +337,20 @@ func _set_badge_suppressed(suppressed: bool) -> void:
 	_refresh_badge_visibility()
 
 
+func _enforce_chest_opaque() -> void:
+	## Never fade the physical chest sprite / root — glow may still use alpha.
+	modulate = Color(1, 1, 1, 1)
+	self_modulate = Color(1, 1, 1, 1)
+	if _root_visual:
+		_root_visual.modulate = Color(1, 1, 1, 1)
+		_root_visual.self_modulate = Color(1, 1, 1, 1)
+	if _frame_view:
+		## Preserve idle RGB shimmer channel but keep alpha locked at 1.
+		var c := _frame_view.modulate
+		_frame_view.modulate = Color(c.r, c.g, c.b, 1.0)
+		_frame_view.self_modulate = Color(1, 1, 1, 1)
+
+
 func configure(state: ChestState, show_final_label: bool = false) -> void:
 	chest_state = state
 	animating = false
@@ -346,7 +365,8 @@ func configure(state: ChestState, show_final_label: bool = false) -> void:
 	_reset_pose()
 	match state:
 		ChestState.LOCKED_SILHOUETTE:
-			self_modulate = Color(0.55, 0.55, 0.75, 0.9)
+			## Dim RGB only — never reduce alpha (chest must stay opaque).
+			self_modulate = Color(0.55, 0.55, 0.75, 1.0)
 			_label.visible = false
 			_set_frame_progress(0.0, false)
 			set_process(false)
@@ -363,6 +383,7 @@ func configure(state: ChestState, show_final_label: bool = false) -> void:
 			set_process(false)
 		_:
 			set_process(false)
+	_enforce_chest_opaque()
 
 
 func _ease_open_curve(t: float) -> float:
@@ -372,7 +393,7 @@ func _ease_open_curve(t: float) -> float:
 	t = clampf(t, 0.0, 1.0)
 	var s := t * t * (3.0 - 2.0 * t)
 	var early := t * t * t
-	return lerpf(early, s, 0.72)
+	return lerpf(early, s, 0.68)
 
 
 func _select_sequence(emerge_scroll: bool) -> void:
@@ -389,6 +410,8 @@ func _show_frame_index(index: int) -> void:
 	var tex: Texture2D = _active_frames[_frame_index]
 	if _frame_view and tex:
 		_frame_view.texture = tex
+		## One opaque TextureRect only — never alpha-crossfade between poses.
+		_enforce_chest_opaque()
 
 
 func _frame_index_from_progress(eased: float, emerge_scroll: bool) -> int:
@@ -398,37 +421,45 @@ func _frame_index_from_progress(eased: float, emerge_scroll: bool) -> int:
 	if max_i <= 0:
 		return 0
 	if emerge_scroll and max_i >= SCROLL_REVEAL_START_INDEX:
-		## First ~56% → shared opening cadence; remainder → scroll rise only.
+		## First ~54% → shared opening cadence; remainder → scroll rise only.
 		var open_end := SCROLL_REVEAL_START_INDEX - 1
-		if eased < 0.56:
-			var t_open := eased / 0.56
+		if eased >= 0.999:
+			return max_i
+		if eased < 0.54:
+			var t_open := eased / 0.54
 			## Match empty shaping: closed→crack→quarter→half→late→fully open.
 			t_open = t_open * t_open * (3.0 - 2.0 * t_open)
-			if t_open < 0.24:
-				t_open *= 1.14
-			elif t_open < 0.55:
-				t_open = 0.24 * 1.14 + (t_open - 0.24) * 0.94
-			elif t_open > 0.74:
-				## Extra dwell on fully-open before any scroll peek.
-				t_open = 0.74 + (t_open - 0.74) * 0.78
+			if t_open < 0.22:
+				t_open *= 1.18
+			elif t_open < 0.52:
+				t_open = 0.22 * 1.18 + (t_open - 0.22) * 0.96
+			elif t_open > 0.72:
+				## Extra dwell approaching fully-open before any scroll peek.
+				t_open = 0.72 + (t_open - 0.72) * 0.90
+			## Ensure fully-open pose is reached before scroll branch.
+			if t_open > 0.985:
+				return open_end
 			return clampi(int(floor(t_open * float(open_end) + 0.0001)), 0, open_end)
-		var t_scroll := (eased - 0.56) / 0.44
+		var t_scroll := (eased - 0.54) / 0.46
 		## Smoothstep then ease-out so peek→partial→halfway→final each read.
 		t_scroll = t_scroll * t_scroll * (3.0 - 2.0 * t_scroll)
 		t_scroll = 1.0 - (1.0 - t_scroll) * (1.0 - t_scroll)
 		var scroll_span := max_i - open_end
 		var stepped := t_scroll * float(scroll_span)
-		if t_scroll > 0.90:
+		if t_scroll > 0.88:
 			return max_i
 		return clampi(open_end + int(floor(stepped + 0.0001)), open_end, max_i)
 	## Empty open: same cadence — quicker early poses, smoother into fully-open.
+	if eased >= 0.999:
+		return max_i
 	var shaped := eased
-	if eased < 0.24:
-		shaped = eased * 1.14
-	elif eased < 0.55:
-		shaped = 0.24 * 1.14 + (eased - 0.24) * 0.94
-	elif eased > 0.74:
-		shaped = 0.74 + (eased - 0.74) * 0.78
+	if eased < 0.22:
+		shaped = eased * 1.18
+	elif eased < 0.52:
+		shaped = 0.22 * 1.18 + (eased - 0.22) * 0.96
+	elif eased > 0.72:
+		## Linear late map so progress 1.0 always lands on the fully-open frame.
+		shaped = 0.72 + (eased - 0.72) * 1.0
 	return clampi(int(round(clampf(shaped, 0.0, 1.0) * float(max_i))), 0, max_i)
 
 
@@ -552,8 +583,9 @@ func play_open_empty_pulse() -> void:
 		pulse.tween_property(_glow_pulse, "modulate:a", 0.0, 0.30).set_trans(Tween.TRANS_SINE)
 	if _frame_view:
 		var shimmer := create_tween()
+		## Brightness shimmer only — alpha stays 1.0 (no translucent chest).
 		shimmer.tween_property(_frame_view, "modulate", Color(1.08, 1.04, 0.95, 1.0), 0.12)
-		shimmer.tween_property(_frame_view, "modulate", Color.WHITE, 0.26)
+		shimmer.tween_property(_frame_view, "modulate", Color(1.0, 1.0, 1.0, 1.0), 0.26)
 	if not reduced_motion:
 		_emit_burst()
 	if pulse.is_valid():

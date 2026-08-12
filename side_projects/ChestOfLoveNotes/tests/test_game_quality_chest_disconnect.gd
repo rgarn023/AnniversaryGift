@@ -90,7 +90,8 @@ func _run() -> void:
 	_assert(flags.contains("APP_VERSION_CODE :="), "versionCode present")
 	_assert(preset.contains("version/code="), "export version present")
 	_assert(
-		preset.contains("v42-one-chest-beach-layout-debug.apk")
+		preset.contains("v43-chest-hierarchy-beach-fix-debug.apk")
+		or preset.contains("v42-one-chest-beach-layout-debug.apk")
 		or preset.contains("v40-chest-smoothing-hidden-fix-debug.apk")
 		or preset.contains("v39-chest-polish-debug.apk")
 		or preset.contains("backend-disconnect-fix-debug.apk")
@@ -108,7 +109,8 @@ func _run() -> void:
 		"gitignore allow"
 	)
 	_assert(
-		export_sh.contains("v42-one-chest-beach-layout-debug.apk")
+		export_sh.contains("v43-chest-hierarchy-beach-fix-debug.apk")
+		or export_sh.contains("v42-one-chest-beach-layout-debug.apk")
 		or export_sh.contains("v40-chest-smoothing-hidden-fix-debug.apk")
 		or export_sh.contains("v39-chest-polish-debug.apk")
 		or export_sh.contains("disconnect-fix-debug.apk")
