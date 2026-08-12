@@ -58,7 +58,8 @@ func _run() -> void:
 	_assert(main.contains("OPEN_EMPTY"), "retap handles OPEN_EMPTY")
 	_assert(main.contains("play_open_empty_pulse"), "retap pulse wired")
 	_assert(boot.contains("MIN_VISIBLE_SEC := 4.0"), "splash min 4s")
-	_assert(preset.contains("splash_screen/background_color=Color(0, 0, 0, 1)"), "android splash bg black")
+	_assert(preset.contains("splash_screen/background_color=Color(0.01, 0.005, 0.02, 1)"), "android splash bg near-black")
+	_assert(preset.contains("[splash]android:windowSplashScreenBackground"), "force splash window black")
 
 	_assert(
 		FileAccess.file_exists(
