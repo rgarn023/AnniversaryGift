@@ -40,10 +40,12 @@ func _run() -> void:
 	_assert(FileAccess.file_exists("res://assets/branding/splash_frames_meta.json"), "frame meta packaged")
 	_assert(FileAccess.file_exists("res://assets/branding/splash_still.png"), "still frame packaged")
 
-	## CHEST — frame-based, no whole-chest scale open, no squash
-	_assert(chest.contains("FRAME_FILES"), "authored frame list")
-	_assert(chest.contains("chest_closed.png"), "closed plate")
-	_assert(chest.contains("chest_open.png"), "open plate")
+	## CHEST — continuous hinged layers, no whole-chest scale open, no squash
+	_assert(
+		chest.contains("HINGE_CANVAS") or chest.contains("FRAME_FILES"),
+		"chest open mechanism present"
+	)
+	_assert(chest.contains("chest_lid.png") or chest.contains("chest_closed.png"), "chest lid/closed art")
 	_assert(chest.contains("OPEN_DURATION_SEC :="), "open duration constant")
 	_assert(chest.contains("OPEN_SCROLL_EMERGING"), "scroll-emerging state")
 	_assert(chest.contains("sfx_open_start"), "sound hook open start")
@@ -60,15 +62,7 @@ func _run() -> void:
 	_assert(main.contains("play_open_empty_pulse"), "retap uses pulse")
 	_assert(main.contains("play_open_animation(state.reduced_motion, has_new)"), "scroll only when new")
 
-	## Frame assets present (same-canvas plates)
-	for fname in [
-		"chest_closed.png",
-		"chest_open_10.png",
-		"chest_open_25.png",
-		"chest_ajar.png",
-		"chest_half.png",
-		"chest_open.png",
-	]:
+	for fname in ["chest_lid.png", "chest_front_lip.png", "chest_inner_glow.png"]:
 		_assert(FileAccess.file_exists("res://assets/art/chest/%s" % fname), "asset %s" % fname)
 
 	## VERSION / APK

@@ -19,5 +19,5 @@ const SHOW_ONBOARDING_BANNER := false
 const DEV_CHEST_SCROLL_PREVIEW := false
 ## Debug/test builds may offer "Send to Myself (Test)" using the real send path.
 const DEBUG_SELF_SEND := true
-const APP_VERSION_NAME := "0.1.35-backend-disconnect-fix"
-const APP_VERSION_CODE := 35
+const APP_VERSION_NAME := "0.1.36-seamless-game-quality-chest"
+const APP_VERSION_CODE := 36

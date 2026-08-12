@@ -1025,8 +1025,14 @@ func _on_chest_tapped() -> void:
 		or int(_last_chest_counts.get("requests", 0)) > 0
 		or (_dev_force_chest_scroll and OS.is_debug_build())
 	)
-	## Already open empty chest: pulse only.
-	if _chest.chest_state == LoveNotesChest.ChestState.OPENED and not has_new:
+	## Already open empty chest: pulse only — never replay full open.
+	if (
+		(
+			_chest.chest_state == LoveNotesChest.ChestState.OPENED
+			or _chest.chest_state == LoveNotesChest.ChestState.OPEN_EMPTY
+		)
+		and not has_new
+	):
 		await _chest.play_open_empty_pulse()
 		if _empty_chest_hint:
 			_empty_chest_hint.text = "No new scrolls today."

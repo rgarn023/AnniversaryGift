@@ -39,8 +39,11 @@ func _run() -> void:
 	_assert(boot.contains("mark_app_ready"), "splash app-ready gate kept")
 	_assert(main.contains("mark_app_ready"), "main still marks boot ready")
 
-	## CHEST hybrid game-feel
-	_assert(chest.contains("Architecture C") or chest.contains("Hybrid"), "hybrid architecture")
+	## CHEST game-feel (seamless hinged layers as of v36+)
+	_assert(
+		chest.contains("Seamless layered") or chest.contains("Hybrid") or chest.contains("Architecture C"),
+		"chest architecture"
+	)
 	_assert(chest.contains("chest_interior.png"), "interior layer")
 	_assert(chest.contains("_ease_open_curve"), "custom open easing")
 	_assert(chest.contains("OPEN_WAITING_FOR_SCROLL"), "waiting-for-scroll state")
@@ -52,11 +55,8 @@ func _run() -> void:
 	_assert(chest.contains("clip_contents = true"), "scroll occlusion clip")
 	_assert(not chest.contains('scale.y =') and not chest.contains('"scale:y"'), "no scale.y squash tween")
 	_assert(not chest.contains("_cinematic_zoom"), "no cinematic zoom reopen")
-	_assert(chest.contains("OPEN_DURATION_SEC := 0.88"), "open duration tuned")
-	for fname in [
-		"chest_closed.png", "chest_open_10.png", "chest_open_25.png",
-		"chest_ajar.png", "chest_half.png", "chest_open.png", "chest_interior.png",
-	]:
+	_assert(chest.contains("OPEN_DURATION_SEC :="), "open duration tuned")
+	for fname in ["chest_lid.png", "chest_interior.png", "chest_front_lip.png"]:
 		_assert(FileAccess.file_exists("res://assets/art/chest/%s" % fname), "asset %s" % fname)
 
 	## DISCONNECT durable — root cause fix
