@@ -1,0 +1,303 @@
+{
+  "pass": "step2_asset_creation_validation",
+  "integration_allowed": true,
+  "failures": [],
+  "output_dimensions": [
+    512,
+    512
+  ],
+  "color": "RGBA 8-bit",
+  "chest_12_path": "assets/chest/animation_v2/chest_frames/chest_12_fully_open.png",
+  "chest_12_sha256": "df17108ca1ede3142793795056cf1480c46528464bd865cf67e7f6de24885aa5",
+  "scroll_path": "assets/chest/animation_v2/scroll/love_scroll_reward.png",
+  "scroll_sha256": "d8769ae0074cc062f78951c64cbcc4d8e01996ad52ceb2f3d6ebafe34fa3d1e2",
+  "scroll_native_size": [
+    720,
+    305
+  ],
+  "scroll_production_width": 118,
+  "scroll_production_height": 50,
+  "scroll_x": 188,
+  "scroll_center_x": 247.0,
+  "scroll_x_bias_from_cavity_center": 28.0,
+  "opening_width_px": 164.0,
+  "scroll_width_frac_of_opening": 0.72,
+  "lip_y": 269,
+  "foreground_occluder": {
+    "path": "assets/chest/animation_v2/layers/chest_open_front_rim.png",
+    "reused_existing_front_rim": true,
+    "rederived": false,
+    "pixel_compatible_with_chest12": true,
+    "sha256": "724a93919f78dfbae7e8ddd67ae7477d6d18842ce94dd3e7308cce5751518c28",
+    "extra_occlusion": "deterministic lip burial: restore chest_12 for all y >= 269 after scroll paste (closes rim gaps so scroll cannot bleed through the front lip)"
+  },
+  "compositing_order": [
+    "A. full chest_12 base",
+    "B. scaled horizontal scroll at fixed X / per-frame Y",
+    "C. restore chest_12 for rim opaque pixels + all y >= lip_y"
+  ],
+  "reveal_00_vs_chest12_diff_pixels": 0,
+  "scroll_art_scale_identical_across_frames": true,
+  "no_mask_rectangle_artifacts": true,
+  "validation_contact_sheet": "assets/chest/animation_v3/validation/scroll_reveal_contact_sheet.png",
+  "validation_lip_closeup": "assets/chest/animation_v3/validation/scroll_reveal_lip_closeup.png",
+  "validation_preview": "assets/chest/animation_v3/validation/scroll_reveal_preview.mp4",
+  "preview_generated": true,
+  "frames": [
+    {
+      "file": "reveal_00_hidden.png",
+      "path": "assets/chest/animation_v3/scroll_reveal/reveal_00_hidden.png",
+      "reveal_pct_intended": 0.0,
+      "reveal_pct_approx": 0.0,
+      "scroll_top_y": 269,
+      "scroll_x": 188,
+      "scroll_size": [
+        118,
+        50
+      ],
+      "geometric_visibility_pct": 0.0,
+      "actual_visibility_pct_estimate": 0.0,
+      "first_visible_canvas_y": null,
+      "dimensions": [
+        512,
+        512
+      ],
+      "color": "RGBA 8-bit",
+      "alpha": true,
+      "chest_consistency": {
+        "diff_pixels_vs_chest12": 0,
+        "allowed_scroll_region_xyxy": null,
+        "unexpected_diffs_outside_scroll_region": 0
+      },
+      "notes": "pixel-identical to chest_12; scroll completely hidden"
+    },
+    {
+      "file": "reveal_01_peek.png",
+      "path": "assets/chest/animation_v3/scroll_reveal/reveal_01_peek.png",
+      "reveal_pct_intended": 5.0,
+      "reveal_pct_approx": 5.0,
+      "scroll_top_y": 266,
+      "scroll_x": 188,
+      "scroll_size": [
+        118,
+        50
+      ],
+      "geometric_visibility_pct": 6.0,
+      "actual_visibility_pct_estimate": 6.0,
+      "first_visible_canvas_y": 266,
+      "dimensions": [
+        512,
+        512
+      ],
+      "color": "RGBA 8-bit",
+      "alpha": true,
+      "chest_consistency": {
+        "diff_pixels_vs_chest12": 36,
+        "allowed_scroll_region_xyxy": [
+          188,
+          266,
+          306,
+          269
+        ],
+        "unexpected_diffs_outside_scroll_region": 0
+      },
+      "notes": "horizontal scroll; Y-only; chest_12 base + rim/lip occlusion"
+    },
+    {
+      "file": "reveal_02_15.png",
+      "path": "assets/chest/animation_v3/scroll_reveal/reveal_02_15.png",
+      "reveal_pct_intended": 15.0,
+      "reveal_pct_approx": 15.0,
+      "scroll_top_y": 262,
+      "scroll_x": 188,
+      "scroll_size": [
+        118,
+        50
+      ],
+      "geometric_visibility_pct": 14.0,
+      "actual_visibility_pct_estimate": 14.0,
+      "first_visible_canvas_y": 262,
+      "dimensions": [
+        512,
+        512
+      ],
+      "color": "RGBA 8-bit",
+      "alpha": true,
+      "chest_consistency": {
+        "diff_pixels_vs_chest12": 132,
+        "allowed_scroll_region_xyxy": [
+          188,
+          262,
+          306,
+          269
+        ],
+        "unexpected_diffs_outside_scroll_region": 0
+      },
+      "notes": "horizontal scroll; Y-only; chest_12 base + rim/lip occlusion"
+    },
+    {
+      "file": "reveal_03_30.png",
+      "path": "assets/chest/animation_v3/scroll_reveal/reveal_03_30.png",
+      "reveal_pct_intended": 30.0,
+      "reveal_pct_approx": 30.0,
+      "scroll_top_y": 254,
+      "scroll_x": 188,
+      "scroll_size": [
+        118,
+        50
+      ],
+      "geometric_visibility_pct": 30.0,
+      "actual_visibility_pct_estimate": 30.0,
+      "first_visible_canvas_y": 254,
+      "dimensions": [
+        512,
+        512
+      ],
+      "color": "RGBA 8-bit",
+      "alpha": true,
+      "chest_consistency": {
+        "diff_pixels_vs_chest12": 610,
+        "allowed_scroll_region_xyxy": [
+          188,
+          254,
+          306,
+          269
+        ],
+        "unexpected_diffs_outside_scroll_region": 0
+      },
+      "notes": "horizontal scroll; Y-only; chest_12 base + rim/lip occlusion"
+    },
+    {
+      "file": "reveal_04_50.png",
+      "path": "assets/chest/animation_v3/scroll_reveal/reveal_04_50.png",
+      "reveal_pct_intended": 50.0,
+      "reveal_pct_approx": 50.0,
+      "scroll_top_y": 244,
+      "scroll_x": 188,
+      "scroll_size": [
+        118,
+        50
+      ],
+      "geometric_visibility_pct": 50.0,
+      "actual_visibility_pct_estimate": 50.0,
+      "first_visible_canvas_y": 244,
+      "dimensions": [
+        512,
+        512
+      ],
+      "color": "RGBA 8-bit",
+      "alpha": true,
+      "chest_consistency": {
+        "diff_pixels_vs_chest12": 1628,
+        "allowed_scroll_region_xyxy": [
+          188,
+          244,
+          306,
+          269
+        ],
+        "unexpected_diffs_outside_scroll_region": 0
+      },
+      "notes": "horizontal scroll; Y-only; chest_12 base + rim/lip occlusion"
+    },
+    {
+      "file": "reveal_05_70.png",
+      "path": "assets/chest/animation_v3/scroll_reveal/reveal_05_70.png",
+      "reveal_pct_intended": 70.0,
+      "reveal_pct_approx": 70.0,
+      "scroll_top_y": 234,
+      "scroll_x": 188,
+      "scroll_size": [
+        118,
+        50
+      ],
+      "geometric_visibility_pct": 70.0,
+      "actual_visibility_pct_estimate": 70.0,
+      "first_visible_canvas_y": 234,
+      "dimensions": [
+        512,
+        512
+      ],
+      "color": "RGBA 8-bit",
+      "alpha": true,
+      "chest_consistency": {
+        "diff_pixels_vs_chest12": 2675,
+        "allowed_scroll_region_xyxy": [
+          188,
+          234,
+          306,
+          269
+        ],
+        "unexpected_diffs_outside_scroll_region": 0
+      },
+      "notes": "horizontal scroll; Y-only; chest_12 base + rim/lip occlusion"
+    },
+    {
+      "file": "reveal_06_85.png",
+      "path": "assets/chest/animation_v3/scroll_reveal/reveal_06_85.png",
+      "reveal_pct_intended": 85.0,
+      "reveal_pct_approx": 85.0,
+      "scroll_top_y": 226,
+      "scroll_x": 188,
+      "scroll_size": [
+        118,
+        50
+      ],
+      "geometric_visibility_pct": 86.0,
+      "actual_visibility_pct_estimate": 86.0,
+      "first_visible_canvas_y": 226,
+      "dimensions": [
+        512,
+        512
+      ],
+      "color": "RGBA 8-bit",
+      "alpha": true,
+      "chest_consistency": {
+        "diff_pixels_vs_chest12": 3188,
+        "allowed_scroll_region_xyxy": [
+          188,
+          226,
+          306,
+          269
+        ],
+        "unexpected_diffs_outside_scroll_region": 0
+      },
+      "notes": "horizontal scroll; Y-only; chest_12 base + rim/lip occlusion"
+    },
+    {
+      "file": "reveal_07_final.png",
+      "path": "assets/chest/animation_v3/scroll_reveal/reveal_07_final.png",
+      "reveal_pct_intended": 88.0,
+      "reveal_pct_approx": 88.0,
+      "scroll_top_y": 225,
+      "scroll_x": 188,
+      "scroll_size": [
+        118,
+        50
+      ],
+      "geometric_visibility_pct": 88.0,
+      "actual_visibility_pct_estimate": 88.0,
+      "first_visible_canvas_y": 225,
+      "dimensions": [
+        512,
+        512
+      ],
+      "color": "RGBA 8-bit",
+      "alpha": true,
+      "chest_consistency": {
+        "diff_pixels_vs_chest12": 3220,
+        "allowed_scroll_region_xyxy": [
+          188,
+          225,
+          306,
+          269
+        ],
+        "unexpected_diffs_outside_scroll_region": 0
+      },
+      "notes": "horizontal scroll; Y-only; chest_12 base + rim/lip occlusion"
+    }
+  ],
+  "rim_opaque_pixels": 31453,
+  "rim_vs_chest12_mismatches_where_opaque": 0,
+  "rim_reused": true,
+  "rim_rederived": false
+}

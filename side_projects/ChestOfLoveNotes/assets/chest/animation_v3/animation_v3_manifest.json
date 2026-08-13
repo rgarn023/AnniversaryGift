@@ -1,8 +1,8 @@
 {
   "package": "animation_v3",
-  "pass": "step1_preparation_audit_scaffolding_only",
-  "status": "awaiting reveal artwork",
-  "integration_allowed": false,
+  "pass": "step2_baked_scroll_reveal_assets",
+  "status": "reveal artwork ready for integration",
+  "integration_allowed": true,
   "godot_integration": false,
   "runtime_behavior_changed": false,
   "apk_built": false,
@@ -30,7 +30,10 @@
       "chest_11_open_92.png",
       "chest_12_fully_open.png"
     ],
-    "dimensions_all": [512, 512],
+    "dimensions_all": [
+      512,
+      512
+    ],
     "color": "RGBA 8-bit",
     "do_not_modify": true,
     "do_not_regenerate": true
@@ -38,22 +41,45 @@
   "approved_source_chest_frame": {
     "path": "assets/chest/animation_v2/chest_frames/chest_12_fully_open.png",
     "role": "immutable base for EVERY future baked scroll-reveal frame",
-    "dimensions": [512, 512],
+    "dimensions": [
+      512,
+      512
+    ],
     "color": "RGBA 8-bit",
     "alpha": true,
-    "visible_bbox_xyxy_measured": [117, 144, 442, 428],
-    "visual_center_bbox_midpoint": [279.5, 286.0],
-    "base_anchor": [256.0, 420.0],
+    "visible_bbox_xyxy_measured": [
+      117,
+      144,
+      442,
+      428
+    ],
+    "visual_center_bbox_midpoint": [
+      279.5,
+      286.0
+    ],
+    "base_anchor": [
+      256.0,
+      420.0
+    ],
     "planted_base_y_authored": 420,
-    "safe_as_immutable_base": true
+    "safe_as_immutable_base": true,
+    "sha256": "df17108ca1ede3142793795056cf1480c46528464bd865cf67e7f6de24885aa5"
   },
   "source_scroll_asset": {
     "runtime_path": "assets/chest/animation_v2/scroll/love_scroll_reward.png",
-    "dimensions": [720, 305],
+    "dimensions": [
+      720,
+      305
+    ],
     "orientation": "horizontal",
     "legacy_vertical_path": "assets/chest/animation_v2/scroll/love_scroll.png",
     "legacy_horizontal_path": "assets/chest/animation_v2/scroll/love_scroll_horizontal.png",
-    "master_source_path": "assets/chest/animation_v2/incoming_new_art/new_love_scroll_master.png"
+    "master_source_path": "assets/chest/animation_v2/incoming_new_art/new_love_scroll_master.png",
+    "sha256": "d8769ae0074cc062f78951c64cbcc4d8e01996ad52ceb2f3d6ebafe34fa3d1e2",
+    "production_composited_size": [
+      118,
+      50
+    ]
   },
   "production_canvas": {
     "width": 512,
@@ -68,9 +94,15 @@
     "class_name": "LoveNotesChest",
     "scene_template": "scenes/chest/Chest.tscn",
     "runtime_node_path": "Main/_screen_host/ChestStage/LoveNotesChest (dynamically created in main.gd _show_main_chest)",
-    "host_size": [252, 326],
+    "host_size": [
+      252,
+      326
+    ],
     "fit_scale": 0.4921875,
-    "draw_size_approx": [252, 252],
+    "draw_size_approx": [
+      252,
+      252
+    ],
     "foot_y_frac": 0.8203125,
     "ground_y_frac": 0.888,
     "ground_constant": "ChestEnvironment.CHEST_GROUND_Y",
@@ -92,53 +124,270 @@
   },
   "future_reveal_frames": {
     "dir": "assets/chest/animation_v3/scroll_reveal/",
-    "exist_yet": false,
+    "exist_yet": true,
     "ordered": [
       {
         "file": "reveal_00_hidden.png",
-        "reveal_pct_approx": 0,
-        "notes": "fully-open chest; scroll completely hidden; pixel-identical to chest_12"
+        "path": "assets/chest/animation_v3/scroll_reveal/reveal_00_hidden.png",
+        "reveal_pct_intended": 0.0,
+        "reveal_pct_approx": 0.0,
+        "scroll_top_y": 269,
+        "scroll_x": 188,
+        "scroll_size": [
+          118,
+          50
+        ],
+        "geometric_visibility_pct": 0.0,
+        "actual_visibility_pct_estimate": 0.0,
+        "first_visible_canvas_y": null,
+        "dimensions": [
+          512,
+          512
+        ],
+        "color": "RGBA 8-bit",
+        "alpha": true,
+        "chest_consistency": {
+          "diff_pixels_vs_chest12": 0,
+          "allowed_scroll_region_xyxy": null,
+          "unexpected_diffs_outside_scroll_region": 0
+        },
+        "notes": "pixel-identical to chest_12; scroll completely hidden"
       },
       {
         "file": "reveal_01_peek.png",
-        "reveal_pct_approx": 5,
-        "notes": "approximately 5% of scroll height visible"
+        "path": "assets/chest/animation_v3/scroll_reveal/reveal_01_peek.png",
+        "reveal_pct_intended": 5.0,
+        "reveal_pct_approx": 5.0,
+        "scroll_top_y": 266,
+        "scroll_x": 188,
+        "scroll_size": [
+          118,
+          50
+        ],
+        "geometric_visibility_pct": 6.0,
+        "actual_visibility_pct_estimate": 6.0,
+        "first_visible_canvas_y": 266,
+        "dimensions": [
+          512,
+          512
+        ],
+        "color": "RGBA 8-bit",
+        "alpha": true,
+        "chest_consistency": {
+          "diff_pixels_vs_chest12": 36,
+          "allowed_scroll_region_xyxy": [
+            188,
+            266,
+            306,
+            269
+          ],
+          "unexpected_diffs_outside_scroll_region": 0
+        },
+        "notes": "horizontal scroll; Y-only; chest_12 base + rim/lip occlusion"
       },
       {
         "file": "reveal_02_15.png",
-        "reveal_pct_approx": 15,
-        "notes": "approximately 15% visible"
+        "path": "assets/chest/animation_v3/scroll_reveal/reveal_02_15.png",
+        "reveal_pct_intended": 15.0,
+        "reveal_pct_approx": 15.0,
+        "scroll_top_y": 262,
+        "scroll_x": 188,
+        "scroll_size": [
+          118,
+          50
+        ],
+        "geometric_visibility_pct": 14.0,
+        "actual_visibility_pct_estimate": 14.0,
+        "first_visible_canvas_y": 262,
+        "dimensions": [
+          512,
+          512
+        ],
+        "color": "RGBA 8-bit",
+        "alpha": true,
+        "chest_consistency": {
+          "diff_pixels_vs_chest12": 132,
+          "allowed_scroll_region_xyxy": [
+            188,
+            262,
+            306,
+            269
+          ],
+          "unexpected_diffs_outside_scroll_region": 0
+        },
+        "notes": "horizontal scroll; Y-only; chest_12 base + rim/lip occlusion"
       },
       {
         "file": "reveal_03_30.png",
-        "reveal_pct_approx": 30,
-        "notes": "approximately 30% visible"
+        "path": "assets/chest/animation_v3/scroll_reveal/reveal_03_30.png",
+        "reveal_pct_intended": 30.0,
+        "reveal_pct_approx": 30.0,
+        "scroll_top_y": 254,
+        "scroll_x": 188,
+        "scroll_size": [
+          118,
+          50
+        ],
+        "geometric_visibility_pct": 30.0,
+        "actual_visibility_pct_estimate": 30.0,
+        "first_visible_canvas_y": 254,
+        "dimensions": [
+          512,
+          512
+        ],
+        "color": "RGBA 8-bit",
+        "alpha": true,
+        "chest_consistency": {
+          "diff_pixels_vs_chest12": 610,
+          "allowed_scroll_region_xyxy": [
+            188,
+            254,
+            306,
+            269
+          ],
+          "unexpected_diffs_outside_scroll_region": 0
+        },
+        "notes": "horizontal scroll; Y-only; chest_12 base + rim/lip occlusion"
       },
       {
         "file": "reveal_04_50.png",
-        "reveal_pct_approx": 50,
-        "notes": "approximately 50% visible"
+        "path": "assets/chest/animation_v3/scroll_reveal/reveal_04_50.png",
+        "reveal_pct_intended": 50.0,
+        "reveal_pct_approx": 50.0,
+        "scroll_top_y": 244,
+        "scroll_x": 188,
+        "scroll_size": [
+          118,
+          50
+        ],
+        "geometric_visibility_pct": 50.0,
+        "actual_visibility_pct_estimate": 50.0,
+        "first_visible_canvas_y": 244,
+        "dimensions": [
+          512,
+          512
+        ],
+        "color": "RGBA 8-bit",
+        "alpha": true,
+        "chest_consistency": {
+          "diff_pixels_vs_chest12": 1628,
+          "allowed_scroll_region_xyxy": [
+            188,
+            244,
+            306,
+            269
+          ],
+          "unexpected_diffs_outside_scroll_region": 0
+        },
+        "notes": "horizontal scroll; Y-only; chest_12 base + rim/lip occlusion"
       },
       {
         "file": "reveal_05_70.png",
-        "reveal_pct_approx": 70,
-        "notes": "approximately 70% visible"
+        "path": "assets/chest/animation_v3/scroll_reveal/reveal_05_70.png",
+        "reveal_pct_intended": 70.0,
+        "reveal_pct_approx": 70.0,
+        "scroll_top_y": 234,
+        "scroll_x": 188,
+        "scroll_size": [
+          118,
+          50
+        ],
+        "geometric_visibility_pct": 70.0,
+        "actual_visibility_pct_estimate": 70.0,
+        "first_visible_canvas_y": 234,
+        "dimensions": [
+          512,
+          512
+        ],
+        "color": "RGBA 8-bit",
+        "alpha": true,
+        "chest_consistency": {
+          "diff_pixels_vs_chest12": 2675,
+          "allowed_scroll_region_xyxy": [
+            188,
+            234,
+            306,
+            269
+          ],
+          "unexpected_diffs_outside_scroll_region": 0
+        },
+        "notes": "horizontal scroll; Y-only; chest_12 base + rim/lip occlusion"
       },
       {
         "file": "reveal_06_85.png",
-        "reveal_pct_approx": 85,
-        "notes": "approximately 85% visible"
+        "path": "assets/chest/animation_v3/scroll_reveal/reveal_06_85.png",
+        "reveal_pct_intended": 85.0,
+        "reveal_pct_approx": 85.0,
+        "scroll_top_y": 226,
+        "scroll_x": 188,
+        "scroll_size": [
+          118,
+          50
+        ],
+        "geometric_visibility_pct": 86.0,
+        "actual_visibility_pct_estimate": 86.0,
+        "first_visible_canvas_y": 226,
+        "dimensions": [
+          512,
+          512
+        ],
+        "color": "RGBA 8-bit",
+        "alpha": true,
+        "chest_consistency": {
+          "diff_pixels_vs_chest12": 3188,
+          "allowed_scroll_region_xyxy": [
+            188,
+            226,
+            306,
+            269
+          ],
+          "unexpected_diffs_outside_scroll_region": 0
+        },
+        "notes": "horizontal scroll; Y-only; chest_12 base + rim/lip occlusion"
       },
       {
         "file": "reveal_07_final.png",
-        "reveal_pct_approx": 87.5,
-        "notes": "final clean horizontal presentation; approximately 85–90% visible"
+        "path": "assets/chest/animation_v3/scroll_reveal/reveal_07_final.png",
+        "reveal_pct_intended": 88.0,
+        "reveal_pct_approx": 88.0,
+        "scroll_top_y": 225,
+        "scroll_x": 188,
+        "scroll_size": [
+          118,
+          50
+        ],
+        "geometric_visibility_pct": 88.0,
+        "actual_visibility_pct_estimate": 88.0,
+        "first_visible_canvas_y": 225,
+        "dimensions": [
+          512,
+          512
+        ],
+        "color": "RGBA 8-bit",
+        "alpha": true,
+        "chest_consistency": {
+          "diff_pixels_vs_chest12": 3220,
+          "allowed_scroll_region_xyxy": [
+            188,
+            225,
+            306,
+            269
+          ],
+          "unexpected_diffs_outside_scroll_region": 0
+        },
+        "notes": "horizontal scroll; Y-only; chest_12 base + rim/lip occlusion"
       }
     ]
   },
   "timing_recommendation_not_implemented": {
-    "scroll_reveal_duration_sec": [0.45, 0.65],
-    "final_hold_sec": [0.55, 0.65],
+    "scroll_reveal_duration_sec": [
+      0.45,
+      0.65
+    ],
+    "final_hold_sec": [
+      0.55,
+      0.65
+    ],
     "frame_count": 8
   },
   "future_runtime_flow_normal_scroll_reward": [
@@ -207,7 +456,33 @@
   "documents": {
     "spec": "assets/chest/animation_v3/SCROLL_REVEAL_SPEC.md",
     "integration_plan": "assets/chest/animation_v3/notes/INTEGRATION_PLAN.md",
-    "runtime_audit": "assets/chest/animation_v3/notes/STEP1_RUNTIME_AUDIT.md"
+    "runtime_audit": "assets/chest/animation_v3/notes/STEP1_RUNTIME_AUDIT.md",
+    "step2_asset_build": "assets/chest/animation_v3/notes/STEP2_ASSET_BUILD.md",
+    "step2_reveal_audit": "assets/chest/animation_v3/notes/STEP2_REVEAL_AUDIT.json"
   },
-  "ready_for_step2_create_baked_scroll_reveal_artwork": true
+  "ready_for_step2_create_baked_scroll_reveal_artwork": true,
+  "step2_utc": "2026-08-13",
+  "foreground_occluder": {
+    "path": "assets/chest/animation_v2/layers/chest_open_front_rim.png",
+    "reused_existing_front_rim": true,
+    "rederived": false,
+    "pixel_compatible_with_chest12": true,
+    "sha256": "724a93919f78dfbae7e8ddd67ae7477d6d18842ce94dd3e7308cce5751518c28",
+    "extra_occlusion": "deterministic lip burial: restore chest_12 for all y >= 269 after scroll paste (closes rim gaps so scroll cannot bleed through the front lip)"
+  },
+  "scroll_compositing": {
+    "fixed_x": 188,
+    "fixed_center_x": 247.0,
+    "fixed_scale_size": [
+      118,
+      50
+    ],
+    "opening_width_px": 164.0,
+    "width_frac_of_opening": 0.72,
+    "lip_y": 269,
+    "orientation": "horizontal",
+    "motion": "Y_only"
+  },
+  "ready_for_step3_integration": true,
+  "build_tool": "tools/build_baked_scroll_reveal.py"
 }

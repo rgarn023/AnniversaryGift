@@ -93,6 +93,8 @@ Empty path never enters the baked reveal.
 
 ## Step checklist
 
-1. **Step 1 (done by this pass):** audit + folders + spec + manifest — no runtime change  
-2. **Step 2:** create baked `scroll_reveal/reveal_*.png` artwork from `chest_12` + approved scroll  
+1. **Step 1 (done):** audit + folders + spec + manifest — no runtime change  
+2. **Step 2 (done):** baked `scroll_reveal/reveal_*.png` from `chest_12` + approved scroll; `integration_allowed=true`  
 3. **Step 3:** wire normal scroll reward to `animation_v3`; leave empty path alone; then retire layered reveal for that path only  
+
+See `STEP2_ASSET_BUILD.md` for exact compositing locks (scroll 118×50 at X=188, lip Y=269).

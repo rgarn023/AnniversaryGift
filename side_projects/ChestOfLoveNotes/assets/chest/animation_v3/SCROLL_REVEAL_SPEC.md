@@ -1,10 +1,14 @@
 # animation_v3 — Baked Scroll-Reveal Specification
 
-**Status:** Step 1 preparation / scaffolding only.  
-**Integration allowed:** `false`  
-**Runtime behavior:** unchanged. Do not wire this package into Godot yet.
+**Status:** Step 2 complete — reveal artwork ready for integration.  
+**Integration allowed:** `true`  
+**Runtime behavior:** still unchanged. Do not wire this package into Godot until Step 3.
 
-This document freezes the rules for the future **baked chest + scroll reveal** sequence that will replace the current runtime normal-scroll reward path (open_back / front_rim / standalone scroll tween).
+This document freezes the rules for the **baked chest + scroll reveal** sequence that will replace the current runtime normal-scroll reward path (open_back / front_rim / standalone scroll tween).
+
+Step 2 build notes: `notes/STEP2_ASSET_BUILD.md`  
+Step 2 audit: `notes/STEP2_REVEAL_AUDIT.json`  
+Rebuild tool: `tools/build_baked_scroll_reveal.py`
 
 ---
 
@@ -73,22 +77,30 @@ These remain on disk for empty-chest / legacy tooling until a later cleanup pass
 
 ---
 
-## 4. Future reveal frame filenames
+## 4. Production reveal frame filenames (Step 2 — present)
 
-Preferred production files under `scroll_reveal/` (do **not** exist yet):
+Production files under `scroll_reveal/` (built deterministically; do not hand-edit):
 
-| File | Intended reveal |
-|------|-----------------|
-| `reveal_00_hidden.png` | Fully-open chest; scroll completely hidden; chest identical to `chest_12` |
-| `reveal_01_peek.png` | ≈ 5% of scroll height visible |
-| `reveal_02_15.png` | ≈ 15% visible |
-| `reveal_03_30.png` | ≈ 30% visible |
-| `reveal_04_50.png` | ≈ 50% visible |
-| `reveal_05_70.png` | ≈ 70% visible |
-| `reveal_06_85.png` | ≈ 85% visible |
-| `reveal_07_final.png` | Final clean horizontal presentation; ≈ 85–90% visible (best visual result) |
+| File | Intended | scroll_top_y | Geometric % |
+|------|----------|--------------|-------------|
+| `reveal_00_hidden.png` | Hidden; pixel-identical to `chest_12` | 269 | 0 |
+| `reveal_01_peek.png` | ≈ 5% of scroll height visible | 266 | 6 |
+| `reveal_02_15.png` | ≈ 15% visible | 262 | 14 |
+| `reveal_03_30.png` | ≈ 30% visible | 254 | 30 |
+| `reveal_04_50.png` | ≈ 50% visible | 244 | 50 |
+| `reveal_05_70.png` | ≈ 70% visible | 234 | 70 |
+| `reveal_06_85.png` | ≈ 85% visible | 226 | 86 |
+| `reveal_07_final.png` | Final; ≈ 85–90% (88% chosen) | 225 | 88 |
 
 All frames: **512×512 RGBA**, same canvas / base anchor as `chest_12`.
+
+| Compositing lock | Value |
+|------------------|-------|
+| Scroll production size | 118×50 |
+| Fixed scroll X (left) | 188 |
+| Fixed scroll center X | 247 |
+| Foreground occluder | existing `chest_open_front_rim.png` + lip burial `y >= 269` |
+| Architecture | chest_12 base → scroll → restore chest_12 on rim / below lip |
 
 ---
 
@@ -189,20 +201,21 @@ Do **not** change these values in Step 1.
 assets/chest/animation_v3/
   SCROLL_REVEAL_SPEC.md          ← this file
   animation_v3_manifest.json
-  scroll_reveal/                 ← future reveal_XX_*.png (empty until Step 2)
-  source/                        ← working plates / composites for artwork
-  validation/                    ← future contact sheets / audits (do not commit junk)
+  scroll_reveal/                 ← reveal_00 … reveal_07 production PNGs (Step 2)
+  source/                        ← working plates / composites
+  validation/                    ← contact sheets / previews (do not commit junk)
   notes/
     INTEGRATION_PLAN.md
     STEP1_RUNTIME_AUDIT.md
+    STEP2_ASSET_BUILD.md
+    STEP2_REVEAL_AUDIT.json
 ```
-
 ---
 
 ## 10. Step boundaries
 
 | Step | Purpose |
 |------|---------|
-| **1 (this pass)** | Audit + scaffold + spec. No runtime change. No APK. |
-| **2** | Create baked scroll-reveal artwork |
+| **1** | Audit + scaffold + spec. No runtime change. No APK. |
+| **2 (this pass)** | Create baked scroll-reveal artwork + validate. No runtime change. No APK. |
 | **3** | Integrate animation_v3 for normal scroll reward only |
