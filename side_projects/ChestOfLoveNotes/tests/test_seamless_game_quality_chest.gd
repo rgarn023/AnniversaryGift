@@ -1,5 +1,5 @@
 extends SceneTree
-## v55: scroll depth (front-lip origin) + top sky band + local-time day fix.
+## v56: scroll origin behind front lip + opaque day sky top + local-time day.
 
 var _passed: int = 0
 var _failed: int = 0
@@ -19,7 +19,7 @@ func _assert(cond: bool, label: String) -> void:
 
 
 func _run() -> void:
-	print("=== Chest scroll depth / top sky / local-time fix (v55) ===")
+	print("=== Chest scroll origin / top sky / local-time fix (v56) ===")
 	var chest := FileAccess.get_file_as_string("res://scripts/chest/treasure_chest.gd")
 	var env_script := FileAccess.get_file_as_string("res://scripts/chest/chest_environment.gd")
 	var main := FileAccess.get_file_as_string("res://scripts/main.gd")
@@ -52,7 +52,8 @@ func _run() -> void:
 	_assert(chest.contains("SCROLL_POST_OPEN_BEAT_SEC := 0.11"), "post-open beat")
 	_assert(chest.contains("REWARD_HOLD_SEC := 0.60"), "reward hold ~0.60s")
 	_assert(chest.contains("SCROLL_FINAL_ABOVE_RIM := 0.90"), "final reveal ~90%")
-	_assert(chest.contains("SCROLL_PEEK_ABOVE_RIM := 0.07"), "first peek ~7%")
+	_assert(chest.contains("SCROLL_START_ABOVE_RIM := 0.0"), "scroll starts fully behind lip")
+	_assert(chest.contains("SCROLL_PEEK_ABOVE_RIM := 0.08"), "first peek ~8%")
 	_assert(chest.contains("GLOW_EMERGE_A"), "reduced emerge glow")
 	_assert(chest.contains("hard-cut the scroll bottom") or chest.contains("clip_contents hard-cut"), "clipping root-cause documented")
 	_assert(chest.contains("EMPHASIS_SCALE := 1.002"), "tiny settle scale only")
@@ -210,16 +211,18 @@ func _run() -> void:
 		"default beach environment art"
 	)
 
-	_assert(flags.contains("APP_VERSION_CODE := 55"), "versionCode 55")
-	_assert(preset.contains("version/code=55"), "export 55")
-	_assert(preset.contains("0.1.55-scroll-depth-top-sky-fix"), "version name")
-	_assert(preset.contains("v55-scroll-depth-top-sky-fix-debug.apk"), "APK name")
+	_assert(flags.contains("APP_VERSION_CODE := 56"), "versionCode 56")
+	_assert(preset.contains("version/code=56"), "export 56")
+	_assert(preset.contains("0.1.56-scroll-origin-top-time-fix"), "version name")
+	_assert(preset.contains("v56-scroll-origin-top-time-fix-debug.apk"), "APK name")
 	_assert(gitignore.contains("*.apk"), "apks ignored by default")
-	_assert(export_sh.contains("v55-scroll-depth-top-sky-fix-debug.apk"), "export default")
+	_assert(export_sh.contains("v56-scroll-origin-top-time-fix-debug.apk"), "export default")
 	_assert(not env_script.contains("var _top_shade"), "top shade var removed")
 	_assert(not env_script.contains('name = "TopReadabilityShade"'), "top shade node not created")
 	_assert(env_script.contains("get_datetime_dict_from_system"), "local time via system datetime")
 	_assert(env_script.contains("debug_hour_override >= 0.0"), "debug override gated")
+	_assert(env_script.contains("RenderingServer.set_default_clear_color"), "clear color tracks sky_top")
+	_assert(env_script.contains("sky_top.r, sky_top.g, sky_top.b, 1.0") or env_script.contains("top_fill"), "base_fill = opaque sky_top")
 	_assert(preset.contains("statusBarColor") and preset.contains("#00000000"), "transparent status bar")
 	_assert(
 		FileAccess.file_exists("res://assets/art/background/environments/ocean_glisten.png"),
@@ -309,15 +312,20 @@ func _run() -> void:
 		if hour_case.get("stars_hidden", false):
 			_assert(env._stars.visible == false or env._stars.modulate.a <= 0.01, "stars hidden @%.1f" % float(hour_case["h"]))
 		_assert(env._ocean_tint.color.a > 0.05, "ocean tint active @%.1f" % float(hour_case["h"]))
-	## 11:00 late-morning must clearly be DAY (physical-device review hour).
-	var day_pal := ChestEnvironment.tod_palette_at(11.0)
-	_assert(str(day_pal["phase"]) == "day", "11:00 is DAY")
-	_assert(float(day_pal["star_a"]) <= 0.001, "11:00 stars fully hidden")
-	_assert((day_pal["sky_top"] as Color).a >= 0.55, "11:00 sky wash strong enough for day")
-	ChestEnvironment.debug_hour_override = 11.0
+	## 11:47 late-morning must clearly be DAY (physical-device review hour).
+	var day_pal := ChestEnvironment.tod_palette_at(11.783)
+	_assert(str(day_pal["phase"]) == "day", "11:47 is DAY")
+	_assert(float(day_pal["star_a"]) <= 0.001, "11:47 stars fully hidden")
+	_assert((day_pal["sky_top"] as Color).a >= 0.95, "11:47 sky wash opaque enough for day")
+	ChestEnvironment.debug_hour_override = 11.783
 	env._apply_time_of_day(true)
 	await process_frame
-	_assert(env._stars.visible == false or env._stars.modulate.a <= 0.01, "11:00 stars node hidden")
+	_assert(env._stars.visible == false or env._stars.modulate.a <= 0.01, "11:47 stars node hidden")
+	_assert(env._base_fill.color.a >= 0.999, "11:47 base fill opaque")
+	var top_delta := absf(env._base_fill.color.r - (day_pal["sky_top"] as Color).r) \
+		+ absf(env._base_fill.color.g - (day_pal["sky_top"] as Color).g) \
+		+ absf(env._base_fill.color.b - (day_pal["sky_top"] as Color).b)
+	_assert(top_delta < 0.02, "11:47 base_fill matches opaque sky_top (no top strip)")
 	## Smooth mid-phase blend (06:30 should sit between dawn keyframes).
 	var dawn_mid := ChestEnvironment.tod_palette_at(6.5)
 	var dawn_start := ChestEnvironment.tod_palette_at(5.0)
@@ -384,10 +392,19 @@ func _run() -> void:
 	## Clipping root-cause fix: cavity clip must fully contain scroll at peek and final.
 	_assert(scroll_top_check >= node._scroll_clip.position.y - 0.5, "final scroll top inside clip")
 	_assert(scroll_bot_check <= node._scroll_clip.position.y + node._scroll_clip.size.y + 0.5, "final scroll bottom inside clip")
+	## rise=0: scroll fully behind lip (start origin). rise≈0.09: ~8% first peek.
 	node._set_scroll_rise_amount(0.0)
+	await process_frame
+	var hidden_top := node._scroll_clip.position.y + node._scroll_view.position.y
+	var rim_y_start := node._anchor_rect.position.y + (LoveNotesChest.CAVITY_RIM_CANVAS_Y / LoveNotesChest.FRAME_CANVAS.y) * node._anchor_rect.size.y
+	var hidden_above := (rim_y_start - hidden_top) / maxf(node._scroll_view.size.y, 0.01)
+	_assert(hidden_above <= 0.02, "rise=0 scroll fully behind lip (above=%.3f)" % hidden_above)
+	node._set_scroll_rise_amount(LoveNotesChest.SCROLL_PEEK_ABOVE_RIM / LoveNotesChest.SCROLL_FINAL_ABOVE_RIM)
 	await process_frame
 	var peek_top := node._scroll_clip.position.y + node._scroll_view.position.y
 	var peek_bot := peek_top + node._scroll_view.size.y
+	var peek_above := (rim_y_start - peek_top) / maxf(node._scroll_view.size.y, 0.01)
+	_assert(peek_above >= 0.05 and peek_above <= 0.12, "first peek ~5-10%% above rim (got %.2f)" % peek_above)
 	_assert(peek_top >= node._scroll_clip.position.y - 0.5, "peek scroll top inside clip")
 	_assert(peek_bot <= node._scroll_clip.position.y + node._scroll_clip.size.y + 0.5, "peek scroll bottom inside clip (no hard cut)")
 	node._set_scroll_rise_amount(1.0)

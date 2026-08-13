@@ -5,8 +5,9 @@ class_name ChestEnvironment
 ## Chest animation stays a separate layer above this node.
 ## Future cosmetic swaps can change `environment_id` / texture without
 ## rewriting the chest frame animation. No store/IAP in this pass.
-## v55: device-LOCAL via Time.get_datetime_dict_from_system(); remove top shade
-## band; resume + periodic TOD refresh; day wash covers baked dusk beach art.
+## v56: DAY sky wash is near-opaque so baked dusk beach + moon cannot tint the
+## top band twilight; EnvironmentBaseFill + clear_color track opaque sky_top.
+## Device-LOCAL via Time.get_datetime_dict_from_system(); resume + periodic TOD.
 
 const ENV_DEFAULT_BEACH := "default_beach"
 const ENV_DIR := "res://assets/art/background/environments/"
@@ -175,41 +176,43 @@ static func tod_palette_at(hour: float) -> Dictionary:
 			"star_a": 0.12,
 			"glisten_a": 0.66,
 		},
-		{ ## 08:00 day start — stronger wash so baked dusk beach art reads as DAY.
+		{ ## 08:00 day start — near-opaque wash so baked dusk/moon cannot show.
 			"base": Color(0.30, 0.48, 0.72, 1.0),
-			"sky_top": Color(0.32, 0.58, 0.92, 0.78),
-			"sky_mid": Color(0.48, 0.70, 0.96, 0.70),
-			"sky_lower": Color(0.68, 0.84, 0.98, 0.62),
-			"sky_horizon": Color(0.82, 0.92, 1.0, 0.52),
-			"bg_mod": Color(1.18, 1.12, 1.05, 1.0),
+			"sky_top": Color(0.36, 0.62, 0.96, 1.0),
+			"sky_mid": Color(0.50, 0.74, 0.98, 0.98),
+			"sky_lower": Color(0.68, 0.86, 1.0, 0.92),
+			"sky_horizon": Color(0.82, 0.92, 1.0, 0.78),
+			"bg_mod": Color(1.10, 1.08, 1.04, 1.0),
 			"ocean": Color(0.22, 0.55, 0.78, 0.22),
 			"shimmer": Color(1.0, 0.98, 0.90, 1.0),
 			"star_a": 0.0,
 			"glisten_a": 0.82,
 		},
-		{ ## 12:00 midday
+		{ ## 12:00 midday — opaque top sky; continuous blue to the viewport edge.
 			"base": Color(0.34, 0.55, 0.82, 1.0),
-			"sky_top": Color(0.28, 0.56, 0.96, 0.82),
-			"sky_mid": Color(0.45, 0.72, 1.0, 0.74),
-			"sky_lower": Color(0.62, 0.84, 1.0, 0.64),
-			"sky_horizon": Color(0.78, 0.90, 1.0, 0.50),
-			"bg_mod": Color(1.22, 1.16, 1.08, 1.0),
+			"sky_top": Color(0.30, 0.58, 0.98, 1.0),
+			"sky_mid": Color(0.46, 0.74, 1.0, 0.99),
+			"sky_lower": Color(0.64, 0.86, 1.0, 0.94),
+			"sky_horizon": Color(0.80, 0.92, 1.0, 0.80),
+			"bg_mod": Color(1.12, 1.10, 1.06, 1.0),
 			"ocean": Color(0.18, 0.58, 0.84, 0.20),
 			"shimmer": Color(1.0, 0.99, 0.92, 1.0),
 			"star_a": 0.0,
 			"glisten_a": 0.90,
 		},
-		{ ## 17:00 sunset start
-			"base": Color(0.16, 0.12, 0.22, 1.0),
-			"sky_top": Color(0.18, 0.14, 0.36, 0.36),
-			"sky_mid": Color(0.40, 0.22, 0.42, 0.34),
-			"sky_lower": Color(0.88, 0.42, 0.36, 0.34),
-			"sky_horizon": Color(0.98, 0.55, 0.32, 0.30),
-			"bg_mod": Color(1.02, 0.92, 0.88, 1.0),
-			"ocean": Color(0.48, 0.30, 0.42, 0.22),
-			"shimmer": Color(1.0, 0.82, 0.62, 1.0),
-			"star_a": 0.05,
-			"glisten_a": 0.74,
+		{ ## 17:00 sunset start — keep upper sky nearly opaque so late DAY
+			## (e.g. 15:56) cannot lerp into a translucent wash that reveals the
+			## baked moon/stars in default_beach.png before true sunset.
+			"base": Color(0.22, 0.28, 0.48, 1.0),
+			"sky_top": Color(0.28, 0.42, 0.78, 0.96),
+			"sky_mid": Color(0.48, 0.40, 0.70, 0.90),
+			"sky_lower": Color(0.88, 0.52, 0.48, 0.78),
+			"sky_horizon": Color(0.98, 0.62, 0.40, 0.62),
+			"bg_mod": Color(1.08, 1.00, 0.96, 1.0),
+			"ocean": Color(0.40, 0.42, 0.62, 0.22),
+			"shimmer": Color(1.0, 0.90, 0.72, 1.0),
+			"star_a": 0.0,
+			"glisten_a": 0.78,
 		},
 		{ ## 18:30 mid sunset
 			"base": Color(0.10, 0.06, 0.16, 1.0),
@@ -376,9 +379,9 @@ func _build() -> void:
 	_stars.modulate = Color(1, 1, 1, 0.0)
 	_sky_clip.add_child(_stars)
 
-	## v55: removed the old top readability ColorRect (top ~10% dark wash) that
-	## caused the hard horizontal discoloration band on device. Title readability
+	## Top readability ColorRect removed (was a hard band). Title readability
 	## uses the label outline/shadow only; sky gradient continues to the top edge.
+	## v56: day sky_top alpha=1 + base_fill/clear sync — no dark beach bleed strip.
 
 	## Water-only romantic shimmer — clipped so sand/sky/chest stay untouched.
 	_water_clip = Control.new()
@@ -558,17 +561,16 @@ func _apply_time_of_day(force: bool = false) -> void:
 		return
 	_last_hour_bucket = bucket
 	var pal := tod_palette_at(hour)
+	var sky_top := pal["sky_top"] as Color
+	## Exact top-strip source (v55 leftover): EnvironmentBaseFill was a different
+	## navy/blue than the semi-transparent sky+dusk-beach composite, so the top
+	## edge (and any status-bar/clear underlap) read as a darker horizontal band.
+	## Fix: opaque underfill = opaque sky_top RGB; sync engine clear color too.
+	var top_fill := Color(sky_top.r, sky_top.g, sky_top.b, 1.0)
 	if _base_fill:
-		## Opaque underfill matches sky-top so status-bar/safe-area edges never
-		## show a mismatched clear-color band above the gradient.
-		var sky_top := pal["sky_top"] as Color
-		var base := pal["base"] as Color
-		_base_fill.color = Color(
-			lerpf(base.r, sky_top.r, 0.55),
-			lerpf(base.g, sky_top.g, 0.55),
-			lerpf(base.b, sky_top.b, 0.55),
-			1.0
-		)
+		_base_fill.color = top_fill
+	## Keep Android/status underlap matching current sky-top (not a fixed navy).
+	RenderingServer.set_default_clear_color(top_fill)
 	if _bg:
 		_bg.modulate = pal["bg_mod"] as Color
 	_apply_sky_gradient(pal)
@@ -576,6 +578,7 @@ func _apply_time_of_day(force: bool = false) -> void:
 		var sa := float(pal["star_a"])
 		_stars.modulate = Color(1.0, 1.0, 1.05, sa)
 		## DAY: fully hidden (no moon/starfield). Dawn/sunset interpolate via alpha.
+		## Baked moon in beach art is covered by near-opaque day sky wash.
 		_stars.visible = sa > 0.01
 	if _ocean_tint:
 		_ocean_tint.color = pal["ocean"] as Color

@@ -19,5 +19,5 @@ const SHOW_ONBOARDING_BANNER := false
 const DEV_CHEST_SCROLL_PREVIEW := false
 ## Debug/test builds may offer "Send to Myself (Test)" using the real send path.
 const DEBUG_SELF_SEND := true
-const APP_VERSION_NAME := "0.1.55-scroll-depth-top-sky-fix"
-const APP_VERSION_CODE := 55
+const APP_VERSION_NAME := "0.1.56-scroll-origin-top-time-fix"
+const APP_VERSION_CODE := 56

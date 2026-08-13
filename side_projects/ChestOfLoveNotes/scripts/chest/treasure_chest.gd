@@ -1,13 +1,13 @@
 extends Control
 class_name LoveNotesChest
-## animation_v2 approved 13-frame chest opening (v55 scroll depth + top sky fix).
+## animation_v2 approved 13-frame chest opening (v56 scroll origin + top/time).
 ## Empty + unread share the same smooth multi-frame open (#00→#12).
 ## No chest crossfade / alpha fade / ghost duplicate — exactly ONE visible chest
 ## frame at any instant. Unread then switches cleanly to open-back + scroll +
 ## front-rim layering for a continuous Y-tweened horizontal scroll rise.
 ## Legacy PATH B / glowing-sheet frames are never used at runtime.
-## v55: cavity mask alpha matches silhouette (CLIP_CHILDREN_ONLY), continuous
-## front lip occludes lower scroll, first peek sits behind the front rim.
+## v56: scroll starts fully behind the front lip (rise=0 → above=0); open-back
+## front-depth pocket cleared so first pixels read inside-front, not rear wall.
 ## Approved 13 frames / chest plant remain frozen.
 
 signal tapped
@@ -90,8 +90,8 @@ const SCROLL_NATIVE := Vector2(720, 305)
 ## without spilling past the right inner wall.
 const SCROLL_OPENING_WIDTH_FRAC := 0.92
 ## Canvas-space cavity / rim geometry — top of re-derived front lip (y≈269).
-## v55: continuous lip gold + side pillars in front-rim; cavity alpha mask clips
-## scroll to the mouth (first pixels appear directly behind the front lip).
+## v56: continuous lip + empty front-depth pocket in open-back; cavity mask
+## clips scroll to the mouth. First pixels appear directly behind the front lip.
 const CAVITY_RIM_CANVAS_Y := 269.0
 ## 3/4-view opening is left-biased — scroll must center on the cavity, not canvas.
 const CAVITY_CENTER_CANVAS_X := 219.0
@@ -99,8 +99,10 @@ const CAVITY_INNER_LEFT_X := 137.0
 const CAVITY_INNER_RIGHT_X := 301.0
 ## Final reward: ~90% of horizontal-scroll HEIGHT above the front rim (85–90%).
 const SCROLL_FINAL_ABOVE_RIM := 0.90
-## First visible tip — ~7% so emergence starts inside the cavity behind the lip.
-const SCROLL_PEEK_ABOVE_RIM := 0.07
+## At rise=0 the scroll is fully behind the lip (START=0). First visible tip
+## (~8% height) appears as rise begins — immediately above the front rim.
+const SCROLL_START_ABOVE_RIM := 0.0
+const SCROLL_PEEK_ABOVE_RIM := 0.08
 ## Soft glow peaks — restrained warm accent; never washes out rim/scroll/wood.
 ## v53: slightly softer central glow during emerge/hold for crisp parchment.
 const GLOW_OPEN_A := 0.012
@@ -369,7 +371,7 @@ func _build_visuals() -> void:
 	_cavity_mask_host.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	_cavity_mask_host.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	## CLIP_CHILDREN_ONLY uses parent texture ALPHA as the cavity silhouette.
-	## v55 mask writes matching alpha (not full-white), so early scroll pixels
+	## v56 mask writes matching alpha + front-biased opacity; early scroll pixels
 	## appear only in the mouth directly behind the front lip — not the rear wall.
 	_cavity_mask_host.clip_children = CanvasItem.CLIP_CHILDREN_ONLY
 	_cavity_mask_host.modulate = Color(1, 1, 1, 1)
@@ -399,7 +401,7 @@ func _build_visuals() -> void:
 	_cavity_mask_host.add_child(_scroll_view)
 
 	## Front-rim occlusion layer derived from approved fully-open frame #12.
-	## v55: continuous mouth gold lip + front face + side pillars — ABOVE scroll.
+	## v56: continuous mouth gold lip + front face + side pillars — ABOVE scroll.
 	_rim_view = TextureRect.new()
 	_rim_view.name = "ChestFrontRim"
 	_rim_view.texture = _rim_layer_tex
@@ -575,11 +577,12 @@ func _place_scroll_and_rim() -> void:
 	var aspect := native.x / maxf(native.y, 1.0)
 	var sh := sw / maxf(aspect, 0.01)
 	var rim_y := _anchor_rect.position.y + (CAVITY_RIM_CANVAS_Y / FRAME_CANVAS.y) * draw_h
-	var above := lerpf(SCROLL_PEEK_ABOVE_RIM, SCROLL_FINAL_ABOVE_RIM, _scroll_rise)
+	## Y-only rise from fully behind the lip → final ~90% exposed.
+	## rise=0 → START (0% above rim); early rise ≈ PEEK (~8%); rise=1 → FINAL.
+	var above := lerpf(SCROLL_START_ABOVE_RIM, SCROLL_FINAL_ABOVE_RIM, _scroll_rise)
 	var scroll_top := rim_y - sh * above
 	## Center on the cavity (left-biased in 3/4 art) — NOT the canvas midpoint.
-	## Root cause of “behind the chest”: canvas-centered scroll spilled past the
-	## right inner wall and read as rising behind the whole silhouette.
+	## Depth fix is open-back front pocket + start-behind-lip, not a Y raise.
 	var cavity_cx := _anchor_rect.position.x + (CAVITY_CENTER_CANVAS_X / FRAME_CANVAS.x) * draw_w
 	var scroll_left := cavity_cx - sw * 0.5
 	## ScrollCavityClip + CavityMaskHost cover the full planted canvas so the
@@ -1132,7 +1135,7 @@ func _play_scroll_rise_tween(duration: float) -> void:
 		var spill_in := create_tween()
 		spill_in.tween_property(_warm_spill, "modulate:a", 0.018, duration * 0.14).set_trans(Tween.TRANS_SINE)
 	var rise := create_tween()
-	## Continuous ease-out Y rise: ~8% peek → mid → final (~90% height above rim).
+	## Continuous ease-out Y rise: fully behind lip → ~8% peek → final (~90%).
 	## Single continuous tween — no bounce / elastic / overshoot / frame swap.
 	rise.tween_method(_set_scroll_rise_amount, 0.00, 1.00, duration).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 	await rise.finished
