@@ -1,38 +1,34 @@
 {
   "package": "animation_v2",
-  "pass": "asset_preparation_only",
+  "pass": "late_open_regen_v1_asset_preparation_only",
   "godot_integration": false,
   "incoming_new_art": {
-    "status": "validation_failed_regenerate_art",
-    "verdict": "FAIL — REGENERATE ART",
-    "report": "notes/INCOMING_NEW_ART_VALIDATION_FAIL.md",
-    "audit_json": "notes/incoming_new_art_audit.json",
-    "production_assets_replaced": false
+    "status": "late_open_regen_passed_production_packaged",
+    "verdict": "PASS FOR GODOT INTEGRATION",
+    "report": "notes/LATE_OPEN_REGEN_PASS.md",
+    "audit_json": "notes/late_open_regen_audit.json",
+    "production_assets_replaced": true,
+    "late_frames_regenerated": [
+      9,
+      10,
+      11,
+      12
+    ],
+    "chest_08_regenerated": false
   },
   "source_files": [
     {
-      "path": "assets/chest/animation/glowing_treasure_chest_opening_sprite_sheet.png",
+      "path": "assets/chest/animation_v2/incoming_new_art/new_chest_opening_master_sheet.png",
       "dimensions": [
         1536,
         1024
       ],
-      "grid": "6x4",
+      "grid": "4x4",
       "cell": [
-        256,
+        384,
         256
-      ]
-    },
-    {
-      "path": "assets/chest/animation/magical_treasure_chest_animation_sheet.png",
-      "dimensions": [
-        1536,
-        1024
       ],
-      "grid": "6x4",
-      "cell": [
-        256,
-        256
-      ]
+      "role": "accepted early/mid frames #00-#08; late #09-#12 regenerated"
     }
   ],
   "production_canvas": {
@@ -52,75 +48,274 @@
       "file": "chest_frames/chest_00_closed.png",
       "label": "closed",
       "lid_open_pct": 0,
-      "src_sheet": "glowing",
-      "src_index": 0,
-      "crop_h": 241,
+      "src": "incoming_new_art",
       "base_anchor": {
         "x": 256.0,
         "y": 420.0
       },
-      "visual_center": {
-        "x": 209.3916659745581,
-        "y": 338.1251885995875
-      },
+      "mid_w": 237,
+      "mid_dw_vs0": 0,
+      "planted_base_y": 420,
       "visible_bbox_xyxy": [
-        116,
-        261,
-        301,
-        420
+        131,
+        211,
+        380,
+        421
       ],
       "canvas_top_hits": 0
     },
     {
-      "file": "chest_frames/chest_10_fully_open.png",
-      "label": "fully_open_endpoint",
-      "lid_open_pct": 75,
-      "src_sheet": "glowing",
-      "src_index": 15,
-      "crop_h": 199,
+      "file": "chest_frames/chest_01_open_08.png",
+      "label": "open_08",
+      "lid_open_pct": 8,
+      "src": "incoming_new_art",
       "base_anchor": {
         "x": 256.0,
         "y": 420.0
       },
-      "visual_center": {
-        "x": 225.69619648133138,
-        "y": 329.4573136955193
+      "mid_w": 239,
+      "mid_dw_vs0": 2,
+      "planted_base_y": 419,
+      "visible_bbox_xyxy": [
+        132,
+        211,
+        382,
+        421
+      ],
+      "canvas_top_hits": 0
+    },
+    {
+      "file": "chest_frames/chest_02_open_17.png",
+      "label": "open_17",
+      "lid_open_pct": 17,
+      "src": "incoming_new_art",
+      "base_anchor": {
+        "x": 256.0,
+        "y": 420.0
       },
+      "mid_w": 239,
+      "mid_dw_vs0": 2,
+      "planted_base_y": 420,
+      "visible_bbox_xyxy": [
+        131,
+        212,
+        451,
+        423
+      ],
+      "canvas_top_hits": 0
+    },
+    {
+      "file": "chest_frames/chest_03_open_25.png",
+      "label": "open_25",
+      "lid_open_pct": 25,
+      "src": "incoming_new_art",
+      "base_anchor": {
+        "x": 256.0,
+        "y": 420.0
+      },
+      "mid_w": 240,
+      "mid_dw_vs0": 3,
+      "planted_base_y": 419,
+      "visible_bbox_xyxy": [
+        131,
+        208,
+        382,
+        421
+      ],
+      "canvas_top_hits": 0
+    },
+    {
+      "file": "chest_frames/chest_04_open_33.png",
+      "label": "open_33",
+      "lid_open_pct": 33,
+      "src": "incoming_new_art",
+      "base_anchor": {
+        "x": 256.0,
+        "y": 420.0
+      },
+      "mid_w": 240,
+      "mid_dw_vs0": 3,
+      "planted_base_y": 420,
+      "visible_bbox_xyxy": [
+        130,
+        201,
+        381,
+        421
+      ],
+      "canvas_top_hits": 0
+    },
+    {
+      "file": "chest_frames/chest_05_open_42.png",
+      "label": "open_42",
+      "lid_open_pct": 42,
+      "src": "incoming_new_art",
+      "base_anchor": {
+        "x": 256.0,
+        "y": 420.0
+      },
+      "mid_w": 241,
+      "mid_dw_vs0": 4,
+      "planted_base_y": 419,
+      "visible_bbox_xyxy": [
+        130,
+        194,
+        381,
+        421
+      ],
+      "canvas_top_hits": 0
+    },
+    {
+      "file": "chest_frames/chest_06_open_50.png",
+      "label": "open_50",
+      "lid_open_pct": 50,
+      "src": "incoming_new_art",
+      "base_anchor": {
+        "x": 256.0,
+        "y": 420.0
+      },
+      "mid_w": 240,
+      "mid_dw_vs0": 3,
+      "planted_base_y": 419,
+      "visible_bbox_xyxy": [
+        130,
+        190,
+        449,
+        435
+      ],
+      "canvas_top_hits": 0
+    },
+    {
+      "file": "chest_frames/chest_07_open_58.png",
+      "label": "open_58",
+      "lid_open_pct": 58,
+      "src": "incoming_new_art",
+      "base_anchor": {
+        "x": 256.0,
+        "y": 420.0
+      },
+      "mid_w": 238,
+      "mid_dw_vs0": 1,
+      "planted_base_y": 420,
+      "visible_bbox_xyxy": [
+        130,
+        183,
+        381,
+        435
+      ],
+      "canvas_top_hits": 0
+    },
+    {
+      "file": "chest_frames/chest_08_open_67.png",
+      "label": "open_67",
+      "lid_open_pct": 67,
+      "src": "incoming_new_art",
+      "base_anchor": {
+        "x": 256.0,
+        "y": 420.0
+      },
+      "mid_w": 234,
+      "mid_dw_vs0": -3,
+      "planted_base_y": 420,
+      "visible_bbox_xyxy": [
+        127,
+        180,
+        441,
+        427
+      ],
+      "canvas_top_hits": 0
+    },
+    {
+      "file": "chest_frames/chest_09_open_75.png",
+      "label": "open_75",
+      "lid_open_pct": 75,
+      "src": "incoming_new_art+late_open_regen",
+      "base_anchor": {
+        "x": 256.0,
+        "y": 420.0
+      },
+      "mid_w": 234,
+      "mid_dw_vs0": -3,
+      "planted_base_y": 420,
+      "visible_bbox_xyxy": [
+        128,
+        178,
+        441,
+        427
+      ],
+      "canvas_top_hits": 0
+    },
+    {
+      "file": "chest_frames/chest_10_open_83.png",
+      "label": "open_83",
+      "lid_open_pct": 83,
+      "src": "incoming_new_art+late_open_regen",
+      "base_anchor": {
+        "x": 256.0,
+        "y": 420.0
+      },
+      "mid_w": 234,
+      "mid_dw_vs0": -3,
+      "planted_base_y": 420,
       "visible_bbox_xyxy": [
         126,
-        238,
-        321,
-        420
+        174,
+        441,
+        427
       ],
-      "canvas_top_hits": 0,
-      "note": "Most-open non-sheared glowing-sheet pose after next-cell bleed crop. Planted body does NOT match closed geometry (audit XOR\u224851%); intended as hard-cut open endpoint, not a smooth lid in-between."
+      "canvas_top_hits": 0
+    },
+    {
+      "file": "chest_frames/chest_11_open_92.png",
+      "label": "open_92",
+      "lid_open_pct": 92,
+      "src": "incoming_new_art+late_open_regen",
+      "base_anchor": {
+        "x": 256.0,
+        "y": 420.0
+      },
+      "mid_w": 234,
+      "mid_dw_vs0": -3,
+      "planted_base_y": 420,
+      "visible_bbox_xyxy": [
+        121,
+        147,
+        441,
+        427
+      ],
+      "canvas_top_hits": 0
+    },
+    {
+      "file": "chest_frames/chest_12_fully_open.png",
+      "label": "fully_open",
+      "lid_open_pct": 100,
+      "src": "incoming_new_art+late_open_regen",
+      "base_anchor": {
+        "x": 256.0,
+        "y": 420.0
+      },
+      "mid_w": 234,
+      "mid_dw_vs0": -3,
+      "planted_base_y": 420,
+      "visible_bbox_xyxy": [
+        117,
+        144,
+        441,
+        427
+      ],
+      "canvas_top_hits": 0
     }
   ],
-  "missing_lid_open_percentages": [
-    10,
-    20,
-    30,
-    40,
-    50,
-    60,
-    70,
-    80,
-    90
-  ],
-  "smooth_8_to_11_frame_sequence_possible": false,
+  "missing_lid_open_percentages": [],
+  "smooth_8_to_11_frame_sequence_possible": true,
   "scroll": {
     "path": "scroll/love_scroll.png",
-    "source": "assets/art/scroll/scroll_rolled.png",
-    "donor_size": [
-      1200,
-      266
-    ],
     "output_size": [
       56,
       132
     ],
     "contains_chest_pixels": false,
-    "baked_glow": false
+    "baked_glow": false,
+    "note": "Existing production scroll candidate; occlusion validated against new layers; not replaced in this pass"
   },
   "layers": {
     "chest_open_back": "layers/chest_open_back.png",
@@ -128,7 +323,8 @@
     "dimensions": [
       512,
       512
-    ]
+    ],
+    "derived_from": "chest_frames/chest_12_fully_open.png"
   },
   "intended_future_godot_layer_order": [
     "beach",
@@ -139,247 +335,22 @@
     "UI"
   ],
   "audit": {
-    "candidates_inspected": 48,
-    "compatible_for_smooth_lid_arc": 1,
-    "accepted_production_frames": 2,
-    "accepted_note": "Only glowing[0] passes hard same-body consistency. glowing[15] accepted solely as a hard-cut open endpoint (documented body mismatch). No clean 10\u201390% mid-lid poses.",
-    "rejected": [
-      {
-        "sheet": "glowing",
-        "index": 1,
-        "reason": "closed near-dupe / idle glow pulse; not a lid-open pose; AI micro-drift vs cell 0"
-      },
-      {
-        "sheet": "glowing",
-        "index": 2,
-        "reason": "closed near-dupe / idle glow pulse; not a lid-open pose; AI micro-drift vs cell 0"
-      },
-      {
-        "sheet": "glowing",
-        "index": 3,
-        "reason": "closed near-dupe / idle glow pulse; not a lid-open pose; AI micro-drift vs cell 0"
-      },
-      {
-        "sheet": "glowing",
-        "index": 4,
-        "reason": "closed near-dupe / idle glow pulse; not a lid-open pose; AI micro-drift vs cell 0"
-      },
-      {
-        "sheet": "glowing",
-        "index": 5,
-        "reason": "closed near-dupe / idle glow pulse; not a lid-open pose; AI micro-drift vs cell 0"
-      },
-      {
-        "sheet": "glowing",
-        "index": 6,
-        "reason": "crack/partial-open row \u2014 planted body remorphs vs closed (XOR\u224840\u201346%); not same physical chest"
-      },
-      {
-        "sheet": "glowing",
-        "index": 7,
-        "reason": "crack/partial-open row \u2014 planted body remorphs vs closed (XOR\u224840\u201346%); not same physical chest"
-      },
-      {
-        "sheet": "glowing",
-        "index": 8,
-        "reason": "crack/partial-open row \u2014 planted body remorphs vs closed (XOR\u224840\u201346%); not same physical chest"
-      },
-      {
-        "sheet": "glowing",
-        "index": 9,
-        "reason": "crack/partial-open row \u2014 planted body remorphs vs closed (XOR\u224840\u201346%); not same physical chest"
-      },
-      {
-        "sheet": "glowing",
-        "index": 10,
-        "reason": "crack/partial-open row \u2014 planted body remorphs vs closed (XOR\u224840\u201346%); not same physical chest"
-      },
-      {
-        "sheet": "glowing",
-        "index": 11,
-        "reason": "crack/partial-open row \u2014 planted body remorphs vs closed (XOR\u224840\u201346%); not same physical chest"
-      },
-      {
-        "sheet": "glowing",
-        "index": 12,
-        "reason": "mid-open row \u2014 body remorph + next-cell bleed; near-dupes of cell 15 cluster; rejected as mid-lid art"
-      },
-      {
-        "sheet": "glowing",
-        "index": 13,
-        "reason": "mid-open row \u2014 body remorph + next-cell bleed; near-dupes of cell 15 cluster; rejected as mid-lid art"
-      },
-      {
-        "sheet": "glowing",
-        "index": 14,
-        "reason": "mid-open row \u2014 body remorph + next-cell bleed; near-dupes of cell 15 cluster; rejected as mid-lid art"
-      },
-      {
-        "sheet": "glowing",
-        "index": 16,
-        "reason": "mid-open row \u2014 body remorph + next-cell bleed; near-dupes of cell 15 cluster; rejected as mid-lid art"
-      },
-      {
-        "sheet": "glowing",
-        "index": 17,
-        "reason": "mid-open row \u2014 body remorph + next-cell bleed; near-dupes of cell 15 cluster; rejected as mid-lid art"
-      },
-      {
-        "sheet": "glowing",
-        "index": 18,
-        "reason": "fully-open row TOP-SHEARED (top-edge content px=189); unusable"
-      },
-      {
-        "sheet": "glowing",
-        "index": 19,
-        "reason": "fully-open row TOP-SHEARED (top-edge content px=289); unusable"
-      },
-      {
-        "sheet": "glowing",
-        "index": 20,
-        "reason": "fully-open row TOP-SHEARED (top-edge content px=314); unusable"
-      },
-      {
-        "sheet": "glowing",
-        "index": 21,
-        "reason": "fully-open row TOP-SHEARED (top-edge content px=323); unusable"
-      },
-      {
-        "sheet": "glowing",
-        "index": 22,
-        "reason": "fully-open row TOP-SHEARED (top-edge content px=328); unusable"
-      },
-      {
-        "sheet": "glowing",
-        "index": 23,
-        "reason": "fully-open row TOP-SHEARED (top-edge content px=334); unusable"
-      },
-      {
-        "sheet": "magical",
-        "index": 0,
-        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
-      },
-      {
-        "sheet": "magical",
-        "index": 1,
-        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
-      },
-      {
-        "sheet": "magical",
-        "index": 2,
-        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
-      },
-      {
-        "sheet": "magical",
-        "index": 3,
-        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
-      },
-      {
-        "sheet": "magical",
-        "index": 4,
-        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
-      },
-      {
-        "sheet": "magical",
-        "index": 5,
-        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
-      },
-      {
-        "sheet": "magical",
-        "index": 6,
-        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
-      },
-      {
-        "sheet": "magical",
-        "index": 7,
-        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
-      },
-      {
-        "sheet": "magical",
-        "index": 8,
-        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
-      },
-      {
-        "sheet": "magical",
-        "index": 9,
-        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
-      },
-      {
-        "sheet": "magical",
-        "index": 10,
-        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
-      },
-      {
-        "sheet": "magical",
-        "index": 11,
-        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
-      },
-      {
-        "sheet": "magical",
-        "index": 12,
-        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
-      },
-      {
-        "sheet": "magical",
-        "index": 13,
-        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
-      },
-      {
-        "sheet": "magical",
-        "index": 14,
-        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
-      },
-      {
-        "sheet": "magical",
-        "index": 15,
-        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
-      },
-      {
-        "sheet": "magical",
-        "index": 16,
-        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
-      },
-      {
-        "sheet": "magical",
-        "index": 17,
-        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
-      },
-      {
-        "sheet": "magical",
-        "index": 18,
-        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
-      },
-      {
-        "sheet": "magical",
-        "index": 19,
-        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
-      },
-      {
-        "sheet": "magical",
-        "index": 20,
-        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
-      },
-      {
-        "sheet": "magical",
-        "index": 21,
-        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
-      },
-      {
-        "sheet": "magical",
-        "index": 22,
-        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
-      },
-      {
-        "sheet": "magical",
-        "index": 23,
-        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
-      }
-    ]
-  },
-  "validation_temp": {
-    "contact_sheet": "assets/chest/animation_v2/validation/chest_frames_contact_sheet.png",
-    "alignment_overlay": "assets/chest/animation_v2/validation/chest_alignment_overlay.png",
-    "scroll_occlusion_validation": "assets/chest/animation_v2/validation/scroll_occlusion_validation.png",
-    "front_rim_occludes_lower_scroll": true
+    "candidates_inspected": 13,
+    "accepted_production_frames": 13,
+    "late_mid_body_widths": {
+      "9": 234,
+      "10": 234,
+      "11": 234,
+      "12": 234
+    },
+    "late_mid_body_dw_vs0": {
+      "9": -3,
+      "10": -3,
+      "11": -3,
+      "12": -3
+    },
+    "top_clipping_eliminated": true,
+    "full_sequence_00_12_passes": true,
+    "verdict": "PASS_FOR_GODOT_INTEGRATION"
   }
 }
