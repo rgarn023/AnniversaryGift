@@ -5,8 +5,8 @@ class_name ChestEnvironment
 ## Chest animation stays a separate layer above this node.
 ## Future cosmetic swaps can change `environment_id` / texture without
 ## rewriting the chest frame animation. No store/IAP in this pass.
-## v53: ONE continuous sky GradientTexture2D (no banded ColorRects) + livelier
-## water-only glints; chest ground plane nudged closer to sand.
+## v54: device-LOCAL wall-clock (timezone bias) + resume refresh; day wash strong
+## enough to cover baked dusk beach art; independent glint fade/drift cycles.
 
 const ENV_DEFAULT_BEACH := "default_beach"
 const ENV_DIR := "res://assets/art/background/environments/"
@@ -47,11 +47,18 @@ var _glint_base_y: PackedFloat32Array = PackedFloat32Array()
 var _glint_w: PackedFloat32Array = PackedFloat32Array()
 var _glint_speed: PackedFloat32Array = PackedFloat32Array()
 var _glint_drift: PackedFloat32Array = PackedFloat32Array()
+var _glint_fade_in: PackedFloat32Array = PackedFloat32Array()
+var _glint_fade_out: PackedFloat32Array = PackedFloat32Array()
+var _glint_hold: PackedFloat32Array = PackedFloat32Array()
+var _glint_wait: PackedFloat32Array = PackedFloat32Array()
+var _glint_clock: PackedFloat32Array = PackedFloat32Array()
 var _ready_visuals: bool = false
 var _idle: float = 0.0
 var _tod_refresh: float = 0.0
 var _last_hour_bucket: float = -999.0
 const SOFT_GLINT := "res://assets/art/chest/soft_glow_pulse.png"
+## Lightweight periodic TOD refresh (seconds). Also refreshes on focus/resume.
+const TOD_REFRESH_SEC := 60.0
 
 ## Time-of-day keyframes (local clock hours). Smooth lerp between neighbors.
 ## Phases: NIGHT 20–05, DAWN 05–08, DAY 08–17, SUNSET 17–20.
@@ -82,12 +89,28 @@ static func _load_cached(path: String) -> Texture2D:
 	return tex
 
 
+static func local_timezone_bias_minutes() -> int:
+	## Godot bias = offset from UTC in minutes (matches compose_scroll helper).
+	return int(Time.get_time_zone_from_system().get("bias", 0))
+
+
 static func local_hour_frac() -> float:
-	## Device local clock only — no location permission, no network.
+	## Device LOCAL wall-clock only — no location permission, no network.
+	## Do NOT treat UTC hour components as local (Samsung morning→night bug).
 	if debug_hour_override >= 0.0:
 		return fposmod(debug_hour_override, 24.0)
-	var t := Time.get_time_dict_from_system()
-	return float(t.hour) + float(t.minute) / 60.0 + float(t.second) / 3600.0
+	## Explicit path used elsewhere in this project (compose_scroll_screen.gd):
+	## unix (UTC epoch) + timezone bias → local wall-clock components.
+	## get_datetime_dict_from_unix_time always returns UTC components, so adding
+	## bias yields local hour/minute/second without calling an external API.
+	var bias_min := local_timezone_bias_minutes()
+	var unix := int(Time.get_unix_time_from_system())
+	var local := Time.get_datetime_dict_from_unix_time(unix + bias_min * 60)
+	return (
+		float(local.get("hour", 0))
+		+ float(local.get("minute", 0)) / 60.0
+		+ float(local.get("second", 0)) / 3600.0
+	)
 
 
 static func tod_palette_at(hour: float) -> Dictionary:
@@ -132,26 +155,26 @@ static func tod_palette_at(hour: float) -> Dictionary:
 			"star_a": 0.12,
 			"glisten_a": 0.66,
 		},
-		{ ## 08:00 day start
-			"base": Color(0.18, 0.28, 0.42, 1.0),
-			"sky_top": Color(0.28, 0.48, 0.82, 0.22),
-			"sky_mid": Color(0.42, 0.62, 0.90, 0.16),
-			"sky_lower": Color(0.62, 0.78, 0.95, 0.12),
-			"sky_horizon": Color(0.78, 0.88, 0.98, 0.10),
-			"bg_mod": Color(1.05, 1.02, 0.98, 1.0),
-			"ocean": Color(0.25, 0.48, 0.72, 0.14),
+		{ ## 08:00 day start — stronger wash so baked dusk beach art reads as DAY.
+			"base": Color(0.30, 0.48, 0.72, 1.0),
+			"sky_top": Color(0.32, 0.58, 0.92, 0.78),
+			"sky_mid": Color(0.48, 0.70, 0.96, 0.70),
+			"sky_lower": Color(0.68, 0.84, 0.98, 0.62),
+			"sky_horizon": Color(0.82, 0.92, 1.0, 0.52),
+			"bg_mod": Color(1.18, 1.12, 1.05, 1.0),
+			"ocean": Color(0.22, 0.55, 0.78, 0.22),
 			"shimmer": Color(1.0, 0.98, 0.90, 1.0),
 			"star_a": 0.0,
 			"glisten_a": 0.82,
 		},
 		{ ## 12:00 midday
-			"base": Color(0.22, 0.38, 0.58, 1.0),
-			"sky_top": Color(0.26, 0.50, 0.90, 0.20),
-			"sky_mid": Color(0.40, 0.64, 0.95, 0.14),
-			"sky_lower": Color(0.58, 0.78, 1.0, 0.10),
-			"sky_horizon": Color(0.72, 0.86, 1.0, 0.08),
-			"bg_mod": Color(1.08, 1.05, 1.00, 1.0),
-			"ocean": Color(0.20, 0.52, 0.78, 0.12),
+			"base": Color(0.34, 0.55, 0.82, 1.0),
+			"sky_top": Color(0.28, 0.56, 0.96, 0.82),
+			"sky_mid": Color(0.45, 0.72, 1.0, 0.74),
+			"sky_lower": Color(0.62, 0.84, 1.0, 0.64),
+			"sky_horizon": Color(0.78, 0.90, 1.0, 0.50),
+			"bg_mod": Color(1.22, 1.16, 1.08, 1.0),
+			"ocean": Color(0.18, 0.58, 0.84, 0.20),
 			"shimmer": Color(1.0, 0.99, 0.92, 1.0),
 			"star_a": 0.0,
 			"glisten_a": 0.90,
@@ -256,6 +279,17 @@ func _ready() -> void:
 	resized.connect(_layout)
 	_layout()
 	_apply_time_of_day(true)
+
+
+func _notification(what: int) -> void:
+	## Refresh local time when the app resumes / regains focus (not only at boot).
+	if what == NOTIFICATION_APPLICATION_RESUMED \
+			or what == NOTIFICATION_APPLICATION_FOCUS_IN \
+			or what == NOTIFICATION_WM_WINDOW_FOCUS_IN \
+			or what == NOTIFICATION_VISIBILITY_CHANGED:
+		if visible and is_visible_in_tree():
+			_tod_refresh = 0.0
+			_apply_time_of_day(true)
 
 
 func _build() -> void:
@@ -367,7 +401,7 @@ func _build() -> void:
 	_water_glisten_b.modulate = Color(1.0, 0.95, 0.84, 0.38)
 	_water_clip.add_child(_water_glisten_b)
 
-	## Discrete soft horizontal streaks — phone-visible "little shimmer".
+	## Discrete soft horizontal streaks — independent fade/drift cycles (not synced).
 	_glints.clear()
 	_glint_phase = PackedFloat32Array()
 	_glint_base_x = PackedFloat32Array()
@@ -375,18 +409,34 @@ func _build() -> void:
 	_glint_w = PackedFloat32Array()
 	_glint_speed = PackedFloat32Array()
 	_glint_drift = PackedFloat32Array()
+	_glint_fade_in = PackedFloat32Array()
+	_glint_fade_out = PackedFloat32Array()
+	_glint_hold = PackedFloat32Array()
+	_glint_wait = PackedFloat32Array()
+	_glint_clock = PackedFloat32Array()
 	_glint_phase.resize(GLINT_COUNT)
 	_glint_base_x.resize(GLINT_COUNT)
 	_glint_base_y.resize(GLINT_COUNT)
 	_glint_w.resize(GLINT_COUNT)
 	_glint_speed.resize(GLINT_COUNT)
 	_glint_drift.resize(GLINT_COUNT)
+	_glint_fade_in.resize(GLINT_COUNT)
+	_glint_fade_out.resize(GLINT_COUNT)
+	_glint_hold.resize(GLINT_COUNT)
+	_glint_wait.resize(GLINT_COUNT)
+	_glint_clock.resize(GLINT_COUNT)
 	var widths := [0.24, 0.14, 0.28, 0.16, 0.22, 0.18]
 	var x_fracs := [0.06, 0.26, 0.44, 0.62, 0.78, 0.90]
 	var y_fracs := [0.16, 0.40, 0.26, 0.52, 0.34, 0.60]
 	var phases := [0.0, 1.15, 2.40, 3.55, 4.80, 5.90]
 	var speeds := [0.38, 0.52, 0.44, 0.60, 0.34, 0.48]
 	var drifts := [0.018, 0.012, 0.022, 0.014, 0.020, 0.010]
+	## Per-glint cycle timings (seconds) — staggered so they never pulse together.
+	var fade_ins := [0.85, 1.15, 0.70, 1.30, 0.95, 1.05]
+	var fade_outs := [1.10, 0.85, 1.40, 0.95, 1.25, 1.00]
+	var holds := [0.35, 0.20, 0.45, 0.15, 0.30, 0.25]
+	var waits := [1.80, 2.40, 1.20, 2.90, 1.55, 2.10]
+	var clocks := [0.0, 1.6, 3.2, 0.8, 4.1, 2.5]
 	var soft_tex := _load_cached(SOFT_GLINT)
 	for i in range(GLINT_COUNT):
 		var g := TextureRect.new()
@@ -406,6 +456,11 @@ func _build() -> void:
 		_glint_w[i] = widths[i]
 		_glint_speed[i] = speeds[i]
 		_glint_drift[i] = drifts[i]
+		_glint_fade_in[i] = fade_ins[i]
+		_glint_fade_out[i] = fade_outs[i]
+		_glint_hold[i] = holds[i]
+		_glint_wait[i] = waits[i]
+		_glint_clock[i] = clocks[i]
 
 	apply_environment(environment_id)
 
@@ -511,13 +566,40 @@ var _shimmer_rgb: Color = Color(1.0, 0.97, 0.88, 1.0)
 var _glisten_base_a: float = 0.72
 
 
+func _glint_alpha_at(i: int) -> float:
+	## Independent cycle: wait → fade in → brief hold → fade out → wait.
+	## More motion than brightness — peak alpha stays restrained.
+	var fade_in := maxf(_glint_fade_in[i], 0.05)
+	var hold := maxf(_glint_hold[i], 0.01)
+	var fade_out := maxf(_glint_fade_out[i], 0.05)
+	var wait := maxf(_glint_wait[i], 0.05)
+	var cycle := fade_in + hold + fade_out + wait
+	var t := fposmod(_glint_clock[i], cycle)
+	if t < wait:
+		return 0.0
+	t -= wait
+	if t < fade_in:
+		var u := t / fade_in
+		u = u * u * (3.0 - 2.0 * u)
+		return lerpf(0.0, 0.72, u)
+	t -= fade_in
+	if t < hold:
+		return 0.72
+	t -= hold
+	if t < fade_out:
+		var v := t / fade_out
+		v = v * v * (3.0 - 2.0 * v)
+		return lerpf(0.72, 0.0, v)
+	return 0.0
+
+
 func _process(delta: float) -> void:
 	if not visible:
 		return
 	_idle += delta
 	_tod_refresh += delta
-	## Re-evaluate local time about twice a minute (plus forced on ready/layout).
-	if _tod_refresh >= 30.0:
+	## Re-evaluate local time about once a minute (plus forced on ready/resume).
+	if _tod_refresh >= TOD_REFRESH_SEC:
 		_tod_refresh = 0.0
 		_apply_time_of_day(false)
 	## Soft water-only shimmer: slow sheen drift + independently fading glints.
@@ -537,20 +619,15 @@ func _process(delta: float) -> void:
 			)
 			var drift_b := sin(_idle * 0.18 + 2.4) * size.x * 0.030
 			_water_glisten_b.position.x = -size.x * 0.16 + drift_b
-		## Staggered horizontal glints: independent fade in/out + tiny drift.
-		## Peaks high enough that several glints are clearly visible on a Galaxy screen.
+		## Independent fade/drift per glint — not a synced sine pulse.
 		var water_h := _water_clip.size.y
 		for i in range(_glints.size()):
-			var t := _idle * _glint_speed[i] + _glint_phase[i]
-			## Raised cosine envelope — spends time near zero so glints don't sync.
-			var wave := 0.5 + 0.5 * sin(t)
-			var envelope := wave * wave
-			## Second slower pulse desyncs brightness further.
-			var pulse2 := 0.55 + 0.45 * sin(_idle * (_glint_speed[i] * 0.55) + _glint_phase[i] * 1.7)
-			var a := lerpf(0.08, 0.95, envelope * pulse2)
+			_glint_clock[i] = _glint_clock[i] + delta
+			var a := _glint_alpha_at(i)
 			_glints[i].modulate = Color(sc.r, sc.g, sc.b, a)
-			var drift := sin(_idle * 0.16 + _glint_phase[i]) * size.x * _glint_drift[i]
-			var y_drift := sin(_idle * 0.11 + _glint_phase[i] * 0.7) * water_h * 0.04
+			## Horizontal drift only while visible — a few pixels, staggered phase.
+			var drift := sin(_idle * 0.22 + _glint_phase[i]) * size.x * _glint_drift[i]
+			var y_drift := sin(_idle * 0.13 + _glint_phase[i] * 0.7) * water_h * 0.035
 			_glints[i].position.x = size.x * _glint_base_x[i] + drift
 			_glints[i].position.y = clampf(
 				water_h * _glint_base_y[i] + y_drift,

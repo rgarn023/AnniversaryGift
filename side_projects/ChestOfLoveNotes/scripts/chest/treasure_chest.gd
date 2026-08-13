@@ -1,13 +1,14 @@
 extends Control
 class_name LoveNotesChest
-## animation_v2 approved 13-frame chest opening (v53 scroll-layer + sky polish).
+## animation_v2 approved 13-frame chest opening (v54 scroll cavity + time fix).
 ## Empty + unread share the same smooth multi-frame open (#00→#12).
 ## No chest crossfade / alpha fade / ghost duplicate — exactly ONE visible chest
 ## frame at any instant. Unread then switches cleanly to open-back + scroll +
 ## front-rim layering for a continuous Y-tweened horizontal scroll rise.
 ## Legacy PATH B / glowing-sheet frames are never used at runtime.
-## v53: re-derived open layers so scroll sits between rear/interior and front lip
-## only — approved 13 frames remain frozen.
+## v54: cavity-centered scroll + alpha cavity mask + re-derived lip/pillars so
+## the scroll emerges from inside the opening (not from behind the chest).
+## Approved 13 frames / chest plant remain frozen.
 
 signal tapped
 signal open_finished
@@ -39,6 +40,7 @@ const ANIM_V2 := "res://assets/chest/animation_v2/"
 const CHEST_FRAMES_DIR := ANIM_V2 + "chest_frames/"
 const OPEN_BACK := ANIM_V2 + "layers/chest_open_back.png"
 const FRONT_RIM := ANIM_V2 + "layers/chest_open_front_rim.png"
+const CAVITY_MASK := ANIM_V2 + "layers/chest_cavity_mask.png"
 ## Horizontal romantic reward scroll — packaged from new_love_scroll_master.png
 ## (deskew/crop/resize only). Ribbon + heart remain readable at phone scale.
 const SCROLL_LAYER := ANIM_V2 + "scroll/love_scroll_reward.png"
@@ -83,11 +85,17 @@ const SCROLL_REVEAL_START_PROGRESS := 0.48
 const SCROLL_REVEAL_START_INDEX := 2
 ## Native romantic horizontal scroll art size (love_scroll_reward.png = 720×305).
 const SCROLL_NATIVE := Vector2(720, 305)
-## Target final width as a fraction of usable chest opening (~0.47 canvas).
-const SCROLL_OPENING_WIDTH_FRAC := 0.70
-## Canvas-space cavity / rim geometry — top of re-derived front lip (y≈271).
-## v53: was 285 while gold lip lived in open-back; lip now owns y≥271.
-const CAVITY_RIM_CANVAS_Y := 274.0
+## Target final width as a fraction of the real cavity opening (inner walls).
+## v54: sized to the 3/4 cavity (not canvas-centered 0.47 band) so the scroll
+## fills the mouth without spilling past the right inner wall.
+const SCROLL_OPENING_WIDTH_FRAC := 0.92
+## Canvas-space cavity / rim geometry — top of re-derived front lip (y≈269).
+## v54: lip gold + side pillars live in front-rim; cavity mask clips scroll.
+const CAVITY_RIM_CANVAS_Y := 269.0
+## 3/4-view opening is left-biased — scroll must center on the cavity, not canvas.
+const CAVITY_CENTER_CANVAS_X := 219.0
+const CAVITY_INNER_LEFT_X := 137.0
+const CAVITY_INNER_RIGHT_X := 301.0
 ## Final reward: ~90% of horizontal-scroll HEIGHT above the front rim (85–90%).
 const SCROLL_FINAL_ABOVE_RIM := 0.90
 ## First visible tip — ~8% so emergence starts almost hidden in the cavity.
@@ -147,9 +155,12 @@ var _shadow_view: TextureRect
 var _warm_spill: TextureRect
 var _frame_view: TextureRect
 var _scroll_clip: Control
+var _cavity_mask_host: TextureRect
 var _scroll_view: TextureRect
 var _rim_view: TextureRect
 var _glow_pulse: TextureRect
+var _cavity_mask_tex: Texture2D = null
+var _scroll_mask_mat: ShaderMaterial = null
 var _dust: CPUParticles2D
 var _sparks: CPUParticles2D
 var _motes: CPUParticles2D
@@ -201,6 +212,7 @@ static func preload_assets() -> void:
 	_load_cached(SCROLL_LAYER_VERTICAL_SOURCE)
 	_load_cached(FRONT_RIM)
 	_load_cached(OPEN_BACK)
+	_load_cached(CAVITY_MASK)
 	_load_cached(CONTACT_SHADOW)
 	_load_cached(WARM_SPILL)
 	_open_weight_ends = _build_open_weight_ends()
@@ -272,6 +284,7 @@ func _ready() -> void:
 	_scroll_layer_tex = _load_cached(SCROLL_LAYER)
 	_rim_layer_tex = _load_cached(FRONT_RIM)
 	_open_back_tex = _load_cached(OPEN_BACK)
+	_cavity_mask_tex = _load_cached(CAVITY_MASK)
 	_shadow_tex = _load_cached(CONTACT_SHADOW)
 	_build_visuals()
 	_ready_visuals = true
@@ -337,31 +350,29 @@ func _build_visuals() -> void:
 	_frame_view.z_index = 3
 	_root_visual.add_child(_frame_view)
 
-	## Soft radial pulse — sits behind the scroll during layered reward so parchment
-	## stays readable (intended order: rear → glow → scroll → front lip → UI).
-	_glow_pulse = TextureRect.new()
-	_glow_pulse.name = "GlowPulse"
-	_glow_pulse.texture = _load_cached(SOFT_GLOW)
-	_glow_pulse.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	_glow_pulse.stretch_mode = TextureRect.STRETCH_SCALE
-	_glow_pulse.modulate = Color(1.0, 0.82, 0.48, 0.0)
-	_glow_pulse.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_glow_pulse.z_index = 4
-	_root_visual.add_child(_glow_pulse)
-
-	## Cavity clip — scroll rises BETWEEN open-back and front-rim only.
-	## clip_contents trims extreme side spill; front rim is the lower occluder.
-	## Expanded rect so the full horizontal scroll texture can render (prior short
-	## clip hard-cut the scroll bottom during emerge — looked chopped).
+	## Order: rear/interior → scroll (cavity-masked) → front lip → glow → particles → UI.
+	## Cavity host matches the planted canvas; CLIP_CHILDREN_ONLY uses mask alpha.
 	_scroll_clip = Control.new()
 	_scroll_clip.name = "ScrollCavityClip"
 	_scroll_clip.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_scroll_clip.clip_contents = true
+	_scroll_clip.clip_contents = false
 	_scroll_clip.z_index = 5
 	_scroll_clip.visible = false
 	_root_visual.add_child(_scroll_clip)
 
-	## Horizontal romantic love-note scroll — Y-rises only inside the clipped cavity.
+	_cavity_mask_host = TextureRect.new()
+	_cavity_mask_host.name = "CavityMaskHost"
+	_cavity_mask_host.texture = _cavity_mask_tex
+	_cavity_mask_host.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_cavity_mask_host.stretch_mode = TextureRect.STRETCH_SCALE
+	_cavity_mask_host.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	_cavity_mask_host.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	## Draw nothing — only clip children to the cavity alpha silhouette.
+	_cavity_mask_host.clip_children = CanvasItem.CLIP_CHILDREN_ONLY
+	_cavity_mask_host.modulate = Color(1, 1, 1, 1)
+	_scroll_clip.add_child(_cavity_mask_host)
+
+	## Horizontal romantic love-note scroll — Y-rises only inside the cavity mask.
 	## Orientation is baked into love_scroll_reward.png (no runtime rotation).
 	_scroll_view = TextureRect.new()
 	_scroll_view.name = "ScrollLayer"
@@ -374,10 +385,18 @@ func _build_visuals() -> void:
 	_scroll_view.modulate = Color(1, 1, 1, 1)
 	_scroll_view.rotation = 0.0
 	_scroll_view.visible = true
-	_scroll_clip.add_child(_scroll_view)
+	## Shader mask as a second occlusion pass (works even if clip_children is limited).
+	var shader := load("res://assets/shaders/cavity_scroll_mask.gdshader") as Shader
+	if shader != null and _cavity_mask_tex != null:
+		_scroll_mask_mat = ShaderMaterial.new()
+		_scroll_mask_mat.shader = shader
+		_scroll_mask_mat.set_shader_parameter("mask_tex", _cavity_mask_tex)
+		_scroll_mask_mat.set_shader_parameter("canvas_size", FRAME_CANVAS.x)
+		_scroll_view.material = _scroll_mask_mat
+	_cavity_mask_host.add_child(_scroll_view)
 
 	## Front-rim occlusion layer derived from approved fully-open frame #12.
-	## v53: mouth gold lip + front face only — must sit ABOVE the scroll.
+	## v54: mouth gold lip + front face + opening side pillars — ABOVE the scroll.
 	_rim_view = TextureRect.new()
 	_rim_view.name = "ChestFrontRim"
 	_rim_view.texture = _rim_layer_tex
@@ -390,16 +409,27 @@ func _build_visuals() -> void:
 	_rim_view.visible = false
 	_root_visual.add_child(_rim_view)
 
+	## Soft radial pulse — restrained; sits above the rim so parchment stays readable.
+	_glow_pulse = TextureRect.new()
+	_glow_pulse.name = "GlowPulse"
+	_glow_pulse.texture = _load_cached(SOFT_GLOW)
+	_glow_pulse.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_glow_pulse.stretch_mode = TextureRect.STRETCH_SCALE
+	_glow_pulse.modulate = Color(1.0, 0.82, 0.48, 0.0)
+	_glow_pulse.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_glow_pulse.z_index = 7
+	_root_visual.add_child(_glow_pulse)
+
 	_dust = _make_particles(Color(0.90, 0.78, 0.48, 0.28), 3, Vector2(0, -1), 12.0, 0.65)
-	_dust.z_index = 7
+	_dust.z_index = 8
 	_root_visual.add_child(_dust)
 	_sparks = _make_particles(Color(1.0, 0.84, 0.48, 0.34), 2, Vector2(0, -1), 18.0, 0.50)
-	_sparks.z_index = 7
+	_sparks.z_index = 8
 	_root_visual.add_child(_sparks)
 	_motes = _make_particles(Color(1.0, 0.86, 0.55, 0.24), 4, Vector2(0, -1), 9.0, 1.0)
 	_motes.one_shot = false
 	_motes.explosiveness = 0.0
-	_motes.z_index = 7
+	_motes.z_index = 8
 	_root_visual.add_child(_motes)
 
 	_badge = Label.new()
@@ -535,50 +565,51 @@ func _place_scroll_and_rim() -> void:
 		var tex_size := _scroll_layer_tex.get_size()
 		if tex_size.x > 1.0 and tex_size.y > 1.0:
 			native = tex_size
-	var opening_w := draw_w * 0.47
+	## Fit scroll to the real cavity width (3/4 opening), not a canvas-centered guess.
+	var cavity_w_frac := (CAVITY_INNER_RIGHT_X - CAVITY_INNER_LEFT_X) / FRAME_CANVAS.x
+	var opening_w := draw_w * cavity_w_frac
 	var sw := opening_w * SCROLL_OPENING_WIDTH_FRAC
 	var aspect := native.x / maxf(native.y, 1.0)
 	var sh := sw / maxf(aspect, 0.01)
 	var rim_y := _anchor_rect.position.y + (CAVITY_RIM_CANVAS_Y / FRAME_CANVAS.y) * draw_h
 	var above := lerpf(SCROLL_PEEK_ABOVE_RIM, SCROLL_FINAL_ABOVE_RIM, _scroll_rise)
 	var scroll_top := rim_y - sh * above
-	var scroll_left := _anchor_rect.position.x + (draw_w - sw) * 0.5
-	## Cavity clip must fully contain the scroll texture at every rise amount.
-	## Root cause (v51): clip bottom sat at ~0.64 canvas while peek/mid rise put
-	## scroll bottom near ~0.68 — Control.clip_contents hard-cut the parchment
-	## before the front rim could occlude it (looked chopped / half-scroll).
-	## Fix: expand clip to cover peek→final extents (+margin); rim remains the
-	## only intentional lower occluder. Lid never covers the upper scroll.
-	var clip_pad_x := draw_w * 0.04
-	var clip_pad_y := draw_h * 0.03
-	var peek_top := rim_y - sh * SCROLL_FINAL_ABOVE_RIM
-	var peek_bot := rim_y + sh * (1.0 - SCROLL_PEEK_ABOVE_RIM)
-	var clip_x := mini(scroll_left, _anchor_rect.position.x + draw_w * 0.18) - clip_pad_x
-	var clip_r := maxf(scroll_left + sw, _anchor_rect.position.x + draw_w * 0.82) + clip_pad_x
-	var clip_y := mini(peek_top, _anchor_rect.position.y + draw_h * 0.10) - clip_pad_y
-	var clip_b := maxf(peek_bot, _anchor_rect.position.y + draw_h * 0.78) + clip_pad_y
-	## Keep clip inside the planted canvas so side wood stays tidy.
-	clip_x = maxf(clip_x, _anchor_rect.position.x + draw_w * 0.12)
-	clip_r = minf(clip_r, _anchor_rect.position.x + draw_w * 0.88)
-	clip_y = maxf(clip_y, _anchor_rect.position.y + draw_h * 0.06)
-	clip_b = minf(clip_b, _anchor_rect.position.y + draw_h * 0.82)
-	var clip_w := maxf(clip_r - clip_x, sw + clip_pad_x * 2.0)
-	var clip_h := maxf(clip_b - clip_y, sh + clip_pad_y * 2.0)
+	## Center on the cavity (left-biased in 3/4 art) — NOT the canvas midpoint.
+	## Root cause of “behind the chest”: canvas-centered scroll spilled past the
+	## right inner wall and read as rising behind the whole silhouette.
+	var cavity_cx := _anchor_rect.position.x + (CAVITY_CENTER_CANVAS_X / FRAME_CANVAS.x) * draw_w
+	var scroll_left := cavity_cx - sw * 0.5
+	## ScrollCavityClip + CavityMaskHost cover the full planted canvas so the
+	## cavity alpha mask stays aligned with open-back / front-rim.
+	## Prior rectangular clip_contents hard-cut the scroll bottom during emerge;
+	## cavity mask + front rim are now the intentional occluders (no hard cut).
 	if _scroll_clip:
-		_place_rect(_scroll_clip, Rect2(clip_x, clip_y, clip_w, clip_h))
-	if _scroll_view and _scroll_clip:
-		## Map canvas rim / rise into clip-local coordinates (Y translation only).
-		var local_x := scroll_left - clip_x
-		var local_y := scroll_top - clip_y
+		_place_rect(_scroll_clip, _anchor_rect)
+	if _cavity_mask_host:
+		_place_rect(_cavity_mask_host, Rect2(Vector2.ZERO, _anchor_rect.size))
+	if _scroll_view and _cavity_mask_host:
+		## Map canvas rim / rise into mask-host-local coordinates (Y only).
+		var local_x := scroll_left - _anchor_rect.position.x
+		var local_y := scroll_top - _anchor_rect.position.y
 		_place_rect(_scroll_view, Rect2(local_x, local_y, sw, sh))
 		## Keep orientation locked — never rotate/tilt while rising.
 		_scroll_view.rotation = 0.0
 		_scroll_view.scale = Vector2.ONE
-		## Authored colors only — pale wash made the tiny tube read as a slab.
 		_scroll_view.modulate = Color(1, 1, 1, 1)
+		if _scroll_mask_mat != null:
+			## Shader mask uses chest-canvas pixel rect of the scroll.
+			var canvas_x := (local_x / maxf(draw_w, 1.0)) * FRAME_CANVAS.x
+			var canvas_y := (local_y / maxf(draw_h, 1.0)) * FRAME_CANVAS.y
+			var canvas_w := (sw / maxf(draw_w, 1.0)) * FRAME_CANVAS.x
+			var canvas_h := (sh / maxf(draw_h, 1.0)) * FRAME_CANVAS.y
+			_scroll_mask_mat.set_shader_parameter(
+				"scroll_canvas_rect",
+				Vector4(canvas_x, canvas_y, canvas_w, canvas_h)
+			)
+			_scroll_mask_mat.set_shader_parameter("mask_tex", _cavity_mask_tex)
 	if _rim_view:
-		## Rim stays planted with the chest — gold lip sits over lower scroll.
-		## Draw order: beach → open-back → glow → horizontal scroll → front rim → UI.
+		## Rim stays planted with the chest — gold lip + pillars occlude lower/side scroll.
+		## Draw order: beach → open-back → scroll → front rim → glow → UI.
 		## Identical plant/size/scale as open-back (_frame_view uses same _anchor_rect).
 		_place_rect(_rim_view, _anchor_rect)
 

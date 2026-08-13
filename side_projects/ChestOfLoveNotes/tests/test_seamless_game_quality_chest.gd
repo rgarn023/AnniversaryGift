@@ -1,5 +1,5 @@
 extends SceneTree
-## v53: scroll layer compositing + continuous sky gradient on frozen animation_v2.
+## v54: scroll cavity compositing + local-time sky fix on frozen animation_v2.
 
 var _passed: int = 0
 var _failed: int = 0
@@ -19,7 +19,7 @@ func _assert(cond: bool, label: String) -> void:
 
 
 func _run() -> void:
-	print("=== Chest scroll layer / sky polish (v53) ===")
+	print("=== Chest scroll cavity / local-time fix (v54) ===")
 	var chest := FileAccess.get_file_as_string("res://scripts/chest/treasure_chest.gd")
 	var env_script := FileAccess.get_file_as_string("res://scripts/chest/chest_environment.gd")
 	var main := FileAccess.get_file_as_string("res://scripts/main.gd")
@@ -43,7 +43,7 @@ func _run() -> void:
 	_assert(chest.contains("love_scroll.png"), "original vertical scroll preserved in source const")
 	_assert(chest.contains("new_love_scroll_master.png"), "master source referenced")
 	_assert(chest.contains("SCROLL_NATIVE := Vector2(720, 305)"), "romantic scroll native size")
-	_assert(chest.contains("SCROLL_OPENING_WIDTH_FRAC := 0.70"), "scroll ~70% opening width")
+	_assert(chest.contains("SCROLL_OPENING_WIDTH_FRAC := 0.92"), "scroll ~92% cavity width")
 	_assert(chest.contains("CONTACT_SHADOW"), "contact shadow grounding")
 	_assert(chest.contains("WARM_SPILL"), "warm spill separate from shadow")
 	_assert(chest.contains("OPEN_DURATION_SEC := 1.0"), "open duration ~1.0s")
@@ -144,9 +144,18 @@ func _run() -> void:
 	_assert(env_script.contains("\"night\"") and env_script.contains("\"dawn\"") and env_script.contains("\"day\"") and env_script.contains("\"sunset\""), "four TOD phases")
 	_assert(not env_script.contains("BillingClient") and not env_script.contains("in_app_purchase"), "no store implementation")
 	_assert(not env_script.contains("get_location") and not env_script.contains("LocationHelper"), "no location API for sky")
-	_assert(chest.contains("CAVITY_RIM_CANVAS_Y := 274.0"), "rim Y matches re-derived lip top")
+	_assert(chest.contains("CAVITY_RIM_CANVAS_Y := 269.0"), "rim Y matches re-derived lip top")
+	_assert(chest.contains("CAVITY_CENTER_CANVAS_X := 219.0"), "scroll centered on 3/4 cavity")
+	_assert(chest.contains("chest_cavity_mask.png") or chest.contains("CAVITY_MASK"), "cavity mask wired")
+	_assert(chest.contains("CavityMaskHost"), "cavity mask host node")
+	_assert(chest.contains("cavity_scroll_mask.gdshader") or chest.contains("CLIP_CHILDREN_ONLY"), "cavity occlusion method")
 	_assert(chest.contains("GLOW_EMERGE_A := 0.0010") or chest.contains("GLOW_EMERGE_A := 0.001"), "reduced emerge glow")
-	_assert(chest.contains("z_index = 5") and chest.contains("ScrollCavityClip"), "scroll z above glow/back")
+	_assert(chest.contains("z_index = 5") and chest.contains("ScrollCavityClip"), "scroll z above back")
+	_assert(env_script.contains("local_timezone_bias_minutes"), "timezone bias helper")
+	_assert(env_script.contains("unix + bias_min * 60") or env_script.contains("bias_min * 60"), "local via bias path")
+	_assert(env_script.contains("NOTIFICATION_APPLICATION_RESUMED") or env_script.contains("APPLICATION_FOCUS_IN"), "resume time refresh")
+	_assert(env_script.contains("_glint_fade_in") or env_script.contains("_glint_alpha_at"), "independent glint cycles")
+	_assert(env_script.contains("TOD_REFRESH_SEC"), "periodic TOD refresh constant")
 
 	for i in range(13):
 		var fname := ""
@@ -168,6 +177,14 @@ func _run() -> void:
 	_assert(
 		FileAccess.file_exists("res://assets/chest/animation_v2/layers/chest_open_front_rim.png"),
 		"front-rim layer asset"
+	)
+	_assert(
+		FileAccess.file_exists("res://assets/chest/animation_v2/layers/chest_cavity_mask.png"),
+		"cavity mask asset"
+	)
+	_assert(
+		FileAccess.file_exists("res://assets/shaders/cavity_scroll_mask.gdshader"),
+		"cavity scroll mask shader"
 	)
 	_assert(
 		FileAccess.file_exists("res://assets/chest/animation_v2/scroll/love_scroll.png"),
@@ -193,12 +210,12 @@ func _run() -> void:
 		"default beach environment art"
 	)
 
-	_assert(flags.contains("APP_VERSION_CODE := 53"), "versionCode 53")
-	_assert(preset.contains("version/code=53"), "export 53")
-	_assert(preset.contains("0.1.53-scroll-layer-sky-polish"), "version name")
-	_assert(preset.contains("v53-scroll-layer-sky-polish-debug.apk"), "APK name")
+	_assert(flags.contains("APP_VERSION_CODE := 54"), "versionCode 54")
+	_assert(preset.contains("version/code=54"), "export 54")
+	_assert(preset.contains("0.1.54-scroll-cavity-time-fix"), "version name")
+	_assert(preset.contains("v54-scroll-cavity-time-fix-debug.apk"), "APK name")
 	_assert(gitignore.contains("*.apk"), "apks ignored by default")
-	_assert(export_sh.contains("v53-scroll-layer-sky-polish-debug.apk"), "export default")
+	_assert(export_sh.contains("v54-scroll-cavity-time-fix-debug.apk"), "export default")
 	_assert(
 		FileAccess.file_exists("res://assets/art/background/environments/ocean_glisten.png"),
 		"ocean glisten texture asset"
@@ -256,19 +273,23 @@ func _run() -> void:
 		_assert(g.get_parent() == env._water_clip, "glint parented under water clip")
 		_assert(g.position.y >= -1.0, "glint inside water clip top")
 		_assert(g.position.y + g.size.y <= env._water_clip.size.y + 1.0, "glint inside water clip bottom")
-	## Layer order: open-back < glow < scroll < front rim
-	_assert(node._glow_pulse.z_index > node._frame_view.z_index, "glow above open-back")
-	_assert(node._scroll_clip.z_index > node._glow_pulse.z_index, "scroll above glow")
+	## Layer order: open-back < scroll < front rim < glow
+	_assert(node._scroll_clip.z_index > node._frame_view.z_index, "scroll above open-back")
 	_assert(node._rim_view.z_index > node._scroll_clip.z_index, "rim above scroll")
-	_assert(absf(LoveNotesChest.CAVITY_RIM_CANVAS_Y - 274.0) < 0.01, "cavity rim at lip top")
+	_assert(node._glow_pulse.z_index > node._rim_view.z_index, "glow above rim")
+	_assert(node._cavity_mask_host != null, "cavity mask host present")
+	_assert(absf(LoveNotesChest.CAVITY_RIM_CANVAS_Y - 269.0) < 0.01, "cavity rim at lip top")
+	_assert(absf(LoveNotesChest.CAVITY_CENTER_CANVAS_X - 219.0) < 0.01, "cavity center x")
 
 	## Dynamic sky interpolation (device-local clock; mock hours for validation only).
 	var prev_override := ChestEnvironment.debug_hour_override
 	for hour_case in [
-		{"h": 0.0, "phase": "night", "stars_min": 0.6},
+		{"h": 4.0, "phase": "night", "stars_min": 0.45},
 		{"h": 6.5, "phase": "dawn", "stars_max": 0.35},
-		{"h": 12.0, "phase": "day", "stars_max": 0.01},
+		{"h": 10.0, "phase": "day", "stars_max": 0.01, "stars_hidden": true},
+		{"h": 12.0, "phase": "day", "stars_max": 0.01, "stars_hidden": true},
 		{"h": 18.5, "phase": "sunset", "stars_min": 0.1},
+		{"h": 21.0, "phase": "night", "stars_min": 0.6},
 	]:
 		ChestEnvironment.debug_hour_override = float(hour_case["h"])
 		var pal := ChestEnvironment.tod_palette_at(float(hour_case["h"]))
@@ -279,13 +300,25 @@ func _run() -> void:
 			_assert(float(pal["star_a"]) >= float(hour_case["stars_min"]), "stars visible @%.1f" % float(hour_case["h"]))
 		if hour_case.has("stars_max"):
 			_assert(float(pal["star_a"]) <= float(hour_case["stars_max"]), "stars faded @%.1f" % float(hour_case["h"]))
+		if hour_case.get("stars_hidden", false):
+			_assert(env._stars.visible == false or env._stars.modulate.a <= 0.01, "stars hidden @%.1f" % float(hour_case["h"]))
 		_assert(env._ocean_tint.color.a > 0.05, "ocean tint active @%.1f" % float(hour_case["h"]))
+	## 10:00 must clearly be DAY with a strong sky wash (covers baked dusk beach).
+	var day_pal := ChestEnvironment.tod_palette_at(10.0)
+	_assert(str(day_pal["phase"]) == "day", "10:00 is DAY")
+	_assert(float(day_pal["star_a"]) <= 0.001, "10:00 stars fully hidden")
+	_assert((day_pal["sky_top"] as Color).a >= 0.55, "10:00 sky wash strong enough for day")
 	## Smooth mid-phase blend (06:30 should sit between dawn keyframes).
 	var dawn_mid := ChestEnvironment.tod_palette_at(6.5)
 	var dawn_start := ChestEnvironment.tod_palette_at(5.0)
 	var dawn_end := ChestEnvironment.tod_palette_at(8.0)
 	_assert(float(dawn_mid["star_a"]) < float(dawn_start["star_a"]), "dawn mid stars below night-edge")
 	_assert(float(dawn_mid["star_a"]) > float(dawn_end["star_a"]), "dawn mid stars above day")
+	## System local-time path (no override) returns a sane hour.
+	ChestEnvironment.debug_hour_override = -1.0
+	var sys_h := ChestEnvironment.local_hour_frac()
+	_assert(sys_h >= 0.0 and sys_h < 24.0, "system local hour in [0,24)")
+	_assert(ChestEnvironment.local_timezone_bias_minutes() == int(Time.get_time_zone_from_system().get("bias", 0)), "bias matches Time API")
 	ChestEnvironment.debug_hour_override = prev_override
 	env._apply_time_of_day(true)
 
@@ -300,15 +333,20 @@ func _run() -> void:
 	_assert(absf(foot_y - node.size.y * LoveNotesChest.CHEST_FOOT_Y_FRAC) < 3.0, "foot on ground frac")
 	_assert(node._shadow_view.size.x <= node._anchor_rect.size.x * 0.40, "shadow tight under feet")
 
-	## Horizontal scroll geometry at final pose.
+	## Horizontal scroll geometry at final pose — centered on cavity, not canvas.
 	node._enter_layered_open()
 	node._set_scroll_rise_amount(1.0)
 	await process_frame
 	var scroll_w := node._scroll_view.size.x
 	var scroll_h := node._scroll_view.size.y
-	var opening_w := node._anchor_rect.size.x * 0.47
+	var cavity_w_frac := (LoveNotesChest.CAVITY_INNER_RIGHT_X - LoveNotesChest.CAVITY_INNER_LEFT_X) / LoveNotesChest.FRAME_CANVAS.x
+	var opening_w := node._anchor_rect.size.x * cavity_w_frac
 	var width_frac := scroll_w / maxf(opening_w, 1.0)
-	_assert(width_frac >= 0.62 and width_frac <= 0.82, "scroll width ~65-75%% of opening (got %.2f)" % width_frac)
+	_assert(width_frac >= 0.85 and width_frac <= 0.98, "scroll width ~90-95%% of cavity opening (got %.2f)" % width_frac)
+	var cavity_cx := node._anchor_rect.position.x + (LoveNotesChest.CAVITY_CENTER_CANVAS_X / LoveNotesChest.FRAME_CANVAS.x) * node._anchor_rect.size.x
+	var scroll_cx := node._anchor_rect.position.x + node._scroll_view.position.x + scroll_w * 0.5
+	_assert(absf(scroll_cx - cavity_cx) < 3.0, "scroll centered on cavity (not canvas mid)")
+	_assert(absf(cavity_cx - (node._anchor_rect.position.x + node._anchor_rect.size.x * 0.5)) > 5.0, "cavity center left-biased vs canvas")
 	_assert(node._scroll_view.size.x > node._scroll_view.size.y, "scroll is horizontal (w>h)")
 	_assert(is_zero_approx(node._scroll_view.rotation), "scroll rotation stays 0")
 	var native_aspect := LoveNotesChest.SCROLL_NATIVE.x / LoveNotesChest.SCROLL_NATIVE.y
