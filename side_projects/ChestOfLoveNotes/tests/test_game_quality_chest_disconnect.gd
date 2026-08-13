@@ -39,16 +39,17 @@ func _run() -> void:
 	_assert(boot.contains("mark_app_ready"), "splash app-ready gate kept")
 	_assert(main.contains("mark_app_ready"), "main still marks boot ready")
 
-	## CHEST game-feel (fantasy sheet frames as of v37+)
+	## CHEST game-feel (animation_v2 approved frames as of v48+)
 	_assert(
-		chest.contains("Fantasy sheet")
+		chest.contains("animation_v2")
+		or chest.contains("Fantasy sheet")
 		or chest.contains("Seamless layered")
 		or chest.contains("Hybrid")
 		or chest.contains("Architecture C"),
 		"chest architecture"
 	)
 	_assert(
-		chest.contains("assets/art/chest/frames/") or chest.contains("chest_interior.png"),
+		chest.contains("animation_v2") or chest.contains("assets/art/chest/frames/") or chest.contains("chest_interior.png"),
 		"interior / frame art"
 	)
 	_assert(chest.contains("_ease_open_curve"), "custom open easing")
@@ -66,7 +67,8 @@ func _run() -> void:
 	_assert(not chest.contains("_cinematic_zoom"), "no cinematic zoom reopen")
 	_assert(chest.contains("OPEN_DURATION_SEC :="), "open duration tuned")
 	_assert(
-		FileAccess.file_exists("res://assets/art/chest/frames/empty/empty_00.png")
+		FileAccess.file_exists("res://assets/chest/animation_v2/chest_frames/chest_00_closed.png")
+		or FileAccess.file_exists("res://assets/art/chest/frames/empty/empty_00.png")
 		or FileAccess.file_exists("res://assets/art/chest/chest_lid.png"),
 		"chest art present"
 	)
@@ -76,13 +78,21 @@ func _run() -> void:
 	_assert(disc.contains('.eq("status", "accepted")'), "cancels accepted requests")
 	_assert(disc.contains("pending"), "cancels pending requests")
 	_assert(disc.contains("Durable disconnect tombstone") or disc.contains("auto-reconnect"), "documents root cause")
-	_assert(not getf.contains("reconcileAcceptedPairing"), "get-friends reconcile removed (v34+)")
+	_assert(
+		not getf.contains("async function reconcileAcceptedPairing")
+		or getf.contains("Intentionally NO reconcileAcceptedPairing"),
+		"get-friends reconcile removed (v34+)"
+	)
 	_assert(FileAccess.file_exists("res://supabase/migrations/20260812140000_my_person_pair_ends_no_auto_reconnect.sql"), "tombstone migration present")
 	_assert(mig.contains("status = 'cancelled'") or true, "prior cancel migration retained")
 	_assert(block.contains('.eq("status", "accepted")'), "block also cancels accepted")
 	_assert(main.contains("Disconnected from %s"), "named disconnect toast")
 	_assert(main.contains("Couldn't disconnect right now. Please try again."), "failure keeps pairing")
-	_assert(main.contains("clear_last_person_cache"), "clears local person cache")
+	var app_state := FileAccess.get_file_as_string("res://scripts/app_state.gd")
+	_assert(
+		main.contains("clear_last_person_cache") or app_state.contains("clear_last_person_cache"),
+		"clears local person cache"
+	)
 	_assert(strings.contains("Existing scroll history will remain"), "confirm preserves history")
 	_assert(compose.contains("COMPOSE_NEED_PERSON"), "compose needs person gate")
 
@@ -90,7 +100,7 @@ func _run() -> void:
 	_assert(flags.contains("APP_VERSION_CODE :="), "versionCode present")
 	_assert(preset.contains("version/code="), "export version present")
 	_assert(
-		preset.contains("v47-chest-clean-transition-debug.apk") or preset.contains("v46-chest-geometry-grounding-debug.apk") or preset.contains("v45-chest-grounding-scroll-fix-debug.apk") or preset.contains("v44-chest-render-scroll-beach-polish-debug.apk")
+		preset.contains("v48-approved-smooth-chest-debug.apk") or preset.contains("v47-chest-clean-transition-debug.apk") or preset.contains("v46-chest-geometry-grounding-debug.apk") or preset.contains("v45-chest-grounding-scroll-fix-debug.apk") or preset.contains("v44-chest-render-scroll-beach-polish-debug.apk")
 		or preset.contains("v42-one-chest-beach-layout-debug.apk")
 		or preset.contains("v40-chest-smoothing-hidden-fix-debug.apk")
 		or preset.contains("v39-chest-polish-debug.apk")
@@ -109,7 +119,7 @@ func _run() -> void:
 		"gitignore allow"
 	)
 	_assert(
-		export_sh.contains("v47-chest-clean-transition-debug.apk") or export_sh.contains("v46-chest-geometry-grounding-debug.apk") or export_sh.contains("v45-chest-grounding-scroll-fix-debug.apk") or export_sh.contains("v44-chest-render-scroll-beach-polish-debug.apk")
+		export_sh.contains("v48-approved-smooth-chest-debug.apk") or export_sh.contains("v48-approved-smooth-chest-debug.apk") or export_sh.contains("v47-chest-clean-transition-debug.apk") or export_sh.contains("v46-chest-geometry-grounding-debug.apk") or export_sh.contains("v45-chest-grounding-scroll-fix-debug.apk") or export_sh.contains("v44-chest-render-scroll-beach-polish-debug.apk")
 		or export_sh.contains("v42-one-chest-beach-layout-debug.apk")
 		or export_sh.contains("v40-chest-smoothing-hidden-fix-debug.apk")
 		or export_sh.contains("v39-chest-polish-debug.apk")

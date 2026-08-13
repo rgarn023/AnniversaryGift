@@ -40,15 +40,17 @@ func _run() -> void:
 	_assert(FileAccess.file_exists("res://assets/branding/splash_frames_meta.json"), "frame meta packaged")
 	_assert(FileAccess.file_exists("res://assets/branding/splash_still.png"), "still frame packaged")
 
-	## CHEST — fantasy sheet frames (or legacy hinge/plate markers for older contracts)
+	## CHEST — animation_v2 approved frames (or legacy markers for older contracts)
 	_assert(
-		chest.contains("assets/art/chest/frames/")
+		chest.contains("animation_v2")
+		or chest.contains("assets/art/chest/frames/")
 		or chest.contains("HINGE_CANVAS")
 		or chest.contains("FRAME_FILES"),
 		"chest open mechanism present"
 	)
 	_assert(
-		chest.contains("empty_")
+		chest.contains("chest_00_closed")
+		or chest.contains("empty_")
 		or chest.contains("chest_lid.png")
 		or chest.contains("chest_closed.png"),
 		"chest lid/closed art"
@@ -70,7 +72,8 @@ func _run() -> void:
 	_assert(main.contains("play_open_animation(state.reduced_motion, has_new)"), "scroll only when new")
 
 	_assert(
-		FileAccess.file_exists("res://assets/art/chest/frames/empty/empty_00.png")
+		FileAccess.file_exists("res://assets/chest/animation_v2/chest_frames/chest_00_closed.png")
+		or FileAccess.file_exists("res://assets/art/chest/frames/empty/empty_00.png")
 		or FileAccess.file_exists("res://assets/art/chest/chest_lid.png"),
 		"chest production art present"
 	)

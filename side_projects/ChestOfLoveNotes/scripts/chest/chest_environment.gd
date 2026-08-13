@@ -73,10 +73,10 @@ func _build() -> void:
 	_bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(_bg)
 
-	## Soft upper shade for title / filter readability — not an opaque panel.
+	## Soft upper shade for title readability — low alpha so sky has no hard seam.
 	_top_shade = ColorRect.new()
 	_top_shade.name = "TopReadabilityShade"
-	_top_shade.color = Color(0.04, 0.06, 0.12, 0.28)
+	_top_shade.color = Color(0.04, 0.06, 0.12, 0.14)
 	_top_shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_top_shade)
 
@@ -111,8 +111,9 @@ func _layout() -> void:
 	if _bg:
 		_bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	if _top_shade:
+		## Short soft band only — avoid a hard sky color seam near the top.
 		_top_shade.position = Vector2.ZERO
-		_top_shade.size = Vector2(area.x, area.y * 0.18)
+		_top_shade.size = Vector2(area.x, area.y * 0.12)
 	if _horizon_sheen:
 		## Horizon sits ~48% down the authored beach art.
 		_horizon_sheen.position = Vector2(0.0, area.y * 0.48)

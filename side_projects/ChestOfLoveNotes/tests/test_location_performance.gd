@@ -87,7 +87,8 @@ func _test_location_draft_roundtrip() -> void:
 
 func _test_chest_lid_animation() -> void:
 	_assert(
-		FileAccess.file_exists("res://assets/art/chest/frames/empty/empty_00.png")
+		FileAccess.file_exists("res://assets/chest/animation_v2/chest_frames/chest_00_closed.png")
+		or FileAccess.file_exists("res://assets/art/chest/frames/empty/empty_00.png")
 		or FileAccess.file_exists("res://assets/art/chest/chest_closed.png"),
 		"closed art packaged"
 	)
@@ -148,7 +149,7 @@ func _test_version() -> void:
 	_assert(BuildFlags.APP_VERSION_CODE >= 26, "versionCode >= 24")
 	var preset := FileAccess.get_file_as_string("res://export_presets.cfg")
 	_assert(
-		preset.contains("ChestOfLoveNotes-v47-chest-clean-transition-debug.apk") or preset.contains("v46-chest-geometry-grounding-debug.apk") or preset.contains("ChestOfLoveNotes-v45-chest-grounding-scroll-fix-debug.apk") or preset.contains("ChestOfLoveNotes-v44-chest-render-scroll-beach-polish-debug.apk")
+		preset.contains("ChestOfLoveNotes-v48-approved-smooth-chest-debug.apk") or preset.contains("ChestOfLoveNotes-v47-chest-clean-transition-debug.apk") or preset.contains("v46-chest-geometry-grounding-debug.apk") or preset.contains("ChestOfLoveNotes-v45-chest-grounding-scroll-fix-debug.apk") or preset.contains("ChestOfLoveNotes-v44-chest-render-scroll-beach-polish-debug.apk")
 		or preset.contains("ChestOfLoveNotes-v42-one-chest-beach-layout-debug.apk")
 		or preset.contains("ChestOfLoveNotes-v40-chest-smoothing-hidden-fix-debug.apk")
 		or preset.contains("ChestOfLoveNotes-v39-chest-polish-debug.apk")
@@ -157,7 +158,7 @@ func _test_version() -> void:
 		"APK filename"
 	)
 	_assert(
-		preset.contains("version/code=47") or preset.contains("version/code=46") or preset.contains("version/code=45")
+		preset.contains("version/code=48") or preset.contains("version/code=47") or preset.contains("version/code=46") or preset.contains("version/code=45")
 		or preset.contains("version/code=41")
 		or preset.contains("version/code=40")
 		or preset.contains("version/code=39")

@@ -124,14 +124,16 @@ func _test_logical_viewport() -> void:
 
 func _test_chest_frames() -> void:
 	_assert(
-		FileAccess.file_exists("res://assets/art/chest/frames/empty/empty_00.png")
+		FileAccess.file_exists("res://assets/chest/animation_v2/chest_frames/chest_00_closed.png")
+		or FileAccess.file_exists("res://assets/art/chest/frames/empty/empty_00.png")
 		or FileAccess.file_exists("res://assets/art/chest/chest_closed.png"),
 		"chest production art present"
 	)
 	var chest_src := FileAccess.get_file_as_string("res://scripts/chest/treasure_chest.gd")
 	_assert(not chest_src.contains("FRAME_KEYS"), "static pose keyframe table removed")
 	_assert(
-		chest_src.contains("assets/art/chest/frames/")
+		chest_src.contains("animation_v2")
+		or chest_src.contains("assets/art/chest/frames/")
 		or chest_src.contains("FRAME_FILES")
 		or chest_src.contains("chest_closed.png"),
 		"frame sequence wired"
@@ -212,7 +214,7 @@ func _test_build_version() -> void:
 	_assert(BuildFlags.APP_VERSION_CODE >= 26, "versionCode >= 24")
 	var preset := FileAccess.get_file_as_string("res://export_presets.cfg")
 	_assert(
-		preset.contains("ChestOfLoveNotes-v47-chest-clean-transition-debug.apk") or preset.contains("v46-chest-geometry-grounding-debug.apk") or preset.contains("ChestOfLoveNotes-v45-chest-grounding-scroll-fix-debug.apk") or preset.contains("ChestOfLoveNotes-v44-chest-render-scroll-beach-polish-debug.apk")
+		preset.contains("ChestOfLoveNotes-v48-approved-smooth-chest-debug.apk") or preset.contains("ChestOfLoveNotes-v47-chest-clean-transition-debug.apk") or preset.contains("v46-chest-geometry-grounding-debug.apk") or preset.contains("ChestOfLoveNotes-v45-chest-grounding-scroll-fix-debug.apk") or preset.contains("ChestOfLoveNotes-v44-chest-render-scroll-beach-polish-debug.apk")
 		or preset.contains("ChestOfLoveNotes-v40-chest-smoothing-hidden-fix-debug.apk")
 		or preset.contains("ChestOfLoveNotes-v39-chest-polish-debug.apk")
 		or preset.contains("ChestOfLoveNotes-fantasy-sheet-chest-debug.apk")
@@ -220,7 +222,7 @@ func _test_build_version() -> void:
 		or preset.contains("splash-timing-chest-animation-fix-debug.apk"),
 		"export APK name"
 	)
-	_assert(preset.contains("version/code=47") or preset.contains("version/code=46") or preset.contains("version/code=45") or preset.contains("version/code=42") or preset.contains("version/code=41") or preset.contains("version/code=40") or preset.contains("version/code=39") or preset.contains("version/code=37") or preset.contains("version/code=33") or preset.contains("version/code=32"), "export versionCode recent")
+	_assert(preset.contains("version/code=48") or preset.contains("version/code=47") or preset.contains("version/code=46") or preset.contains("version/code=45") or preset.contains("version/code=42") or preset.contains("version/code=41") or preset.contains("version/code=40") or preset.contains("version/code=39") or preset.contains("version/code=37") or preset.contains("version/code=33") or preset.contains("version/code=32"), "export versionCode recent")
 	_assert(BuildFlags.PRIVATE_ONBOARDING_BUILD == true, "private onboarding still enabled")
 	_assert(BuildFlags.SHOW_ONBOARDING_BANNER == false, "onboarding banner hidden in APKs")
 	_assert(FileAccess.file_exists("res://assets/icons/app_icon_1024.png"), "app icon present")
