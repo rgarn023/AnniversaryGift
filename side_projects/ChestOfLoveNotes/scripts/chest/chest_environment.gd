@@ -5,8 +5,8 @@ class_name ChestEnvironment
 ## Chest animation stays a separate layer above this node.
 ## Future cosmetic swaps can change `environment_id` / texture without
 ## rewriting the chest frame animation. No store/IAP in this pass.
-## v54: device-LOCAL wall-clock (timezone bias) + resume refresh; day wash strong
-## enough to cover baked dusk beach art; independent glint fade/drift cycles.
+## v55: device-LOCAL via Time.get_datetime_dict_from_system(); remove top shade
+## band; resume + periodic TOD refresh; day wash covers baked dusk beach art.
 
 const ENV_DEFAULT_BEACH := "default_beach"
 const ENV_DIR := "res://assets/art/background/environments/"
@@ -35,7 +35,6 @@ var _sky_gradient_view: TextureRect
 var _sky_gradient_tex: GradientTexture2D
 var _sky_gradient: Gradient
 var _stars: TextureRect
-var _top_shade: ColorRect
 var _water_clip: Control
 var _ocean_tint: ColorRect
 var _water_glisten: TextureRect
@@ -99,17 +98,38 @@ static func local_hour_frac() -> float:
 	## Do NOT treat UTC hour components as local (Samsung morning→night bug).
 	if debug_hour_override >= 0.0:
 		return fposmod(debug_hour_override, 24.0)
-	## Explicit path used elsewhere in this project (compose_scroll_screen.gd):
-	## unix (UTC epoch) + timezone bias → local wall-clock components.
-	## get_datetime_dict_from_unix_time always returns UTC components, so adding
-	## bias yields local hour/minute/second without calling an external API.
-	var bias_min := local_timezone_bias_minutes()
-	var unix := int(Time.get_unix_time_from_system())
-	var local := Time.get_datetime_dict_from_unix_time(unix + bias_min * 60)
-	return (
+	## Primary: Godot system local datetime (same API as compose_scroll_screen.gd).
+	## get_datetime_dict_from_system() defaults to local wall-clock, not UTC.
+	## Bias-adjusted unix path kept as a consistency cross-check only.
+	var local := Time.get_datetime_dict_from_system()
+	var hour := (
 		float(local.get("hour", 0))
 		+ float(local.get("minute", 0)) / 60.0
 		+ float(local.get("second", 0)) / 3600.0
+	)
+	## If system local is unavailable/empty, fall back to bias-adjusted unix.
+	if local.is_empty() or not local.has("hour"):
+		var bias_min := local_timezone_bias_minutes()
+		var unix := int(Time.get_unix_time_from_system())
+		var via_bias := Time.get_datetime_dict_from_unix_time(unix + bias_min * 60)
+		hour = (
+			float(via_bias.get("hour", 0))
+			+ float(via_bias.get("minute", 0)) / 60.0
+			+ float(via_bias.get("second", 0)) / 3600.0
+		)
+	return fposmod(hour, 24.0)
+
+
+static func local_hour_frac_via_bias() -> float:
+	## Test/helper: unix + timezone bias → local components (UTC dict + bias).
+	var bias_min := local_timezone_bias_minutes()
+	var unix := int(Time.get_unix_time_from_system())
+	var local := Time.get_datetime_dict_from_unix_time(unix + bias_min * 60)
+	return fposmod(
+		float(local.get("hour", 0))
+		+ float(local.get("minute", 0)) / 60.0
+		+ float(local.get("second", 0)) / 3600.0,
+		24.0
 	)
 
 
@@ -356,13 +376,9 @@ func _build() -> void:
 	_stars.modulate = Color(1, 1, 1, 0.0)
 	_sky_clip.add_child(_stars)
 
-	## Soft upper shade for title readability — very low alpha, no hard seam.
-	_top_shade = ColorRect.new()
-	_top_shade.name = "TopReadabilityShade"
-	_top_shade.color = Color(0.04, 0.06, 0.12, 0.10)
-	_top_shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_top_shade.z_index = 1
-	add_child(_top_shade)
+	## v55: removed the old top readability ColorRect (top ~10% dark wash) that
+	## caused the hard horizontal discoloration band on device. Title readability
+	## uses the label outline/shadow only; sky gradient continues to the top edge.
 
 	## Water-only romantic shimmer — clipped so sand/sky/chest stay untouched.
 	_water_clip = Control.new()
@@ -495,10 +511,6 @@ func _layout() -> void:
 		if _stars:
 			_stars.position = Vector2.ZERO
 			_stars.size = Vector2(area.x, sky_h)
-	if _top_shade:
-		## Short soft band only — avoid a hard sky color seam near the top.
-		_top_shade.position = Vector2.ZERO
-		_top_shade.size = Vector2(area.x, area.y * 0.10)
 	if _water_clip and _water_glisten:
 		var water_top := area.y * WATER_TOP_FRAC
 		var water_h := area.y * (WATER_BOTTOM_FRAC - WATER_TOP_FRAC)
@@ -547,13 +559,23 @@ func _apply_time_of_day(force: bool = false) -> void:
 	_last_hour_bucket = bucket
 	var pal := tod_palette_at(hour)
 	if _base_fill:
-		_base_fill.color = pal["base"] as Color
+		## Opaque underfill matches sky-top so status-bar/safe-area edges never
+		## show a mismatched clear-color band above the gradient.
+		var sky_top := pal["sky_top"] as Color
+		var base := pal["base"] as Color
+		_base_fill.color = Color(
+			lerpf(base.r, sky_top.r, 0.55),
+			lerpf(base.g, sky_top.g, 0.55),
+			lerpf(base.b, sky_top.b, 0.55),
+			1.0
+		)
 	if _bg:
 		_bg.modulate = pal["bg_mod"] as Color
 	_apply_sky_gradient(pal)
 	if _stars:
 		var sa := float(pal["star_a"])
 		_stars.modulate = Color(1.0, 1.0, 1.05, sa)
+		## DAY: fully hidden (no moon/starfield). Dawn/sunset interpolate via alpha.
 		_stars.visible = sa > 0.01
 	if _ocean_tint:
 		_ocean_tint.color = pal["ocean"] as Color

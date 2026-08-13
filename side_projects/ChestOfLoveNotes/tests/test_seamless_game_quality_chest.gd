@@ -1,5 +1,5 @@
 extends SceneTree
-## v54: scroll cavity compositing + local-time sky fix on frozen animation_v2.
+## v55: scroll depth (front-lip origin) + top sky band + local-time day fix.
 
 var _passed: int = 0
 var _failed: int = 0
@@ -19,7 +19,7 @@ func _assert(cond: bool, label: String) -> void:
 
 
 func _run() -> void:
-	print("=== Chest scroll cavity / local-time fix (v54) ===")
+	print("=== Chest scroll depth / top sky / local-time fix (v55) ===")
 	var chest := FileAccess.get_file_as_string("res://scripts/chest/treasure_chest.gd")
 	var env_script := FileAccess.get_file_as_string("res://scripts/chest/chest_environment.gd")
 	var main := FileAccess.get_file_as_string("res://scripts/main.gd")
@@ -52,7 +52,7 @@ func _run() -> void:
 	_assert(chest.contains("SCROLL_POST_OPEN_BEAT_SEC := 0.11"), "post-open beat")
 	_assert(chest.contains("REWARD_HOLD_SEC := 0.60"), "reward hold ~0.60s")
 	_assert(chest.contains("SCROLL_FINAL_ABOVE_RIM := 0.90"), "final reveal ~90%")
-	_assert(chest.contains("SCROLL_PEEK_ABOVE_RIM := 0.08"), "first peek ~8%")
+	_assert(chest.contains("SCROLL_PEEK_ABOVE_RIM := 0.07"), "first peek ~7%")
 	_assert(chest.contains("GLOW_EMERGE_A"), "reduced emerge glow")
 	_assert(chest.contains("hard-cut the scroll bottom") or chest.contains("clip_contents hard-cut"), "clipping root-cause documented")
 	_assert(chest.contains("EMPHASIS_SCALE := 1.002"), "tiny settle scale only")
@@ -210,12 +210,17 @@ func _run() -> void:
 		"default beach environment art"
 	)
 
-	_assert(flags.contains("APP_VERSION_CODE := 54"), "versionCode 54")
-	_assert(preset.contains("version/code=54"), "export 54")
-	_assert(preset.contains("0.1.54-scroll-cavity-time-fix"), "version name")
-	_assert(preset.contains("v54-scroll-cavity-time-fix-debug.apk"), "APK name")
+	_assert(flags.contains("APP_VERSION_CODE := 55"), "versionCode 55")
+	_assert(preset.contains("version/code=55"), "export 55")
+	_assert(preset.contains("0.1.55-scroll-depth-top-sky-fix"), "version name")
+	_assert(preset.contains("v55-scroll-depth-top-sky-fix-debug.apk"), "APK name")
 	_assert(gitignore.contains("*.apk"), "apks ignored by default")
-	_assert(export_sh.contains("v54-scroll-cavity-time-fix-debug.apk"), "export default")
+	_assert(export_sh.contains("v55-scroll-depth-top-sky-fix-debug.apk"), "export default")
+	_assert(not env_script.contains("var _top_shade"), "top shade var removed")
+	_assert(not env_script.contains('name = "TopReadabilityShade"'), "top shade node not created")
+	_assert(env_script.contains("get_datetime_dict_from_system"), "local time via system datetime")
+	_assert(env_script.contains("debug_hour_override >= 0.0"), "debug override gated")
+	_assert(preset.contains("statusBarColor") and preset.contains("#00000000"), "transparent status bar")
 	_assert(
 		FileAccess.file_exists("res://assets/art/background/environments/ocean_glisten.png"),
 		"ocean glisten texture asset"
@@ -287,6 +292,7 @@ func _run() -> void:
 		{"h": 4.0, "phase": "night", "stars_min": 0.45},
 		{"h": 6.5, "phase": "dawn", "stars_max": 0.35},
 		{"h": 10.0, "phase": "day", "stars_max": 0.01, "stars_hidden": true},
+		{"h": 11.0, "phase": "day", "stars_max": 0.01, "stars_hidden": true},
 		{"h": 12.0, "phase": "day", "stars_max": 0.01, "stars_hidden": true},
 		{"h": 18.5, "phase": "sunset", "stars_min": 0.1},
 		{"h": 21.0, "phase": "night", "stars_min": 0.6},
@@ -303,24 +309,41 @@ func _run() -> void:
 		if hour_case.get("stars_hidden", false):
 			_assert(env._stars.visible == false or env._stars.modulate.a <= 0.01, "stars hidden @%.1f" % float(hour_case["h"]))
 		_assert(env._ocean_tint.color.a > 0.05, "ocean tint active @%.1f" % float(hour_case["h"]))
-	## 10:00 must clearly be DAY with a strong sky wash (covers baked dusk beach).
-	var day_pal := ChestEnvironment.tod_palette_at(10.0)
-	_assert(str(day_pal["phase"]) == "day", "10:00 is DAY")
-	_assert(float(day_pal["star_a"]) <= 0.001, "10:00 stars fully hidden")
-	_assert((day_pal["sky_top"] as Color).a >= 0.55, "10:00 sky wash strong enough for day")
+	## 11:00 late-morning must clearly be DAY (physical-device review hour).
+	var day_pal := ChestEnvironment.tod_palette_at(11.0)
+	_assert(str(day_pal["phase"]) == "day", "11:00 is DAY")
+	_assert(float(day_pal["star_a"]) <= 0.001, "11:00 stars fully hidden")
+	_assert((day_pal["sky_top"] as Color).a >= 0.55, "11:00 sky wash strong enough for day")
+	ChestEnvironment.debug_hour_override = 11.0
+	env._apply_time_of_day(true)
+	await process_frame
+	_assert(env._stars.visible == false or env._stars.modulate.a <= 0.01, "11:00 stars node hidden")
 	## Smooth mid-phase blend (06:30 should sit between dawn keyframes).
 	var dawn_mid := ChestEnvironment.tod_palette_at(6.5)
 	var dawn_start := ChestEnvironment.tod_palette_at(5.0)
 	var dawn_end := ChestEnvironment.tod_palette_at(8.0)
 	_assert(float(dawn_mid["star_a"]) < float(dawn_start["star_a"]), "dawn mid stars below night-edge")
 	_assert(float(dawn_mid["star_a"]) > float(dawn_end["star_a"]), "dawn mid stars above day")
-	## System local-time path (no override) returns a sane hour.
+	## System local-time path (no override) returns a sane hour; matches bias path within 2 min.
 	ChestEnvironment.debug_hour_override = -1.0
 	var sys_h := ChestEnvironment.local_hour_frac()
+	var bias_h := ChestEnvironment.local_hour_frac_via_bias()
 	_assert(sys_h >= 0.0 and sys_h < 24.0, "system local hour in [0,24)")
 	_assert(ChestEnvironment.local_timezone_bias_minutes() == int(Time.get_time_zone_from_system().get("bias", 0)), "bias matches Time API")
+	var hour_delta := absf(sys_h - bias_h)
+	if hour_delta > 12.0:
+		hour_delta = 24.0 - hour_delta
+	_assert(hour_delta < (2.0 / 60.0), "system local ≈ bias-adjusted unix (<2 min)")
+	var sys_dict := Time.get_datetime_dict_from_system()
+	var utc_dict := Time.get_datetime_dict_from_unix_time(int(Time.get_unix_time_from_system()))
+	## Local must not be forced to UTC components when bias is non-zero.
+	if ChestEnvironment.local_timezone_bias_minutes() != 0:
+		_assert(int(sys_dict.get("hour", -1)) == int(floor(sys_h)), "local_hour uses system local hour field")
 	ChestEnvironment.debug_hour_override = prev_override
 	env._apply_time_of_day(true)
+	## No top shade band node in the live tree.
+	_assert(env.get_node_or_null("TopReadabilityShade") == null, "no TopReadabilityShade node")
+	_assert(env._sky_gradient_view.position.y == 0.0, "sky gradient starts at top edge")
 
 	## Grounding: contact shadow kisses the foot (no hover gap).
 	node._layout_frames()

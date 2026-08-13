@@ -1,13 +1,13 @@
 extends Control
 class_name LoveNotesChest
-## animation_v2 approved 13-frame chest opening (v54 scroll cavity + time fix).
+## animation_v2 approved 13-frame chest opening (v55 scroll depth + top sky fix).
 ## Empty + unread share the same smooth multi-frame open (#00→#12).
 ## No chest crossfade / alpha fade / ghost duplicate — exactly ONE visible chest
 ## frame at any instant. Unread then switches cleanly to open-back + scroll +
 ## front-rim layering for a continuous Y-tweened horizontal scroll rise.
 ## Legacy PATH B / glowing-sheet frames are never used at runtime.
-## v54: cavity-centered scroll + alpha cavity mask + re-derived lip/pillars so
-## the scroll emerges from inside the opening (not from behind the chest).
+## v55: cavity mask alpha matches silhouette (CLIP_CHILDREN_ONLY), continuous
+## front lip occludes lower scroll, first peek sits behind the front rim.
 ## Approved 13 frames / chest plant remain frozen.
 
 signal tapped
@@ -86,11 +86,12 @@ const SCROLL_REVEAL_START_INDEX := 2
 ## Native romantic horizontal scroll art size (love_scroll_reward.png = 720×305).
 const SCROLL_NATIVE := Vector2(720, 305)
 ## Target final width as a fraction of the real cavity opening (inner walls).
-## v54: sized to the 3/4 cavity (not canvas-centered 0.47 band) so the scroll
-## fills the mouth without spilling past the right inner wall.
+## Sized to the 3/4 cavity (not canvas-centered) so the scroll fills the mouth
+## without spilling past the right inner wall.
 const SCROLL_OPENING_WIDTH_FRAC := 0.92
 ## Canvas-space cavity / rim geometry — top of re-derived front lip (y≈269).
-## v54: lip gold + side pillars live in front-rim; cavity mask clips scroll.
+## v55: continuous lip gold + side pillars in front-rim; cavity alpha mask clips
+## scroll to the mouth (first pixels appear directly behind the front lip).
 const CAVITY_RIM_CANVAS_Y := 269.0
 ## 3/4-view opening is left-biased — scroll must center on the cavity, not canvas.
 const CAVITY_CENTER_CANVAS_X := 219.0
@@ -98,8 +99,8 @@ const CAVITY_INNER_LEFT_X := 137.0
 const CAVITY_INNER_RIGHT_X := 301.0
 ## Final reward: ~90% of horizontal-scroll HEIGHT above the front rim (85–90%).
 const SCROLL_FINAL_ABOVE_RIM := 0.90
-## First visible tip — ~8% so emergence starts almost hidden in the cavity.
-const SCROLL_PEEK_ABOVE_RIM := 0.08
+## First visible tip — ~7% so emergence starts inside the cavity behind the lip.
+const SCROLL_PEEK_ABOVE_RIM := 0.07
 ## Soft glow peaks — restrained warm accent; never washes out rim/scroll/wood.
 ## v53: slightly softer central glow during emerge/hold for crisp parchment.
 const GLOW_OPEN_A := 0.012
@@ -367,7 +368,9 @@ func _build_visuals() -> void:
 	_cavity_mask_host.stretch_mode = TextureRect.STRETCH_SCALE
 	_cavity_mask_host.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	_cavity_mask_host.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	## Draw nothing — only clip children to the cavity alpha silhouette.
+	## CLIP_CHILDREN_ONLY uses parent texture ALPHA as the cavity silhouette.
+	## v55 mask writes matching alpha (not full-white), so early scroll pixels
+	## appear only in the mouth directly behind the front lip — not the rear wall.
 	_cavity_mask_host.clip_children = CanvasItem.CLIP_CHILDREN_ONLY
 	_cavity_mask_host.modulate = Color(1, 1, 1, 1)
 	_scroll_clip.add_child(_cavity_mask_host)
@@ -396,7 +399,7 @@ func _build_visuals() -> void:
 	_cavity_mask_host.add_child(_scroll_view)
 
 	## Front-rim occlusion layer derived from approved fully-open frame #12.
-	## v54: mouth gold lip + front face + opening side pillars — ABOVE the scroll.
+	## v55: continuous mouth gold lip + front face + side pillars — ABOVE scroll.
 	_rim_view = TextureRect.new()
 	_rim_view.name = "ChestFrontRim"
 	_rim_view.texture = _rim_layer_tex
