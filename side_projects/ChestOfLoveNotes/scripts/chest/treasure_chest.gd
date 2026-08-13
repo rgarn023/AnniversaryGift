@@ -6,8 +6,9 @@ class_name LoveNotesChest
 ## frame at any instant. Unread then switches cleanly to open-back + scroll +
 ## front-rim layering for a continuous Y-tweened horizontal scroll rise.
 ## Legacy PATH B / glowing-sheet frames are never used at runtime.
-## v57: remove visible CavityMaskHost (gray chest_cavity_mask.png). Compositing
-## is rear/interior → scroll → front rim only — no rectangular cavity mask draw.
+## v57: remove visible CavityMaskHost (gray chest_cavity_mask.png) AND restore
+## opaque open-back cavity wood (v56 had zeroed cavity alpha → hole / gray band).
+## Compositing is rear/interior → scroll → front rim only — no mask draw.
 ## Scroll still starts fully behind the front lip; plant/frames remain frozen.
 
 signal tapped
