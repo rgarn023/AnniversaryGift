@@ -5,7 +5,7 @@ class_name ChestEnvironment
 ## Chest animation stays a separate layer above this node.
 ## Future cosmetic swaps can change `environment_id` / texture without
 ## rewriting the chest frame animation. No store/IAP in this pass.
-## v50: subtle multi-glint water-only ocean shimmer (no new artwork).
+## v51: stronger water-only horizontal glints (beach art otherwise frozen).
 
 const ENV_DEFAULT_BEACH := "default_beach"
 const ENV_DIR := "res://assets/art/background/environments/"
@@ -14,6 +14,8 @@ const OCEAN_GLISTEN := ENV_DIR + "ocean_glisten.png"
 ## Must stay off sky (~above 0.47) and off sand (~below 0.56).
 const WATER_TOP_FRAC := 0.470
 const WATER_BOTTOM_FRAC := 0.560
+## Soft elongated horizontal glints (water-only, staggered).
+const GLINT_COUNT := 4
 
 static var _tex_cache: Dictionary = {}
 static var _preloaded: bool = false
@@ -26,8 +28,14 @@ var _horizon_sheen: ColorRect
 var _water_clip: Control
 var _water_glisten: TextureRect
 var _water_glisten_b: TextureRect
+var _glints: Array[TextureRect] = []
+var _glint_phase: PackedFloat32Array = PackedFloat32Array()
+var _glint_base_x: PackedFloat32Array = PackedFloat32Array()
+var _glint_base_y: PackedFloat32Array = PackedFloat32Array()
+var _glint_w: PackedFloat32Array = PackedFloat32Array()
 var _ready_visuals: bool = false
 var _idle: float = 0.0
+const SOFT_GLINT := "res://assets/art/chest/soft_glow_pulse.png"
 
 
 static func preload_assets() -> void:
@@ -35,6 +43,7 @@ static func preload_assets() -> void:
 		return
 	_load_cached(_path_for(ENV_DEFAULT_BEACH))
 	_load_cached(OCEAN_GLISTEN)
+	_load_cached(SOFT_GLINT)
 	_preloaded = true
 
 
@@ -113,8 +122,8 @@ func _build() -> void:
 	_water_glisten.stretch_mode = TextureRect.STRETCH_SCALE
 	_water_glisten.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	_water_glisten.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	## Soft warm sheen — noticeable but never glitter spam.
-	_water_glisten.modulate = Color(1.0, 0.96, 0.84, 0.48)
+	## Noticeable soft sheen — still tasteful, never glitter spam.
+	_water_glisten.modulate = Color(1.0, 0.97, 0.88, 0.72)
 	_water_clip.add_child(_water_glisten)
 
 	## Second offset glint band — different phase/opacity so shimmer feels alive.
@@ -125,8 +134,40 @@ func _build() -> void:
 	_water_glisten_b.stretch_mode = TextureRect.STRETCH_SCALE
 	_water_glisten_b.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	_water_glisten_b.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_water_glisten_b.modulate = Color(1.0, 0.93, 0.80, 0.30)
+	_water_glisten_b.modulate = Color(1.0, 0.95, 0.84, 0.48)
 	_water_clip.add_child(_water_glisten_b)
+
+	## Discrete soft horizontal streaks — phone-visible "little shimmer".
+	_glints.clear()
+	_glint_phase = PackedFloat32Array()
+	_glint_base_x = PackedFloat32Array()
+	_glint_base_y = PackedFloat32Array()
+	_glint_w = PackedFloat32Array()
+	_glint_phase.resize(GLINT_COUNT)
+	_glint_base_x.resize(GLINT_COUNT)
+	_glint_base_y.resize(GLINT_COUNT)
+	_glint_w.resize(GLINT_COUNT)
+	var widths := [0.20, 0.13, 0.24, 0.16]
+	var x_fracs := [0.10, 0.36, 0.56, 0.76]
+	var y_fracs := [0.20, 0.46, 0.32, 0.60]
+	var phases := [0.0, 1.3, 2.6, 3.9]
+	var soft_tex := _load_cached(SOFT_GLINT)
+	for i in range(GLINT_COUNT):
+		var g := TextureRect.new()
+		g.name = "OceanGlint_%d" % i
+		g.texture = soft_tex
+		g.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		g.stretch_mode = TextureRect.STRETCH_SCALE
+		g.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+		## Soft warm moonlight streak — elongated soft glow; opacity in _process.
+		g.modulate = Color(1.0, 0.96, 0.86, 0.0)
+		g.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_water_clip.add_child(g)
+		_glints.append(g)
+		_glint_phase[i] = phases[i]
+		_glint_base_x[i] = x_fracs[i]
+		_glint_base_y[i] = y_fracs[i]
+		_glint_w[i] = widths[i]
 
 	apply_environment(environment_id)
 
@@ -170,6 +211,15 @@ func _layout() -> void:
 		if _water_glisten_b:
 			_water_glisten_b.size = Vector2(area.x * 1.30, water_h * 0.92)
 			_water_glisten_b.position = Vector2(-area.x * 0.16, water_h * 0.04)
+		## Place discrete soft streaks inside the water clip only.
+		for i in range(_glints.size()):
+			var gw := area.x * _glint_w[i]
+			var gh := maxf(3.0, water_h * 0.16)
+			_glints[i].size = Vector2(gw, gh)
+			_glints[i].position = Vector2(
+				area.x * _glint_base_x[i],
+				water_h * _glint_base_y[i]
+			)
 
 
 func _process(delta: float) -> void:
@@ -182,21 +232,33 @@ func _process(delta: float) -> void:
 		_horizon_sheen.color.a = pulse
 	## Soft water-only shimmer: slow sheen drift + gentle breathe (two phases).
 	if _water_glisten and _water_clip and size.x > 8.0:
-		var breathe_a := 0.36 + 0.16 * sin(_idle * 0.36)
+		var breathe_a := 0.52 + 0.20 * sin(_idle * 0.34)
 		_water_glisten.modulate.a = breathe_a
-		var drift_a := sin(_idle * 0.15) * size.x * 0.045
+		var drift_a := sin(_idle * 0.14) * size.x * 0.040
 		_water_glisten.position.x = -size.x * 0.11 + drift_a
 		if _water_glisten_b:
-			var breathe_b := 0.20 + 0.12 * sin(_idle * 0.27 + 1.7)
+			var breathe_b := 0.32 + 0.16 * sin(_idle * 0.25 + 1.7)
 			_water_glisten_b.modulate.a = breathe_b
-			var drift_b := sin(_idle * 0.19 + 2.4) * size.x * 0.032
+			var drift_b := sin(_idle * 0.18 + 2.4) * size.x * 0.030
 			_water_glisten_b.position.x = -size.x * 0.16 + drift_b
+		## Staggered horizontal glints: slow fade in/out + tiny drift.
+		var water_h := _water_clip.size.y
+		for i in range(_glints.size()):
+			var t := _idle * 0.55 + _glint_phase[i]
+			## Period ~2.2s; soft pulse peaks so 2–4 glints are noticeable over time.
+			var wave := 0.5 + 0.5 * sin(t)
+			var a := lerpf(0.10, 0.55, wave * wave)
+			_glints[i].modulate.a = a
+			var drift := sin(_idle * 0.22 + _glint_phase[i]) * size.x * 0.012
+			_glints[i].position.x = size.x * _glint_base_x[i] + drift
+			_glints[i].position.y = water_h * _glint_base_y[i]
 
 
 ## Sand contact / ground plane as a fraction of this control's height.
 ## Main chest host aligns LoveNotesChest foot to this constant (CHEST_GROUND_Y).
-## v49/v50: keep plant; grounding polish is via tighter contact shadow only.
-const CHEST_GROUND_Y := 0.828
+## v51: entire assembly nudged slightly down so feet kiss the sand (no bury).
+## Delta from v50 0.828 → +0.024 of viewport height (~20px @844).
+const CHEST_GROUND_Y := 0.852
 
 
 func sand_contact_y_frac() -> float:
