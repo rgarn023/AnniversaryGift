@@ -1,0 +1,213 @@
+{
+  "package": "animation_v3",
+  "pass": "step1_preparation_audit_scaffolding_only",
+  "status": "awaiting reveal artwork",
+  "integration_allowed": false,
+  "godot_integration": false,
+  "runtime_behavior_changed": false,
+  "apk_built": false,
+  "version_incremented": false,
+  "created_utc": "2026-08-13",
+  "branch": "cursor/mobile-production-polish-caa0",
+  "purpose": "Prepare project for a future baked scroll-reveal sequence that keeps the approved chest_12 fully-open pixels immutable while only scroll position changes.",
+  "approved_chest_opening": {
+    "package": "animation_v2",
+    "locked": true,
+    "frames_dir": "assets/chest/animation_v2/chest_frames/",
+    "frame_count": 13,
+    "files": [
+      "chest_00_closed.png",
+      "chest_01_open_08.png",
+      "chest_02_open_17.png",
+      "chest_03_open_25.png",
+      "chest_04_open_33.png",
+      "chest_05_open_42.png",
+      "chest_06_open_50.png",
+      "chest_07_open_58.png",
+      "chest_08_open_67.png",
+      "chest_09_open_75.png",
+      "chest_10_open_83.png",
+      "chest_11_open_92.png",
+      "chest_12_fully_open.png"
+    ],
+    "dimensions_all": [512, 512],
+    "color": "RGBA 8-bit",
+    "do_not_modify": true,
+    "do_not_regenerate": true
+  },
+  "approved_source_chest_frame": {
+    "path": "assets/chest/animation_v2/chest_frames/chest_12_fully_open.png",
+    "role": "immutable base for EVERY future baked scroll-reveal frame",
+    "dimensions": [512, 512],
+    "color": "RGBA 8-bit",
+    "alpha": true,
+    "visible_bbox_xyxy_measured": [117, 144, 442, 428],
+    "visual_center_bbox_midpoint": [279.5, 286.0],
+    "base_anchor": [256.0, 420.0],
+    "planted_base_y_authored": 420,
+    "safe_as_immutable_base": true
+  },
+  "source_scroll_asset": {
+    "runtime_path": "assets/chest/animation_v2/scroll/love_scroll_reward.png",
+    "dimensions": [720, 305],
+    "orientation": "horizontal",
+    "legacy_vertical_path": "assets/chest/animation_v2/scroll/love_scroll.png",
+    "legacy_horizontal_path": "assets/chest/animation_v2/scroll/love_scroll_horizontal.png",
+    "master_source_path": "assets/chest/animation_v2/incoming_new_art/new_love_scroll_master.png"
+  },
+  "production_canvas": {
+    "width": 512,
+    "height": 512
+  },
+  "base_anchor": {
+    "x": 256.0,
+    "y": 420.0
+  },
+  "runtime_chest_placement": {
+    "script": "scripts/chest/treasure_chest.gd",
+    "class_name": "LoveNotesChest",
+    "scene_template": "scenes/chest/Chest.tscn",
+    "runtime_node_path": "Main/_screen_host/ChestStage/LoveNotesChest (dynamically created in main.gd _show_main_chest)",
+    "host_size": [252, 326],
+    "fit_scale": 0.4921875,
+    "draw_size_approx": [252, 252],
+    "foot_y_frac": 0.8203125,
+    "ground_y_frac": 0.888,
+    "ground_constant": "ChestEnvironment.CHEST_GROUND_Y",
+    "anchors": {
+      "left": 0.5,
+      "right": 0.5,
+      "top": 0.888,
+      "bottom": 0.888
+    },
+    "offsets": {
+      "left": -126,
+      "right": 126,
+      "top": "-(chest_h * foot_y_frac)",
+      "bottom": "(chest_h * (1 - foot_y_frac))"
+    },
+    "pivot": "ChestAnimationRoot.pivot_offset = host_size * 0.5",
+    "z_index_host": 5,
+    "do_not_change_in_step1": true
+  },
+  "future_reveal_frames": {
+    "dir": "assets/chest/animation_v3/scroll_reveal/",
+    "exist_yet": false,
+    "ordered": [
+      {
+        "file": "reveal_00_hidden.png",
+        "reveal_pct_approx": 0,
+        "notes": "fully-open chest; scroll completely hidden; pixel-identical to chest_12"
+      },
+      {
+        "file": "reveal_01_peek.png",
+        "reveal_pct_approx": 5,
+        "notes": "approximately 5% of scroll height visible"
+      },
+      {
+        "file": "reveal_02_15.png",
+        "reveal_pct_approx": 15,
+        "notes": "approximately 15% visible"
+      },
+      {
+        "file": "reveal_03_30.png",
+        "reveal_pct_approx": 30,
+        "notes": "approximately 30% visible"
+      },
+      {
+        "file": "reveal_04_50.png",
+        "reveal_pct_approx": 50,
+        "notes": "approximately 50% visible"
+      },
+      {
+        "file": "reveal_05_70.png",
+        "reveal_pct_approx": 70,
+        "notes": "approximately 70% visible"
+      },
+      {
+        "file": "reveal_06_85.png",
+        "reveal_pct_approx": 85,
+        "notes": "approximately 85% visible"
+      },
+      {
+        "file": "reveal_07_final.png",
+        "reveal_pct_approx": 87.5,
+        "notes": "final clean horizontal presentation; approximately 85–90% visible"
+      }
+    ]
+  },
+  "timing_recommendation_not_implemented": {
+    "scroll_reveal_duration_sec": [0.45, 0.65],
+    "final_hold_sec": [0.55, 0.65],
+    "frame_count": 8
+  },
+  "future_runtime_flow_normal_scroll_reward": [
+    "chest_00_closed",
+    "chest_01_open_08",
+    "chest_02_open_17",
+    "chest_03_open_25",
+    "chest_04_open_33",
+    "chest_05_open_42",
+    "chest_06_open_50",
+    "chest_07_open_58",
+    "chest_08_open_67",
+    "chest_09_open_75",
+    "chest_10_open_83",
+    "chest_11_open_92",
+    "chest_12_fully_open",
+    "reveal_00_hidden",
+    "reveal_01_peek",
+    "reveal_02_15",
+    "reveal_03_30",
+    "reveal_04_50",
+    "reveal_05_70",
+    "reveal_06_85",
+    "reveal_07_final",
+    "hold",
+    "existing_note_transition"
+  ],
+  "hard_art_rules": [
+    "Every reveal frame uses exact chest_12_fully_open.png as base",
+    "Chest pixels pixel-identical in every reveal frame",
+    "Chest position never changes",
+    "Chest geometry never changes",
+    "Chest lighting never changes except optional separate effect layer later",
+    "Scroll remains horizontal",
+    "Scroll artwork remains existing approved love scroll",
+    "Only scroll position/reveal changes",
+    "No cavity masks baked into the frame",
+    "No gray rectangles",
+    "No reconstructed chest back/front system",
+    "No runtime open_back/front_rim compositing for normal scroll rewards once integrated",
+    "No chest repainting",
+    "No AI-generated alternate chest",
+    "No perspective changes"
+  ],
+  "current_broken_runtime_scroll_reveal": {
+    "primary_script": "scripts/chest/treasure_chest.gd",
+    "caller": "scripts/main.gd::_on_chest_tapped",
+    "approach": "After chest_12, swap ChestFrame to open_back, show ScrollLayer + ChestFrontRim, Y-tween scroll rise",
+    "assets_used": [
+      "assets/chest/animation_v2/layers/chest_open_back.png",
+      "assets/chest/animation_v2/layers/chest_open_front_rim.png",
+      "assets/chest/animation_v2/scroll/love_scroll_reward.png"
+    ],
+    "assets_on_disk_not_drawn_at_runtime": [
+      "assets/chest/animation_v2/layers/chest_cavity_mask.png"
+    ],
+    "to_be_replaced_in_step3_for_normal_scroll_only": true,
+    "do_not_delete_in_step1": true
+  },
+  "folders": {
+    "scroll_reveal": "assets/chest/animation_v3/scroll_reveal/",
+    "source": "assets/chest/animation_v3/source/",
+    "validation": "assets/chest/animation_v3/validation/",
+    "notes": "assets/chest/animation_v3/notes/"
+  },
+  "documents": {
+    "spec": "assets/chest/animation_v3/SCROLL_REVEAL_SPEC.md",
+    "integration_plan": "assets/chest/animation_v3/notes/INTEGRATION_PLAN.md",
+    "runtime_audit": "assets/chest/animation_v3/notes/STEP1_RUNTIME_AUDIT.md"
+  },
+  "ready_for_step2_create_baked_scroll_reveal_artwork": true
+}
