@@ -436,7 +436,11 @@ def _alpha_over(dst: np.ndarray, src: np.ndarray) -> np.ndarray:
 
 
 def extract_front_rim(open_placed: np.ndarray) -> np.ndarray:
-	"""Foreground rim/front structure for scroll occlusion."""
+	"""Foreground rim/front structure for scroll occlusion.
+
+	v53: expand gold-lip capture upward (rim_y-12) so mouth gold cannot remain
+	in open-back (that made the scroll look like it rose from behind the chest).
+	"""
 	a = open_placed[:, :, 3]
 	ys, xs = np.where(a > 40)
 	if len(ys) == 0:
@@ -453,29 +457,38 @@ def extract_front_rim(open_placed: np.ndarray) -> np.ndarray:
 	lum = (r + g + b) / 3.0
 	gold_lip = (
 		(a > 70)
-		& (yy >= rim_y - 3)
-		& (yy <= rim_y + 18)
-		& (np.abs(xx - cx) < 120)
-		& (r > 110)
-		& (g > 75)
-		& ((r - b) > 25)
-		& (lum < 225)
-		& (lum > 50)
+		& (yy >= rim_y - 12)
+		& (yy <= rim_y + 22)
+		& (np.abs(xx - cx) < 128)
+		& (r > 100)
+		& (g > 65)
+		& ((r - b) > 20)
+		& (lum < 235)
+		& (lum > 40)
 	)
 	front_face = (
 		(a > 70)
-		& (yy >= rim_y + 8)
+		& (yy >= rim_y + 4)
 		& (yy <= chest_bot)
-		& (np.abs(xx - cx) < 128)
+		& (np.abs(xx - cx) < 135)
 		& (
-			((r > 100) & (g > 70) & ((r - b) > 25) & (lum < 230))
-			| ((lum < 155) & (r > 35) & (r > b) & (g > b * 0.45))
+			((r > 95) & (g > 65) & ((r - b) > 20) & (lum < 235))
+			| ((lum < 160) & (r > 30) & (r > b) & (g > b * 0.4))
 		)
 	)
-	not_glow = ~((lum > 190) & (r > 200) & (g > 140) & (a < 200) & (yy < rim_y + 10))
-	## Exclude lid / heart-lock above the cavity mouth.
-	not_lid = yy >= (rim_y - 4)
-	front_mask = (gold_lip | front_face) & not_glow & not_lid
+	lower_plate = (
+		(a > 70)
+		& (yy >= rim_y + 10)
+		& (yy <= chest_bot)
+		& (np.abs(xx - cx) < 142)
+	)
+	not_glow = ~((lum > 190) & (r > 200) & (g > 140) & (a < 200) & (yy < rim_y + 8))
+	not_cavity_glow = ~(
+		(lum > 205) & (r > 200) & (g > 155) & (yy < rim_y + 4) & (np.abs(xx - cx) < 95)
+	)
+	## Exclude lid above the cavity mouth.
+	not_lid = yy >= (rim_y - 12)
+	front_mask = (gold_lip | front_face | lower_plate) & not_glow & not_lid & not_cavity_glow
 	front = np.zeros_like(open_placed)
 	front[front_mask] = open_placed[front_mask]
 	fa = front[:, :, 3]
@@ -489,8 +502,8 @@ def extract_front_rim(open_placed: np.ndarray) -> np.ndarray:
 		fill_rgb = np.median(sample[:, :3], axis=0).astype(np.uint8)
 		yy = np.arange(front.shape[0])[:, None]
 		xx = np.arange(front.shape[1])[None, :]
-		in_box = (yy >= y0) & (yy <= y1) & (xx >= x0) & (xx <= x1) & (np.abs(xx - cx) < 128)
-		holes = in_box & (front[:, :, 3] <= 40) & (yy >= rim_y - 1)
+		in_box = (yy >= y0) & (yy <= y1) & (xx >= x0) & (xx <= x1) & (np.abs(xx - cx) < 135)
+		holes = in_box & (front[:, :, 3] <= 40) & (yy >= rim_y + 2)
 		dil = _dilate(solid, 2)
 		fill_m = holes & dil
 		front[fill_m, 0] = fill_rgb[0]
@@ -501,11 +514,15 @@ def extract_front_rim(open_placed: np.ndarray) -> np.ndarray:
 
 
 def extract_open_back(open_placed: np.ndarray, front_rim: np.ndarray) -> np.ndarray:
-	"""Open chest minus the front-rim occlusion layer (no duplicate rim overlay)."""
+	"""Open chest minus the front-rim occlusion layer (no duplicate rim overlay).
+
+	v53: also strip leftover mouth-gold / front-wood so scroll cannot sit behind
+	a gold lip that still lived in the back layer.
+	"""
 	back = open_placed.copy()
 	rim_solid = front_rim[:, :, 3] > 40
-	## Soften only the overlapping front-face pixels out of the back layer so
-	## scroll can sit between back and rim. Keep lid + interior + sides.
+	## Remove all front-rim pixels from the back layer.
+	back[rim_solid, 3] = 0
 	ys, xs = np.where(open_placed[:, :, 3] > 40)
 	if len(ys) == 0:
 		return back
@@ -515,9 +532,33 @@ def extract_open_back(open_placed: np.ndarray, front_rim: np.ndarray) -> np.ndar
 	rim_y = int(chest_top + chest_h * 0.50)
 	yy = np.arange(back.shape[0])[:, None]
 	xx = np.arange(back.shape[1])[None, :]
-	## Remove front-face band that the rim layer owns; keep lid above rim_y-8.
-	front_owned = rim_solid & (yy >= rim_y - 2) & (np.abs(xx - cx) < 128)
-	back[front_owned, 3] = 0
+	br = back[:, :, 0].astype(np.float32)
+	bg = back[:, :, 1].astype(np.float32)
+	bb = back[:, :, 2].astype(np.float32)
+	ba = back[:, :, 3]
+	blum = (br + bg + bb) / 3.0
+	gold_leftover = (
+		(ba > 40)
+		& (yy >= rim_y - 14)
+		& (yy <= rim_y + 6)
+		& (np.abs(xx - cx) < 130)
+		& (br > 100)
+		& (bg > 60)
+		& ((br - bb) > 18)
+		& (blum < 240)
+		& (blum > 35)
+		& ~((blum > 210) & (br > 210) & (bg > 170) & (np.abs(xx - cx) < 90))
+	)
+	wood_leftover = (
+		(ba > 40)
+		& (yy >= rim_y - 2)
+		& (yy <= chest_bot)
+		& (np.abs(xx - cx) < 122)
+		& (blum < 175)
+		& (br > 30)
+		& (br > bb)
+	)
+	back[gold_leftover | wood_leftover, 3] = 0
 	return back
 
 

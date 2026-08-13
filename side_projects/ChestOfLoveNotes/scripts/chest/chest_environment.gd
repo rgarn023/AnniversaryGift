@@ -5,7 +5,8 @@ class_name ChestEnvironment
 ## Chest animation stays a separate layer above this node.
 ## Future cosmetic swaps can change `environment_id` / texture without
 ## rewriting the chest frame animation. No store/IAP in this pass.
-## v52: stronger water-only glints + smooth device-local time-of-day coloring.
+## v53: ONE continuous sky GradientTexture2D (no banded ColorRects) + livelier
+## water-only glints; chest ground plane nudged closer to sand.
 
 const ENV_DEFAULT_BEACH := "default_beach"
 const ENV_DIR := "res://assets/art/background/environments/"
@@ -16,7 +17,7 @@ const STARFIELD := "res://assets/art/background/starfield.png"
 const WATER_TOP_FRAC := 0.470
 const WATER_BOTTOM_FRAC := 0.560
 ## Soft elongated horizontal glints (water-only, staggered).
-const GLINT_COUNT := 5
+const GLINT_COUNT := 6
 ## Sky band for stars / wash (above horizon water).
 const SKY_BOTTOM_FRAC := 0.470
 
@@ -30,11 +31,11 @@ var environment_id: String = ENV_DEFAULT_BEACH
 var _base_fill: ColorRect
 var _bg: TextureRect
 var _sky_clip: Control
-var _sky_wash_top: ColorRect
-var _sky_wash_horizon: ColorRect
+var _sky_gradient_view: TextureRect
+var _sky_gradient_tex: GradientTexture2D
+var _sky_gradient: Gradient
 var _stars: TextureRect
 var _top_shade: ColorRect
-var _horizon_sheen: ColorRect
 var _water_clip: Control
 var _ocean_tint: ColorRect
 var _water_glisten: TextureRect
@@ -44,6 +45,8 @@ var _glint_phase: PackedFloat32Array = PackedFloat32Array()
 var _glint_base_x: PackedFloat32Array = PackedFloat32Array()
 var _glint_base_y: PackedFloat32Array = PackedFloat32Array()
 var _glint_w: PackedFloat32Array = PackedFloat32Array()
+var _glint_speed: PackedFloat32Array = PackedFloat32Array()
+var _glint_drift: PackedFloat32Array = PackedFloat32Array()
 var _ready_visuals: bool = false
 var _idle: float = 0.0
 var _tod_refresh: float = 0.0
@@ -89,107 +92,117 @@ static func local_hour_frac() -> float:
 
 static func tod_palette_at(hour: float) -> Dictionary:
 	## Lightweight keyframe interpolation for sky / ocean / stars / shimmer.
+	## Multi-stop sky colors feed ONE continuous GradientTexture2D (no hard bands).
 	var h := fposmod(hour, 24.0)
-	## Palette: base, sky_top, sky_horizon, bg_mod, ocean, horizon, shimmer, star_a
+	## Palette: base, sky stops (top→mid→lower→horizon), bg_mod, ocean, shimmer, star_a
 	var keys := [
 		{ ## 00:00 deep night
 			"base": Color(0.03, 0.04, 0.12, 1.0),
-			"sky_top": Color(0.05, 0.06, 0.18, 0.55),
-			"sky_horizon": Color(0.10, 0.08, 0.22, 0.28),
+			"sky_top": Color(0.04, 0.05, 0.16, 0.72),
+			"sky_mid": Color(0.07, 0.07, 0.22, 0.55),
+			"sky_lower": Color(0.10, 0.08, 0.26, 0.38),
+			"sky_horizon": Color(0.14, 0.10, 0.28, 0.22),
 			"bg_mod": Color(0.72, 0.74, 0.92, 1.0),
 			"ocean": Color(0.20, 0.22, 0.48, 0.34),
-			"horizon": Color(0.45, 0.50, 0.85, 0.06),
 			"shimmer": Color(0.78, 0.88, 1.0, 1.0),
 			"star_a": 0.85,
-			"glisten_a": 0.55,
+			"glisten_a": 0.58,
 		},
 		{ ## 05:00 night → dawn
 			"base": Color(0.05, 0.05, 0.14, 1.0),
-			"sky_top": Color(0.10, 0.08, 0.24, 0.42),
-			"sky_horizon": Color(0.55, 0.32, 0.38, 0.30),
+			"sky_top": Color(0.08, 0.07, 0.22, 0.55),
+			"sky_mid": Color(0.22, 0.14, 0.32, 0.42),
+			"sky_lower": Color(0.48, 0.28, 0.38, 0.36),
+			"sky_horizon": Color(0.72, 0.42, 0.40, 0.28),
 			"bg_mod": Color(0.82, 0.78, 0.90, 1.0),
 			"ocean": Color(0.35, 0.30, 0.48, 0.26),
-			"horizon": Color(0.95, 0.55, 0.48, 0.10),
 			"shimmer": Color(1.0, 0.90, 0.82, 1.0),
 			"star_a": 0.45,
-			"glisten_a": 0.58,
+			"glisten_a": 0.62,
 		},
 		{ ## 06:30 mid dawn
 			"base": Color(0.12, 0.08, 0.16, 1.0),
-			"sky_top": Color(0.22, 0.16, 0.36, 0.28),
-			"sky_horizon": Color(0.98, 0.62, 0.55, 0.34),
+			"sky_top": Color(0.18, 0.14, 0.34, 0.36),
+			"sky_mid": Color(0.42, 0.28, 0.48, 0.32),
+			"sky_lower": Color(0.85, 0.52, 0.50, 0.34),
+			"sky_horizon": Color(0.98, 0.68, 0.52, 0.30),
 			"bg_mod": Color(0.96, 0.90, 0.88, 1.0),
 			"ocean": Color(0.55, 0.42, 0.52, 0.22),
-			"horizon": Color(1.0, 0.68, 0.50, 0.14),
 			"shimmer": Color(1.0, 0.92, 0.82, 1.0),
 			"star_a": 0.12,
-			"glisten_a": 0.62,
+			"glisten_a": 0.66,
 		},
 		{ ## 08:00 day start
 			"base": Color(0.18, 0.28, 0.42, 1.0),
-			"sky_top": Color(0.35, 0.55, 0.85, 0.18),
-			"sky_horizon": Color(0.70, 0.82, 0.95, 0.12),
+			"sky_top": Color(0.28, 0.48, 0.82, 0.22),
+			"sky_mid": Color(0.42, 0.62, 0.90, 0.16),
+			"sky_lower": Color(0.62, 0.78, 0.95, 0.12),
+			"sky_horizon": Color(0.78, 0.88, 0.98, 0.10),
 			"bg_mod": Color(1.05, 1.02, 0.98, 1.0),
 			"ocean": Color(0.25, 0.48, 0.72, 0.14),
-			"horizon": Color(0.95, 0.88, 0.70, 0.07),
 			"shimmer": Color(1.0, 0.98, 0.90, 1.0),
 			"star_a": 0.0,
-			"glisten_a": 0.78,
+			"glisten_a": 0.82,
 		},
 		{ ## 12:00 midday
 			"base": Color(0.22, 0.38, 0.58, 1.0),
-			"sky_top": Color(0.30, 0.55, 0.92, 0.16),
-			"sky_horizon": Color(0.65, 0.82, 1.0, 0.10),
+			"sky_top": Color(0.26, 0.50, 0.90, 0.20),
+			"sky_mid": Color(0.40, 0.64, 0.95, 0.14),
+			"sky_lower": Color(0.58, 0.78, 1.0, 0.10),
+			"sky_horizon": Color(0.72, 0.86, 1.0, 0.08),
 			"bg_mod": Color(1.08, 1.05, 1.00, 1.0),
 			"ocean": Color(0.20, 0.52, 0.78, 0.12),
-			"horizon": Color(0.95, 0.92, 0.78, 0.05),
 			"shimmer": Color(1.0, 0.99, 0.92, 1.0),
 			"star_a": 0.0,
-			"glisten_a": 0.85,
+			"glisten_a": 0.90,
 		},
 		{ ## 17:00 sunset start
 			"base": Color(0.16, 0.12, 0.22, 1.0),
-			"sky_top": Color(0.22, 0.16, 0.38, 0.28),
-			"sky_horizon": Color(0.98, 0.48, 0.32, 0.32),
+			"sky_top": Color(0.18, 0.14, 0.36, 0.36),
+			"sky_mid": Color(0.40, 0.22, 0.42, 0.34),
+			"sky_lower": Color(0.88, 0.42, 0.36, 0.34),
+			"sky_horizon": Color(0.98, 0.55, 0.32, 0.30),
 			"bg_mod": Color(1.02, 0.92, 0.88, 1.0),
 			"ocean": Color(0.48, 0.30, 0.42, 0.22),
-			"horizon": Color(1.0, 0.55, 0.35, 0.16),
 			"shimmer": Color(1.0, 0.82, 0.62, 1.0),
 			"star_a": 0.05,
-			"glisten_a": 0.70,
+			"glisten_a": 0.74,
 		},
 		{ ## 18:30 mid sunset
 			"base": Color(0.10, 0.06, 0.16, 1.0),
-			"sky_top": Color(0.16, 0.08, 0.30, 0.40),
-			"sky_horizon": Color(0.95, 0.35, 0.45, 0.36),
+			"sky_top": Color(0.12, 0.08, 0.28, 0.48),
+			"sky_mid": Color(0.28, 0.12, 0.36, 0.42),
+			"sky_lower": Color(0.82, 0.30, 0.42, 0.38),
+			"sky_horizon": Color(0.95, 0.40, 0.42, 0.32),
 			"bg_mod": Color(0.92, 0.80, 0.88, 1.0),
 			"ocean": Color(0.42, 0.22, 0.48, 0.28),
-			"horizon": Color(1.0, 0.42, 0.48, 0.18),
 			"shimmer": Color(1.0, 0.75, 0.70, 1.0),
 			"star_a": 0.28,
-			"glisten_a": 0.62,
+			"glisten_a": 0.66,
 		},
 		{ ## 20:00 night start
 			"base": Color(0.04, 0.05, 0.14, 1.0),
-			"sky_top": Color(0.06, 0.06, 0.20, 0.52),
-			"sky_horizon": Color(0.18, 0.10, 0.28, 0.30),
+			"sky_top": Color(0.05, 0.05, 0.18, 0.68),
+			"sky_mid": Color(0.08, 0.07, 0.24, 0.52),
+			"sky_lower": Color(0.14, 0.10, 0.28, 0.36),
+			"sky_horizon": Color(0.20, 0.12, 0.30, 0.24),
 			"bg_mod": Color(0.75, 0.76, 0.92, 1.0),
 			"ocean": Color(0.22, 0.22, 0.48, 0.32),
-			"horizon": Color(0.50, 0.42, 0.75, 0.08),
 			"shimmer": Color(0.80, 0.88, 1.0, 1.0),
 			"star_a": 0.70,
-			"glisten_a": 0.55,
+			"glisten_a": 0.58,
 		},
 		{ ## 24:00 = 00:00
 			"base": Color(0.03, 0.04, 0.12, 1.0),
-			"sky_top": Color(0.05, 0.06, 0.18, 0.55),
-			"sky_horizon": Color(0.10, 0.08, 0.22, 0.28),
+			"sky_top": Color(0.04, 0.05, 0.16, 0.72),
+			"sky_mid": Color(0.07, 0.07, 0.22, 0.55),
+			"sky_lower": Color(0.10, 0.08, 0.26, 0.38),
+			"sky_horizon": Color(0.14, 0.10, 0.28, 0.22),
 			"bg_mod": Color(0.72, 0.74, 0.92, 1.0),
 			"ocean": Color(0.20, 0.22, 0.48, 0.34),
-			"horizon": Color(0.45, 0.50, 0.85, 0.06),
 			"shimmer": Color(0.78, 0.88, 1.0, 1.0),
 			"star_a": 0.85,
-			"glisten_a": 0.55,
+			"glisten_a": 0.58,
 		},
 	]
 	var i0 := 0
@@ -200,17 +213,18 @@ static func tod_palette_at(hour: float) -> Dictionary:
 	var h0 := float(TOD_HOURS[i0])
 	var h1 := float(TOD_HOURS[i0 + 1])
 	var t := 0.0 if h1 <= h0 else clampf((h - h0) / (h1 - h0), 0.0, 1.0)
-	## Smoothstep for softer phase blends (no hard jumps).
+	## Smoothstep for softer phase blends (no hard jumps / palette swaps).
 	t = t * t * (3.0 - 2.0 * t)
 	var a: Dictionary = keys[i0]
 	var b: Dictionary = keys[i0 + 1]
 	return {
 		"base": (a["base"] as Color).lerp(b["base"] as Color, t),
 		"sky_top": (a["sky_top"] as Color).lerp(b["sky_top"] as Color, t),
+		"sky_mid": (a["sky_mid"] as Color).lerp(b["sky_mid"] as Color, t),
+		"sky_lower": (a["sky_lower"] as Color).lerp(b["sky_lower"] as Color, t),
 		"sky_horizon": (a["sky_horizon"] as Color).lerp(b["sky_horizon"] as Color, t),
 		"bg_mod": (a["bg_mod"] as Color).lerp(b["bg_mod"] as Color, t),
 		"ocean": (a["ocean"] as Color).lerp(b["ocean"] as Color, t),
-		"horizon": (a["horizon"] as Color).lerp(b["horizon"] as Color, t),
 		"shimmer": (a["shimmer"] as Color).lerp(b["shimmer"] as Color, t),
 		"star_a": lerpf(float(a["star_a"]), float(b["star_a"]), t),
 		"glisten_a": lerpf(float(a["glisten_a"]), float(b["glisten_a"]), t),
@@ -263,7 +277,9 @@ func _build() -> void:
 	_bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(_bg)
 
-	## Sky-only wash + stars (clipped so sand/chest stay untouched).
+	## Sky-only continuous gradient + stars (clipped so sand/chest stay untouched).
+	## v53: ONE GradientTexture2D replaces the prior stacked hard-edged sky
+	## ColorRects that produced visible horizontal color bands.
 	_sky_clip = Control.new()
 	_sky_clip.name = "SkyTimeClip"
 	_sky_clip.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -271,15 +287,30 @@ func _build() -> void:
 	_sky_clip.z_index = 0
 	add_child(_sky_clip)
 
-	_sky_wash_top = ColorRect.new()
-	_sky_wash_top.name = "SkyWashTop"
-	_sky_wash_top.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_sky_clip.add_child(_sky_wash_top)
+	_sky_gradient = Gradient.new()
+	_sky_gradient.offsets = PackedFloat32Array([0.0, 0.32, 0.68, 1.0])
+	_sky_gradient.colors = PackedColorArray([
+		Color(0.05, 0.06, 0.18, 0.55),
+		Color(0.10, 0.10, 0.28, 0.40),
+		Color(0.30, 0.20, 0.40, 0.28),
+		Color(0.50, 0.35, 0.40, 0.18),
+	])
+	_sky_gradient_tex = GradientTexture2D.new()
+	_sky_gradient_tex.gradient = _sky_gradient
+	_sky_gradient_tex.fill = GradientTexture2D.FILL_LINEAR
+	_sky_gradient_tex.fill_from = Vector2(0.5, 0.0)
+	_sky_gradient_tex.fill_to = Vector2(0.5, 1.0)
+	_sky_gradient_tex.width = 4
+	_sky_gradient_tex.height = 256
 
-	_sky_wash_horizon = ColorRect.new()
-	_sky_wash_horizon.name = "SkyWashHorizon"
-	_sky_wash_horizon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_sky_clip.add_child(_sky_wash_horizon)
+	_sky_gradient_view = TextureRect.new()
+	_sky_gradient_view.name = "SkyContinuousGradient"
+	_sky_gradient_view.texture = _sky_gradient_tex
+	_sky_gradient_view.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_sky_gradient_view.stretch_mode = TextureRect.STRETCH_SCALE
+	_sky_gradient_view.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	_sky_gradient_view.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_sky_clip.add_child(_sky_gradient_view)
 
 	_stars = TextureRect.new()
 	_stars.name = "SkyStars"
@@ -291,21 +322,13 @@ func _build() -> void:
 	_stars.modulate = Color(1, 1, 1, 0.0)
 	_sky_clip.add_child(_stars)
 
-	## Soft upper shade for title readability — low alpha so sky has no hard seam.
+	## Soft upper shade for title readability — very low alpha, no hard seam.
 	_top_shade = ColorRect.new()
 	_top_shade.name = "TopReadabilityShade"
-	_top_shade.color = Color(0.04, 0.06, 0.12, 0.14)
+	_top_shade.color = Color(0.04, 0.06, 0.12, 0.10)
 	_top_shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_top_shade.z_index = 1
 	add_child(_top_shade)
-
-	## Very subtle horizon sheen (optional depth; cheap ColorRect).
-	_horizon_sheen = ColorRect.new()
-	_horizon_sheen.name = "HorizonSheen"
-	_horizon_sheen.color = Color(1.0, 0.72, 0.45, 0.05)
-	_horizon_sheen.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_horizon_sheen.z_index = 1
-	add_child(_horizon_sheen)
 
 	## Water-only romantic shimmer — clipped so sand/sky/chest stay untouched.
 	_water_clip = Control.new()
@@ -329,8 +352,8 @@ func _build() -> void:
 	_water_glisten.stretch_mode = TextureRect.STRETCH_SCALE
 	_water_glisten.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	_water_glisten.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	## Clearly visible soft sheen — still tasteful, never glitter spam.
-	_water_glisten.modulate = Color(1.0, 0.97, 0.88, 0.88)
+	## Soft sheen base — discrete glints carry the "alive" motion.
+	_water_glisten.modulate = Color(1.0, 0.97, 0.88, 0.55)
 	_water_clip.add_child(_water_glisten)
 
 	## Second offset glint band — different phase/opacity so shimmer feels alive.
@@ -341,7 +364,7 @@ func _build() -> void:
 	_water_glisten_b.stretch_mode = TextureRect.STRETCH_SCALE
 	_water_glisten_b.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	_water_glisten_b.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_water_glisten_b.modulate = Color(1.0, 0.95, 0.84, 0.62)
+	_water_glisten_b.modulate = Color(1.0, 0.95, 0.84, 0.38)
 	_water_clip.add_child(_water_glisten_b)
 
 	## Discrete soft horizontal streaks — phone-visible "little shimmer".
@@ -350,14 +373,20 @@ func _build() -> void:
 	_glint_base_x = PackedFloat32Array()
 	_glint_base_y = PackedFloat32Array()
 	_glint_w = PackedFloat32Array()
+	_glint_speed = PackedFloat32Array()
+	_glint_drift = PackedFloat32Array()
 	_glint_phase.resize(GLINT_COUNT)
 	_glint_base_x.resize(GLINT_COUNT)
 	_glint_base_y.resize(GLINT_COUNT)
 	_glint_w.resize(GLINT_COUNT)
-	var widths := [0.22, 0.14, 0.26, 0.17, 0.20]
-	var x_fracs := [0.08, 0.30, 0.48, 0.66, 0.82]
-	var y_fracs := [0.18, 0.42, 0.28, 0.55, 0.38]
-	var phases := [0.0, 1.1, 2.3, 3.4, 4.6]
+	_glint_speed.resize(GLINT_COUNT)
+	_glint_drift.resize(GLINT_COUNT)
+	var widths := [0.24, 0.14, 0.28, 0.16, 0.22, 0.18]
+	var x_fracs := [0.06, 0.26, 0.44, 0.62, 0.78, 0.90]
+	var y_fracs := [0.16, 0.40, 0.26, 0.52, 0.34, 0.60]
+	var phases := [0.0, 1.15, 2.40, 3.55, 4.80, 5.90]
+	var speeds := [0.38, 0.52, 0.44, 0.60, 0.34, 0.48]
+	var drifts := [0.018, 0.012, 0.022, 0.014, 0.020, 0.010]
 	var soft_tex := _load_cached(SOFT_GLINT)
 	for i in range(GLINT_COUNT):
 		var g := TextureRect.new()
@@ -375,6 +404,8 @@ func _build() -> void:
 		_glint_base_x[i] = x_fracs[i]
 		_glint_base_y[i] = y_fracs[i]
 		_glint_w[i] = widths[i]
+		_glint_speed[i] = speeds[i]
+		_glint_drift[i] = drifts[i]
 
 	apply_environment(environment_id)
 
@@ -403,23 +434,16 @@ func _layout() -> void:
 		var sky_h := area.y * SKY_BOTTOM_FRAC
 		_sky_clip.position = Vector2.ZERO
 		_sky_clip.size = Vector2(area.x, sky_h)
-		if _sky_wash_top:
-			_sky_wash_top.position = Vector2.ZERO
-			_sky_wash_top.size = Vector2(area.x, sky_h * 0.62)
-		if _sky_wash_horizon:
-			_sky_wash_horizon.position = Vector2(0.0, sky_h * 0.48)
-			_sky_wash_horizon.size = Vector2(area.x, sky_h * 0.52)
+		if _sky_gradient_view:
+			_sky_gradient_view.position = Vector2.ZERO
+			_sky_gradient_view.size = Vector2(area.x, sky_h)
 		if _stars:
 			_stars.position = Vector2.ZERO
 			_stars.size = Vector2(area.x, sky_h)
 	if _top_shade:
 		## Short soft band only — avoid a hard sky color seam near the top.
 		_top_shade.position = Vector2.ZERO
-		_top_shade.size = Vector2(area.x, area.y * 0.12)
-	if _horizon_sheen:
-		## Horizon sits ~48% down the authored beach art.
-		_horizon_sheen.position = Vector2(0.0, area.y * 0.48)
-		_horizon_sheen.size = Vector2(area.x, area.y * 0.035)
+		_top_shade.size = Vector2(area.x, area.y * 0.10)
 	if _water_clip and _water_glisten:
 		var water_top := area.y * WATER_TOP_FRAC
 		var water_h := area.y * (WATER_BOTTOM_FRAC - WATER_TOP_FRAC)
@@ -437,12 +461,26 @@ func _layout() -> void:
 		## Place discrete soft streaks inside the water clip only.
 		for i in range(_glints.size()):
 			var gw := area.x * _glint_w[i]
-			var gh := maxf(3.5, water_h * 0.18)
+			var gh := maxf(3.0, water_h * 0.16)
 			_glints[i].size = Vector2(gw, gh)
 			_glints[i].position = Vector2(
 				area.x * _glint_base_x[i],
 				water_h * _glint_base_y[i]
 			)
+
+
+func _apply_sky_gradient(pal: Dictionary) -> void:
+	if _sky_gradient == null:
+		return
+	## Four smooth stops — top → mid → lower → horizon. No hard horizontal seams.
+	_sky_gradient.set_color(0, pal["sky_top"] as Color)
+	_sky_gradient.set_color(1, pal["sky_mid"] as Color)
+	_sky_gradient.set_color(2, pal["sky_lower"] as Color)
+	_sky_gradient.set_color(3, pal["sky_horizon"] as Color)
+	_sky_gradient.set_offset(0, 0.0)
+	_sky_gradient.set_offset(1, 0.32)
+	_sky_gradient.set_offset(2, 0.68)
+	_sky_gradient.set_offset(3, 1.0)
 
 
 func _apply_time_of_day(force: bool = false) -> void:
@@ -457,17 +495,11 @@ func _apply_time_of_day(force: bool = false) -> void:
 		_base_fill.color = pal["base"] as Color
 	if _bg:
 		_bg.modulate = pal["bg_mod"] as Color
-	if _sky_wash_top:
-		_sky_wash_top.color = pal["sky_top"] as Color
-	if _sky_wash_horizon:
-		_sky_wash_horizon.color = pal["sky_horizon"] as Color
+	_apply_sky_gradient(pal)
 	if _stars:
 		var sa := float(pal["star_a"])
 		_stars.modulate = Color(1.0, 1.0, 1.05, sa)
 		_stars.visible = sa > 0.01
-	if _horizon_sheen:
-		var hc := pal["horizon"] as Color
-		_horizon_sheen.color = hc
 	if _ocean_tint:
 		_ocean_tint.color = pal["ocean"] as Color
 	## Cache shimmer RGB for _process intensity animation.
@@ -488,46 +520,50 @@ func _process(delta: float) -> void:
 	if _tod_refresh >= 30.0:
 		_tod_refresh = 0.0
 		_apply_time_of_day(false)
-	## Gentle horizon pulse on top of time-of-day base alpha.
-	if _horizon_sheen:
-		var base_a := _horizon_sheen.color.a
-		var pulse := 0.85 + 0.15 * sin(_idle * 0.55)
-		_horizon_sheen.color.a = clampf(base_a * pulse, 0.02, 0.22)
-	## Soft water-only shimmer: slow sheen drift + gentle breathe (two phases).
+	## Soft water-only shimmer: slow sheen drift + independently fading glints.
 	if _water_glisten and _water_clip and size.x > 8.0:
-		var breathe_a := _glisten_base_a * (0.88 + 0.20 * sin(_idle * 0.34))
+		var breathe_a := _glisten_base_a * (0.42 + 0.18 * sin(_idle * 0.30))
 		var sc := _shimmer_rgb
-		_water_glisten.modulate = Color(sc.r, sc.g, sc.b, clampf(breathe_a, 0.48, 0.98))
+		_water_glisten.modulate = Color(sc.r, sc.g, sc.b, clampf(breathe_a, 0.28, 0.72))
 		var drift_a := sin(_idle * 0.14) * size.x * 0.040
 		_water_glisten.position.x = -size.x * 0.11 + drift_a
 		if _water_glisten_b:
-			var breathe_b := _glisten_base_a * (0.58 + 0.24 * sin(_idle * 0.25 + 1.7))
+			var breathe_b := _glisten_base_a * (0.28 + 0.16 * sin(_idle * 0.22 + 1.7))
 			_water_glisten_b.modulate = Color(
 				lerpf(sc.r, 1.0, 0.15),
 				lerpf(sc.g, 0.95, 0.15),
 				lerpf(sc.b, 0.85, 0.15),
-				clampf(breathe_b, 0.32, 0.90)
+				clampf(breathe_b, 0.18, 0.58)
 			)
 			var drift_b := sin(_idle * 0.18 + 2.4) * size.x * 0.030
 			_water_glisten_b.position.x = -size.x * 0.16 + drift_b
-		## Staggered horizontal glints: slow fade in/out + tiny drift.
-		## Peaks high enough that 2–4 glints are clearly visible on a Galaxy screen.
+		## Staggered horizontal glints: independent fade in/out + tiny drift.
+		## Peaks high enough that several glints are clearly visible on a Galaxy screen.
 		var water_h := _water_clip.size.y
 		for i in range(_glints.size()):
-			var t := _idle * 0.42 + _glint_phase[i]
+			var t := _idle * _glint_speed[i] + _glint_phase[i]
+			## Raised cosine envelope — spends time near zero so glints don't sync.
 			var wave := 0.5 + 0.5 * sin(t)
-			var a := lerpf(0.22, 0.88, wave * wave)
+			var envelope := wave * wave
+			## Second slower pulse desyncs brightness further.
+			var pulse2 := 0.55 + 0.45 * sin(_idle * (_glint_speed[i] * 0.55) + _glint_phase[i] * 1.7)
+			var a := lerpf(0.08, 0.95, envelope * pulse2)
 			_glints[i].modulate = Color(sc.r, sc.g, sc.b, a)
-			var drift := sin(_idle * 0.18 + _glint_phase[i]) * size.x * 0.016
+			var drift := sin(_idle * 0.16 + _glint_phase[i]) * size.x * _glint_drift[i]
+			var y_drift := sin(_idle * 0.11 + _glint_phase[i] * 0.7) * water_h * 0.04
 			_glints[i].position.x = size.x * _glint_base_x[i] + drift
-			_glints[i].position.y = water_h * _glint_base_y[i]
+			_glints[i].position.y = clampf(
+				water_h * _glint_base_y[i] + y_drift,
+				0.0,
+				maxf(0.0, water_h - _glints[i].size.y)
+			)
 
 
 ## Sand contact / ground plane as a fraction of this control's height.
 ## Main chest host aligns LoveNotesChest foot to this constant (CHEST_GROUND_Y).
-## v52: entire assembly nudged one small final step down (feet kiss sand, no bury).
-## Delta from v51 0.852 → +0.018 of viewport height (~15px @844).
-const CHEST_GROUND_Y := 0.870
+## v53: entire assembly nudged ~15px closer to sand (@844 → +0.018) from v52 0.870.
+## Feet kiss sand with no bury / no hover gap.
+const CHEST_GROUND_Y := 0.888
 
 
 func sand_contact_y_frac() -> float:
