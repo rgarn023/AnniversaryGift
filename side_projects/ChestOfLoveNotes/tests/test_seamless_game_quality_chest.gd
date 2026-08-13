@@ -1,5 +1,5 @@
 extends SceneTree
-## v57: remove visible cavity mask; rear → scroll → front rim compositing.
+## v58: scroll +X bias + buried start; shoreline water mask; no cavity mask.
 
 var _passed: int = 0
 var _failed: int = 0
@@ -19,7 +19,7 @@ func _assert(cond: bool, label: String) -> void:
 
 
 func _run() -> void:
-	print("=== Chest scroll mask cleanup (v57) ===")
+	print("=== Chest final scroll + shoreline polish (v58) ===")
 	var chest := FileAccess.get_file_as_string("res://scripts/chest/treasure_chest.gd")
 	var env_script := FileAccess.get_file_as_string("res://scripts/chest/chest_environment.gd")
 	var main := FileAccess.get_file_as_string("res://scripts/main.gd")
@@ -51,9 +51,13 @@ func _run() -> void:
 	_assert(chest.contains("SCROLL_EMERGE_SEC := 0.55"), "scroll emerge duration ~0.55s")
 	_assert(chest.contains("SCROLL_POST_OPEN_BEAT_SEC := 0.11"), "post-open beat")
 	_assert(chest.contains("REWARD_HOLD_SEC := 0.60"), "reward hold ~0.60s")
-	_assert(chest.contains("SCROLL_FINAL_ABOVE_RIM := 0.90"), "final reveal ~90%")
-	_assert(chest.contains("SCROLL_START_ABOVE_RIM := 0.0"), "scroll starts fully behind lip")
+	_assert(chest.contains("SCROLL_FINAL_ABOVE_RIM := 0.85"), "final reveal ~85% content")
+	_assert(chest.contains("SCROLL_START_ABOVE_RIM := -0.16"), "scroll starts buried below lip")
 	_assert(chest.contains("SCROLL_PEEK_ABOVE_RIM := 0.08"), "first peek ~8%")
+	_assert(chest.contains("SCROLL_X_BIAS_CANVAS := 20.0"), "scroll right bias ~+10px runtime")
+	_assert(chest.contains("SCROLL_CONTENT_TOP_PAD"), "scroll texture top pad accounted")
+	_assert(chest.contains("SCROLL_CONTENT_BOTTOM_PAD"), "scroll texture bottom pad accounted")
+	_assert(chest.contains("scroll_rise_for_above_rim"), "rise↔above helper")
 	_assert(chest.contains("GLOW_EMERGE_A"), "reduced emerge glow")
 	_assert(chest.contains("hard-cut the scroll bottom") or chest.contains("clip_contents hard-cut"), "clipping root-cause documented")
 	_assert(chest.contains("EMPHASIS_SCALE := 1.002"), "tiny settle scale only")
@@ -120,12 +124,16 @@ func _run() -> void:
 	_assert(env_script.contains("ENV_DEFAULT_BEACH"), "environment id constant")
 	_assert(env_script.contains("CHEST_GROUND_Y := 0.888"), "ground plane nudged down to sand")
 	_assert(env_script.contains("ocean_glisten.png"), "ocean glisten asset wired")
+	_assert(env_script.contains("ocean_water_mask.png"), "shoreline water mask asset wired")
 	_assert(env_script.contains("OceanGlistenClip"), "water-only glisten clip")
 	_assert(env_script.contains("OceanGlistenB"), "second shimmer glint band")
 	_assert(env_script.contains("OceanGlint_"), "discrete ocean glint streaks")
 	_assert(env_script.contains("GLINT_COUNT := 6"), "six visible glints")
 	_assert(env_script.contains("WATER_TOP_FRAC"), "water top bound")
 	_assert(env_script.contains("WATER_BOTTOM_FRAC"), "water bottom bound")
+	_assert(env_script.contains("CLIP_CHILDREN_ONLY"), "shoreline mask clips children")
+	_assert(env_script.contains("STRETCH_KEEP_ASPECT_COVERED"), "mask matches beach cover")
+	_assert(env_script.contains("OCEAN_WATER_MASK"), "water mask const")
 	_assert(env_script.contains("apply_environment"), "swappable environment API")
 	_assert(env_script.contains("EnvironmentBaseFill") or env_script.contains("_base_fill"), "opaque beach base fill")
 	_assert(env_script.contains("tod_palette_at"), "time-of-day palette interpolation")
@@ -146,12 +154,13 @@ func _run() -> void:
 	_assert(not env_script.contains("BillingClient") and not env_script.contains("in_app_purchase"), "no store implementation")
 	_assert(not env_script.contains("get_location") and not env_script.contains("LocationHelper"), "no location API for sky")
 	_assert(chest.contains("CAVITY_RIM_CANVAS_Y := 269.0"), "rim Y matches re-derived lip top")
-	_assert(chest.contains("CAVITY_CENTER_CANVAS_X := 219.0"), "scroll centered on 3/4 cavity")
+	_assert(chest.contains("CAVITY_CENTER_CANVAS_X := 219.0"), "geometric cavity center retained")
+	_assert(chest.contains("SCROLL_X_BIAS_CANVAS"), "scroll X bias separate from cavity geometry")
 	_assert(chest.contains("CAVITY_MASK_LEGACY"), "legacy mask const retained for history")
 	_assert(not chest.contains('name = "CavityMaskHost"'), "CavityMaskHost node not created")
 	_assert(not chest.contains("var _cavity_mask_host"), "cavity mask host var removed")
 	_assert(not chest.contains("var _scroll_mask_mat"), "scroll mask shader material removed")
-	_assert(not chest.contains("clip_children = CanvasItem.CLIP_CHILDREN_ONLY"), "no CLIP_CHILDREN_ONLY assignment")
+	_assert(not chest.contains("clip_children = CanvasItem.CLIP_CHILDREN_ONLY"), "no cavity CLIP_CHILDREN_ONLY")
 	_assert(not chest.contains('load("res://assets/shaders/cavity_scroll_mask.gdshader")'), "mask shader not loaded at runtime")
 	_assert(chest.contains("Front rim alone occludes") or chest.contains("front rim is the only"), "front-rim occlusion policy")
 	_assert(chest.contains("GLOW_EMERGE_A := 0.0010") or chest.contains("GLOW_EMERGE_A := 0.001"), "reduced emerge glow")
@@ -215,12 +224,12 @@ func _run() -> void:
 		"default beach environment art"
 	)
 
-	_assert(flags.contains("APP_VERSION_CODE := 57"), "versionCode 57")
-	_assert(preset.contains("version/code=57"), "export 57")
-	_assert(preset.contains("0.1.57-scroll-mask-cleanup"), "version name")
-	_assert(preset.contains("v57-scroll-mask-cleanup-debug.apk"), "APK name")
+	_assert(flags.contains("APP_VERSION_CODE := 58"), "versionCode 58")
+	_assert(preset.contains("version/code=58"), "export 58")
+	_assert(preset.contains("0.1.58-final-scroll-shoreline-polish"), "version name")
+	_assert(preset.contains("v58-final-scroll-shoreline-polish-debug.apk"), "APK name")
 	_assert(gitignore.contains("*.apk"), "apks ignored by default")
-	_assert(export_sh.contains("v57-scroll-mask-cleanup-debug.apk"), "export default")
+	_assert(export_sh.contains("v58-final-scroll-shoreline-polish-debug.apk"), "export default")
 	_assert(not env_script.contains("var _top_shade"), "top shade var removed")
 	_assert(not env_script.contains('name = "TopReadabilityShade"'), "top shade node not created")
 	_assert(env_script.contains("get_datetime_dict_from_system"), "local time via system datetime")
@@ -231,6 +240,10 @@ func _run() -> void:
 	_assert(
 		FileAccess.file_exists("res://assets/art/background/environments/ocean_glisten.png"),
 		"ocean glisten texture asset"
+	)
+	_assert(
+		FileAccess.file_exists("res://assets/art/background/environments/ocean_water_mask.png"),
+		"ocean water shoreline mask asset"
 	)
 
 	## Runtime: preload + pose snaps for representative states.
@@ -261,6 +274,9 @@ func _run() -> void:
 	_assert(env._water_glisten != null, "ocean glisten layer present")
 	_assert(env._water_glisten_b != null, "second ocean glisten layer present")
 	_assert(env._water_clip != null, "ocean glisten clip present")
+	_assert(env._water_clip is TextureRect, "water clip is shoreline mask TextureRect")
+	_assert((env._water_clip as TextureRect).texture != null, "water mask texture loaded")
+	_assert(env._water_clip.clip_children == CanvasItem.CLIP_CHILDREN_ONLY, "water mask clips children only")
 	_assert(env._glints.size() == ChestEnvironment.GLINT_COUNT, "discrete glint count")
 	_assert(ChestEnvironment.GLINT_COUNT == 6, "six glints configured")
 	_assert(absf(env.sand_contact_y_frac() - ChestEnvironment.CHEST_GROUND_Y) < 0.001, "ground Y API")
@@ -275,16 +291,19 @@ func _run() -> void:
 	await process_frame
 	var water_top := env.size.y * ChestEnvironment.WATER_TOP_FRAC
 	var water_bot := env.size.y * ChestEnvironment.WATER_BOTTOM_FRAC
-	_assert(env._water_clip.position.y >= water_top - 1.0, "glisten starts at water top")
-	_assert(env._water_clip.position.y + env._water_clip.size.y <= water_bot + 1.0, "glisten ends at water bottom")
-	_assert(env._water_clip.position.y > env.size.y * 0.45, "glisten below sky")
-	_assert(env._water_clip.position.y + env._water_clip.size.y < env.size.y * 0.60, "glisten above sand")
+	## Mask host is full-rect (matches beach cover); tint/glisten stay in water band.
+	_assert(env._water_clip.position == Vector2.ZERO, "water mask host at origin")
+	_assert(absf(env._water_clip.size.x - env.size.x) < 1.0 and absf(env._water_clip.size.y - env.size.y) < 1.0, "water mask full rect")
+	_assert(env._ocean_tint.position.y >= water_top - 1.0, "ocean tint starts at water top")
+	_assert(env._ocean_tint.position.y + env._ocean_tint.size.y <= water_bot + 1.0, "ocean tint ends at water bottom")
+	_assert(env._water_glisten.position.y >= water_top - 1.0, "glisten starts at water top")
+	_assert(env._water_glisten.position.y + env._water_glisten.size.y <= water_bot + 2.0, "glisten ends near water bottom")
 	_assert(env._sky_clip.size.y <= env.size.y * ChestEnvironment.SKY_BOTTOM_FRAC + 1.0, "stars/sky wash clipped to sky")
 	_assert(env._sky_gradient_view.size.y >= env._sky_clip.size.y - 1.0, "gradient fills sky clip")
 	for g in env._glints:
 		_assert(g.get_parent() == env._water_clip, "glint parented under water clip")
-		_assert(g.position.y >= -1.0, "glint inside water clip top")
-		_assert(g.position.y + g.size.y <= env._water_clip.size.y + 1.0, "glint inside water clip bottom")
+		_assert(g.position.y >= water_top - 1.0, "glint inside water band top")
+		_assert(g.position.y + g.size.y <= water_bot + 2.0, "glint inside water band bottom")
 	## Layer order: open-back < scroll < front rim < glow
 	_assert(node._scroll_clip.z_index > node._frame_view.z_index, "scroll above open-back")
 	_assert(node._rim_view.z_index > node._scroll_clip.z_index, "rim above scroll")
@@ -292,9 +311,13 @@ func _run() -> void:
 	_assert(node.get_node_or_null("ChestAnimationRoot/ScrollCavityClip/CavityMaskHost") == null, "no CavityMaskHost in tree")
 	_assert(node._scroll_view.get_parent() == node._scroll_clip, "scroll parented under plain clip")
 	_assert(node._scroll_view.material == null, "scroll has no mask shader material")
-	_assert(node._scroll_clip.clip_children == CanvasItem.CLIP_CHILDREN_DISABLED, "clip host does not mask-draw")
+	_assert(node._scroll_clip.clip_children == CanvasItem.CLIP_CHILDREN_DISABLED, "cavity clip host does not mask-draw")
 	_assert(absf(LoveNotesChest.CAVITY_RIM_CANVAS_Y - 269.0) < 0.01, "cavity rim at lip top")
-	_assert(absf(LoveNotesChest.CAVITY_CENTER_CANVAS_X - 219.0) < 0.01, "cavity center x")
+	_assert(absf(LoveNotesChest.CAVITY_CENTER_CANVAS_X - 219.0) < 0.01, "geometric cavity center x")
+	_assert(absf(LoveNotesChest.SCROLL_X_BIAS_CANVAS - 20.0) < 0.01, "scroll X bias 20 canvas")
+	_assert(LoveNotesChest.SCROLL_START_ABOVE_RIM < -0.05, "scroll start buried below rim")
+	_assert(LoveNotesChest.SCROLL_CONTENT_TOP_PAD > 0.03, "top pad >3%")
+	_assert(LoveNotesChest.SCROLL_CONTENT_BOTTOM_PAD > 0.05, "bottom pad >5%")
 
 	## Dynamic sky interpolation (device-local clock; mock hours for validation only).
 	var prev_override := ChestEnvironment.debug_hour_override
@@ -381,39 +404,54 @@ func _run() -> void:
 	var opening_w := node._anchor_rect.size.x * cavity_w_frac
 	var width_frac := scroll_w / maxf(opening_w, 1.0)
 	_assert(width_frac >= 0.85 and width_frac <= 0.98, "scroll width ~90-95%% of cavity opening (got %.2f)" % width_frac)
-	var cavity_cx := node._anchor_rect.position.x + (LoveNotesChest.CAVITY_CENTER_CANVAS_X / LoveNotesChest.FRAME_CANVAS.x) * node._anchor_rect.size.x
+	var geom_cx := node._anchor_rect.position.x + (LoveNotesChest.CAVITY_CENTER_CANVAS_X / LoveNotesChest.FRAME_CANVAS.x) * node._anchor_rect.size.x
+	var target_cx := node._anchor_rect.position.x + (
+		(LoveNotesChest.CAVITY_CENTER_CANVAS_X + LoveNotesChest.SCROLL_X_BIAS_CANVAS) / LoveNotesChest.FRAME_CANVAS.x
+	) * node._anchor_rect.size.x
 	var scroll_cx := node._anchor_rect.position.x + node._scroll_view.position.x + scroll_w * 0.5
-	_assert(absf(scroll_cx - cavity_cx) < 3.0, "scroll centered on cavity (not canvas mid)")
-	_assert(absf(cavity_cx - (node._anchor_rect.position.x + node._anchor_rect.size.x * 0.5)) > 5.0, "cavity center left-biased vs canvas")
+	_assert(absf(scroll_cx - target_cx) < 3.0, "scroll centered on biased cavity path")
+	_assert(scroll_cx > geom_cx + 4.0, "scroll shifted right of geometric cavity center")
+	_assert(absf(geom_cx - (node._anchor_rect.position.x + node._anchor_rect.size.x * 0.5)) > 5.0, "cavity center left-biased vs canvas")
 	_assert(node._scroll_view.size.x > node._scroll_view.size.y, "scroll is horizontal (w>h)")
 	_assert(is_zero_approx(node._scroll_view.rotation), "scroll rotation stays 0")
 	var native_aspect := LoveNotesChest.SCROLL_NATIVE.x / LoveNotesChest.SCROLL_NATIVE.y
 	var runtime_aspect := scroll_w / maxf(scroll_h, 0.01)
 	_assert(absf(runtime_aspect - native_aspect) < 0.05, "scroll aspect preserved")
-	## Final pose: ~85–90% of scroll HEIGHT above rim.
+	## Final pose: ~85–90% of CONTENT height above rim (pad-aware).
 	var rim_y_check := node._anchor_rect.position.y + (LoveNotesChest.CAVITY_RIM_CANVAS_Y / LoveNotesChest.FRAME_CANVAS.y) * node._anchor_rect.size.y
 	var scroll_top_check := node._scroll_clip.position.y + node._scroll_view.position.y
 	var scroll_bot_check := scroll_top_check + scroll_h
-	var above_frac := (rim_y_check - scroll_top_check) / maxf(scroll_h, 0.01)
-	_assert(above_frac >= 0.85 and above_frac <= 0.94, "final visible height ~85-90%% (got %.2f)" % above_frac)
+	var content_frac := 1.0 - LoveNotesChest.SCROLL_CONTENT_TOP_PAD - LoveNotesChest.SCROLL_CONTENT_BOTTOM_PAD
+	var content_h := scroll_h * content_frac
+	var content_top := scroll_top_check + scroll_h * LoveNotesChest.SCROLL_CONTENT_TOP_PAD
+	var above_frac := (rim_y_check - content_top) / maxf(content_h, 0.01)
+	_assert(above_frac >= 0.85 and above_frac <= 0.92, "final content visible ~85-90%% (got %.2f)" % above_frac)
 	## Clipping root-cause fix: cavity clip must fully contain scroll at peek and final.
 	_assert(scroll_top_check >= node._scroll_clip.position.y - 0.5, "final scroll top inside clip")
 	_assert(scroll_bot_check <= node._scroll_clip.position.y + node._scroll_clip.size.y + 0.5, "final scroll bottom inside clip")
-	## rise=0: scroll fully behind lip (start origin). rise≈0.09: ~8% first peek.
+	## rise=0: content buried below lip. Peek probe uses rise↔above helper.
 	node._set_scroll_rise_amount(0.0)
 	await process_frame
 	var hidden_top := node._scroll_clip.position.y + node._scroll_view.position.y
 	var rim_y_start := node._anchor_rect.position.y + (LoveNotesChest.CAVITY_RIM_CANVAS_Y / LoveNotesChest.FRAME_CANVAS.y) * node._anchor_rect.size.y
-	var hidden_above := (rim_y_start - hidden_top) / maxf(node._scroll_view.size.y, 0.01)
-	_assert(hidden_above <= 0.02, "rise=0 scroll fully behind lip (above=%.3f)" % hidden_above)
-	node._set_scroll_rise_amount(LoveNotesChest.SCROLL_PEEK_ABOVE_RIM / LoveNotesChest.SCROLL_FINAL_ABOVE_RIM)
+	var hidden_content_top := hidden_top + node._scroll_view.size.y * LoveNotesChest.SCROLL_CONTENT_TOP_PAD
+	var hidden_content_h := node._scroll_view.size.y * content_frac
+	var hidden_above := (rim_y_start - hidden_content_top) / maxf(hidden_content_h, 0.01)
+	_assert(hidden_above <= 0.02, "rise=0 content fully behind/buried (above=%.3f)" % hidden_above)
+	_assert(hidden_above <= LoveNotesChest.SCROLL_START_ABOVE_RIM + 0.02, "rise=0 matches buried START")
+	var hidden_cx := node._anchor_rect.position.x + node._scroll_view.position.x + node._scroll_view.size.x * 0.5
+	_assert(absf(hidden_cx - target_cx) < 3.0, "hidden start uses same X as final")
+	node._set_scroll_rise_amount(LoveNotesChest.scroll_rise_for_above_rim(LoveNotesChest.SCROLL_PEEK_ABOVE_RIM))
 	await process_frame
 	var peek_top := node._scroll_clip.position.y + node._scroll_view.position.y
 	var peek_bot := peek_top + node._scroll_view.size.y
-	var peek_above := (rim_y_start - peek_top) / maxf(node._scroll_view.size.y, 0.01)
-	_assert(peek_above >= 0.05 and peek_above <= 0.12, "first peek ~5-10%% above rim (got %.2f)" % peek_above)
+	var peek_content_top := peek_top + node._scroll_view.size.y * LoveNotesChest.SCROLL_CONTENT_TOP_PAD
+	var peek_above := (rim_y_start - peek_content_top) / maxf(hidden_content_h, 0.01)
+	_assert(peek_above >= 0.05 and peek_above <= 0.12, "first peek ~5-10%% content above rim (got %.2f)" % peek_above)
 	_assert(peek_top >= node._scroll_clip.position.y - 0.5, "peek scroll top inside clip")
 	_assert(peek_bot <= node._scroll_clip.position.y + node._scroll_clip.size.y + 0.5, "peek scroll bottom inside clip (no hard cut)")
+	var peek_cx := node._anchor_rect.position.x + node._scroll_view.position.x + node._scroll_view.size.x * 0.5
+	_assert(absf(peek_cx - target_cx) < 3.0, "peek uses same X as final")
 	node._set_scroll_rise_amount(1.0)
 	await process_frame
 

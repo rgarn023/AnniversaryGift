@@ -7,16 +7,22 @@ class_name ChestEnvironment
 ## rewriting the chest frame animation. No store/IAP in this pass.
 ## v56: DAY sky wash is near-opaque so baked dusk beach + moon cannot tint the
 ## top band twilight; EnvironmentBaseFill + clear_color track opaque sky_top.
+## v58: ocean tint/shimmer clipped by shoreline-shaped water mask (same cover
+## transform as beach art) so blue/glints cannot bleed onto dry sand.
 ## Device-LOCAL via Time.get_datetime_dict_from_system(); resume + periodic TOD.
 
 const ENV_DEFAULT_BEACH := "default_beach"
 const ENV_DIR := "res://assets/art/background/environments/"
 const OCEAN_GLISTEN := ENV_DIR + "ocean_glisten.png"
+## Shoreline-shaped alpha mask derived from default_beach water pixels.
+## Used as CLIP_CHILDREN_ONLY host so tint/shimmer follow the real shore curve.
+const OCEAN_WATER_MASK := ENV_DIR + "ocean_water_mask.png"
 const STARFIELD := "res://assets/art/background/starfield.png"
-## Authored beach water band (fraction of environment height).
-## Must stay off sky (~above 0.47) and off sand (~below 0.56).
+## Approximate water band (fraction of environment height) for placing glints.
+## Hard rectangular bottom is NOT the occluder anymore — ocean_water_mask is.
+## Kept slightly inside the water for glint layout only.
 const WATER_TOP_FRAC := 0.470
-const WATER_BOTTOM_FRAC := 0.560
+const WATER_BOTTOM_FRAC := 0.540
 ## Soft elongated horizontal glints (water-only, staggered).
 const GLINT_COUNT := 6
 ## Sky band for stars / wash (above horizon water).
@@ -36,7 +42,7 @@ var _sky_gradient_view: TextureRect
 var _sky_gradient_tex: GradientTexture2D
 var _sky_gradient: Gradient
 var _stars: TextureRect
-var _water_clip: Control
+var _water_clip: TextureRect
 var _ocean_tint: ColorRect
 var _water_glisten: TextureRect
 var _water_glisten_b: TextureRect
@@ -70,6 +76,7 @@ static func preload_assets() -> void:
 		return
 	_load_cached(_path_for(ENV_DEFAULT_BEACH))
 	_load_cached(OCEAN_GLISTEN)
+	_load_cached(OCEAN_WATER_MASK)
 	_load_cached(SOFT_GLINT)
 	_load_cached(STARFIELD)
 	_preloaded = true
@@ -383,11 +390,18 @@ func _build() -> void:
 	## uses the label outline/shadow only; sky gradient continues to the top edge.
 	## v56: day sky_top alpha=1 + base_fill/clear sync — no dark beach bleed strip.
 
-	## Water-only romantic shimmer — clipped so sand/sky/chest stay untouched.
-	_water_clip = Control.new()
+	## Water-only romantic shimmer — shoreline mask clips tint/glints to water.
+	## CLIP_CHILDREN_ONLY: mask alpha occludes children; mask itself draws ZERO
+	## visible pixels (no white/gray rectangle). Same cover transform as beach.
+	_water_clip = TextureRect.new()
 	_water_clip.name = "OceanGlistenClip"
+	_water_clip.texture = _load_cached(OCEAN_WATER_MASK)
+	_water_clip.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_water_clip.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	_water_clip.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	_water_clip.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_water_clip.clip_contents = true
+	_water_clip.clip_contents = false
+	_water_clip.clip_children = CanvasItem.CLIP_CHILDREN_ONLY
 	_water_clip.z_index = 1
 	add_child(_water_clip)
 
@@ -446,7 +460,9 @@ func _build() -> void:
 	_glint_clock.resize(GLINT_COUNT)
 	var widths := [0.24, 0.14, 0.28, 0.16, 0.22, 0.18]
 	var x_fracs := [0.06, 0.26, 0.44, 0.62, 0.78, 0.90]
-	var y_fracs := [0.16, 0.40, 0.26, 0.52, 0.34, 0.60]
+	## Keep glints inside the mid-water band — shoreline mask is the hard stop,
+	## but avoid parking streaks on the feathered wet edge.
+	var y_fracs := [0.14, 0.34, 0.22, 0.42, 0.28, 0.48]
 	var phases := [0.0, 1.15, 2.40, 3.55, 4.80, 5.90]
 	var speeds := [0.38, 0.52, 0.44, 0.60, 0.34, 0.48]
 	var drifts := [0.018, 0.012, 0.022, 0.014, 0.020, 0.010]
@@ -515,27 +531,29 @@ func _layout() -> void:
 			_stars.position = Vector2.ZERO
 			_stars.size = Vector2(area.x, sky_h)
 	if _water_clip and _water_glisten:
+		## Full-rect cover mask matches beach UV crop on every device aspect.
+		## Children still layout in the water band; mask alpha stops sand bleed.
+		_water_clip.position = Vector2.ZERO
+		_water_clip.size = area
 		var water_top := area.y * WATER_TOP_FRAC
 		var water_h := area.y * (WATER_BOTTOM_FRAC - WATER_TOP_FRAC)
-		_water_clip.position = Vector2(0.0, water_top)
-		_water_clip.size = Vector2(area.x, water_h)
 		if _ocean_tint:
-			_ocean_tint.position = Vector2.ZERO
+			_ocean_tint.position = Vector2(0.0, water_top)
 			_ocean_tint.size = Vector2(area.x, water_h)
 		## Slightly oversized so slow horizontal drift never shows a hard edge.
 		_water_glisten.size = Vector2(area.x * 1.22, water_h)
-		_water_glisten.position = Vector2(-area.x * 0.11, 0.0)
+		_water_glisten.position = Vector2(-area.x * 0.11, water_top)
 		if _water_glisten_b:
 			_water_glisten_b.size = Vector2(area.x * 1.30, water_h * 0.92)
-			_water_glisten_b.position = Vector2(-area.x * 0.16, water_h * 0.04)
-		## Place discrete soft streaks inside the water clip only.
+			_water_glisten_b.position = Vector2(-area.x * 0.16, water_top + water_h * 0.04)
+		## Place discrete soft streaks inside the water band (mask-clipped).
 		for i in range(_glints.size()):
 			var gw := area.x * _glint_w[i]
-			var gh := maxf(3.0, water_h * 0.16)
+			var gh := maxf(3.0, water_h * 0.14)
 			_glints[i].size = Vector2(gw, gh)
 			_glints[i].position = Vector2(
 				area.x * _glint_base_x[i],
-				water_h * _glint_base_y[i]
+				water_top + water_h * _glint_base_y[i]
 			)
 
 
@@ -628,12 +646,16 @@ func _process(delta: float) -> void:
 		_tod_refresh = 0.0
 		_apply_time_of_day(false)
 	## Soft water-only shimmer: slow sheen drift + independently fading glints.
+	## Mask host is full-rect; glint/glisten Y stays inside the water band.
 	if _water_glisten and _water_clip and size.x > 8.0:
+		var water_top := size.y * WATER_TOP_FRAC
+		var water_h := size.y * (WATER_BOTTOM_FRAC - WATER_TOP_FRAC)
 		var breathe_a := _glisten_base_a * (0.42 + 0.18 * sin(_idle * 0.30))
 		var sc := _shimmer_rgb
 		_water_glisten.modulate = Color(sc.r, sc.g, sc.b, clampf(breathe_a, 0.28, 0.72))
 		var drift_a := sin(_idle * 0.14) * size.x * 0.040
 		_water_glisten.position.x = -size.x * 0.11 + drift_a
+		_water_glisten.position.y = water_top
 		if _water_glisten_b:
 			var breathe_b := _glisten_base_a * (0.28 + 0.16 * sin(_idle * 0.22 + 1.7))
 			_water_glisten_b.modulate = Color(
@@ -644,20 +666,21 @@ func _process(delta: float) -> void:
 			)
 			var drift_b := sin(_idle * 0.18 + 2.4) * size.x * 0.030
 			_water_glisten_b.position.x = -size.x * 0.16 + drift_b
+			_water_glisten_b.position.y = water_top + water_h * 0.04
 		## Independent fade/drift per glint — not a synced sine pulse.
-		var water_h := _water_clip.size.y
 		for i in range(_glints.size()):
 			_glint_clock[i] = _glint_clock[i] + delta
 			var a := _glint_alpha_at(i)
 			_glints[i].modulate = Color(sc.r, sc.g, sc.b, a)
 			## Horizontal drift only while visible — a few pixels, staggered phase.
 			var drift := sin(_idle * 0.22 + _glint_phase[i]) * size.x * _glint_drift[i]
-			var y_drift := sin(_idle * 0.13 + _glint_phase[i] * 0.7) * water_h * 0.035
+			var y_drift := sin(_idle * 0.13 + _glint_phase[i] * 0.7) * water_h * 0.030
+			var y_base := water_top + water_h * _glint_base_y[i]
 			_glints[i].position.x = size.x * _glint_base_x[i] + drift
 			_glints[i].position.y = clampf(
-				water_h * _glint_base_y[i] + y_drift,
-				0.0,
-				maxf(0.0, water_h - _glints[i].size.y)
+				y_base + y_drift,
+				water_top,
+				maxf(water_top, water_top + water_h - _glints[i].size.y)
 			)
 
 

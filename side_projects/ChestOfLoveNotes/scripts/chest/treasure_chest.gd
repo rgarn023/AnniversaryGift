@@ -1,6 +1,6 @@
 extends Control
 class_name LoveNotesChest
-## animation_v2 approved 13-frame chest opening (v57 scroll mask cleanup).
+## animation_v2 approved 13-frame chest opening (v58 final scroll + shoreline polish).
 ## Empty + unread share the same smooth multi-frame open (#00→#12).
 ## No chest crossfade / alpha fade / ghost duplicate — exactly ONE visible chest
 ## frame at any instant. Unread then switches cleanly to open-back + scroll +
@@ -8,8 +8,10 @@ class_name LoveNotesChest
 ## Legacy PATH B / glowing-sheet frames are never used at runtime.
 ## v57: remove visible CavityMaskHost (gray chest_cavity_mask.png) AND restore
 ## opaque open-back cavity wood (v56 had zeroed cavity alpha → hole / gray band).
-## Compositing is rear/interior → scroll → front rim only — no mask draw.
-## Scroll still starts fully behind the front lip; plant/frames remain frozen.
+## v58: scroll +X bias (centered in usable mouth) + start buried lower behind the
+## front lip so first pixels read as rising out of the cavity, not the rear wall.
+## Compositing is rear/interior → scroll → front rim only — no cavity mask draw.
+## Chest plant/frames/size remain frozen.
 
 signal tapped
 signal open_finished
@@ -89,23 +91,34 @@ const SCROLL_REVEAL_START_PROGRESS := 0.48
 const SCROLL_REVEAL_START_INDEX := 2
 ## Native romantic horizontal scroll art size (love_scroll_reward.png = 720×305).
 const SCROLL_NATIVE := Vector2(720, 305)
+## Transparent vertical padding in love_scroll_reward.png. Top pad ends at the
+## first visible art (red ribbon ≈y=12); bottom pad below parchment roll.
+## Rise math uses CONTENT height so first visible pixels sit at the front lip.
+const SCROLL_CONTENT_TOP_PAD := 0.040
+const SCROLL_CONTENT_BOTTOM_PAD := 0.072
 ## Target final width as a fraction of the real cavity opening (inner walls).
 ## Sized to the 3/4 cavity (not canvas-centered) so the scroll fills the mouth
 ## without spilling past the right inner wall.
 const SCROLL_OPENING_WIDTH_FRAC := 0.92
 ## Canvas-space cavity / rim geometry — top of re-derived front lip (y≈269).
-## v57: front rim is the only foreground occluder — no cavity-mask TextureRect.
+## v57/v58: front rim is the only foreground occluder — no cavity-mask TextureRect.
 ## First pixels appear directly behind the front lip as the scroll rises.
 const CAVITY_RIM_CANVAS_Y := 269.0
-## 3/4-view opening is left-biased — scroll must center on the cavity, not canvas.
+## Geometric center of the 3/4-view cavity opening (not the canvas midpoint).
 const CAVITY_CENTER_CANVAS_X := 219.0
+## Runtime scroll path bias to the RIGHT of geometric cavity center.
+## Measured at chest host 252×326 (fit≈0.492): +10px ≈ +20.3 canvas units.
+## Keeps the horizontal scroll visually centered in the usable mouth.
+const SCROLL_X_BIAS_CANVAS := 20.0
 const CAVITY_INNER_LEFT_X := 137.0
 const CAVITY_INNER_RIGHT_X := 301.0
-## Final reward: ~90% of horizontal-scroll HEIGHT above the front rim (85–90%).
-const SCROLL_FINAL_ABOVE_RIM := 0.90
-## At rise=0 the scroll is fully behind the lip (START=0). First visible tip
-## (~8% height) appears as rise begins — immediately above the front rim.
-const SCROLL_START_ABOVE_RIM := 0.0
+## Final reward: ~85% of CONTENT height above the front rim (85–90% visible).
+## Keeps a clear lower bite behind the front lip so the scroll reads as inside.
+const SCROLL_FINAL_ABOVE_RIM := 0.85
+## At rise=0 the CONTENT is buried below the lip (negative = lower / forward in
+## the front pocket). First visible tip (~8% content height) appears immediately
+## above the front rim — not near the rear wall / cavity shelf.
+const SCROLL_START_ABOVE_RIM := -0.16
 const SCROLL_PEEK_ABOVE_RIM := 0.08
 ## Soft glow peaks — restrained warm accent; never washes out rim/scroll/wood.
 ## v53: slightly softer central glow during emerge/hold for crisp parchment.
@@ -560,13 +573,22 @@ func _place_scroll_and_rim() -> void:
 	var aspect := native.x / maxf(native.y, 1.0)
 	var sh := sw / maxf(aspect, 0.01)
 	var rim_y := _anchor_rect.position.y + (CAVITY_RIM_CANVAS_Y / FRAME_CANVAS.y) * draw_h
-	## Y-only rise from fully behind the lip → final ~90% exposed.
-	## rise=0 → START (0% above rim); early rise ≈ PEEK (~8%); rise=1 → FINAL.
+	## Y-only rise from buried behind the lip → final ~88% content exposed.
+	## rise=0 → START (buried below rim); early rise ≈ PEEK (~8%); rise=1 → FINAL.
+	## Same X for hidden / first-visible / tween / final — vertical rise only.
+	## Use CONTENT height (exclude transparent pad) so first parchment pixels sit
+	## at the front lip instead of floating high toward the rear cavity/lid.
 	var above := lerpf(SCROLL_START_ABOVE_RIM, SCROLL_FINAL_ABOVE_RIM, _scroll_rise)
-	var scroll_top := rim_y - sh * above
-	## Center on the cavity (left-biased in 3/4 art) — NOT the canvas midpoint.
-	## Depth fix is open-back front pocket + start-behind-lip, not a Y raise.
-	var cavity_cx := _anchor_rect.position.x + (CAVITY_CENTER_CANVAS_X / FRAME_CANVAS.x) * draw_w
+	var content_frac := 1.0 - SCROLL_CONTENT_TOP_PAD - SCROLL_CONTENT_BOTTOM_PAD
+	var content_h := sh * content_frac
+	var content_top := rim_y - content_h * above
+	var scroll_top := content_top - sh * SCROLL_CONTENT_TOP_PAD
+	## Center on the cavity (left-biased in 3/4 art) + slight right bias so the
+	## horizontal scroll reads centered in the usable mouth — NOT canvas mid.
+	## Depth illusion: start buried low/forward behind front lip (not rear wall).
+	var cavity_cx := _anchor_rect.position.x + (
+		(CAVITY_CENTER_CANVAS_X + SCROLL_X_BIAS_CANVAS) / FRAME_CANVAS.x
+	) * draw_w
 	var scroll_left := cavity_cx - sw * 0.5
 	## ScrollCavityClip covers the planted canvas as a non-drawing host only.
 	## Prior rectangular clip_contents hard-cut the scroll bottom during emerge;
@@ -775,12 +797,27 @@ func _set_scroll_layers_visible(vis: bool) -> void:
 		_rim_view.visible = vis
 
 
+static func scroll_rise_for_above_rim(above: float) -> float:
+	## Map a desired above-rim height fraction onto the continuous rise parameter.
+	## Accounts for buried START so peek/final probes stay correct.
+	var span := SCROLL_FINAL_ABOVE_RIM - SCROLL_START_ABOVE_RIM
+	if absf(span) < 0.0001:
+		return 0.0
+	return clampf((above - SCROLL_START_ABOVE_RIM) / span, 0.0, 1.0)
+
+
+static func scroll_above_rim_at_rise(rise: float) -> float:
+	return lerpf(SCROLL_START_ABOVE_RIM, SCROLL_FINAL_ABOVE_RIM, clampf(rise, 0.0, 1.0))
+
+
 func _set_scroll_rise_amount(amount: float) -> void:
 	_scroll_rise = clampf(amount, 0.0, 1.0)
 	if _scroll_rise > 0.001 and not _layered_open:
 		_enter_layered_open()
 	_place_scroll_and_rim()
-	if _scroll_rise > 0.02:
+	var above_now := scroll_above_rim_at_rise(_scroll_rise)
+	## Emit once the tip clears the lip — not while still buried in the front pocket.
+	if above_now > 0.01:
 		_set_scroll_layers_visible(true)
 		if not _scroll_emerged_emitted:
 			_scroll_emerged_emitted = true
