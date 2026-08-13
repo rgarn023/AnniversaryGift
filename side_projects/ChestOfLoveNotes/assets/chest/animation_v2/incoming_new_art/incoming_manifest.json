@@ -1,0 +1,8 @@
+{
+  "status": "candidate_assets_pending_validation",
+  "chest_master_sheet": "new_chest_opening_master_sheet.png",
+  "scroll_master": "new_love_scroll_master.png",
+  "integration_allowed": false,
+  "next_action": "Cursor asset validation and extraction only",
+  "important": "Derive open-back and front-rim layers from the exact accepted fully-open frame, not from independently generated images."
+}
