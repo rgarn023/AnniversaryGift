@@ -1,5 +1,5 @@
 extends SceneTree
-## v48: approved animation_v2 13-frame smooth chest + scroll layers + grounding.
+## v49: grounding / scroll reveal / glow / ocean-glisten polish on frozen animation_v2.
 
 var _passed: int = 0
 var _failed: int = 0
@@ -19,7 +19,7 @@ func _assert(cond: bool, label: String) -> void:
 
 
 func _run() -> void:
-	print("=== Chest animation_v2 approved smooth open (v48) ===")
+	print("=== Chest scroll/ground/glisten polish (v49) ===")
 	var chest := FileAccess.get_file_as_string("res://scripts/chest/treasure_chest.gd")
 	var env_script := FileAccess.get_file_as_string("res://scripts/chest/chest_environment.gd")
 	var main := FileAccess.get_file_as_string("res://scripts/main.gd")
@@ -43,9 +43,12 @@ func _run() -> void:
 	_assert(chest.contains("WARM_SPILL"), "warm spill separate from shadow")
 	_assert(chest.contains("OPEN_DURATION_SEC := 1.0"), "open duration ~1.0s")
 	_assert(chest.contains("OPEN_POSE_WEIGHTS"), "variable frame timing")
-	_assert(chest.contains("SCROLL_EMERGE_SEC := 1.20"), "scroll emerge duration")
+	_assert(chest.contains("SCROLL_EMERGE_SEC := 1.22"), "scroll emerge duration")
 	_assert(chest.contains("REWARD_HOLD_SEC := 0.45"), "reward hold ~0.45s")
 	_assert(chest.contains("SCROLL_FINAL_ABOVE_RIM := 0.65"), "final reveal ~65%")
+	_assert(chest.contains("SCROLL_PEEK_ABOVE_RIM := 0.045"), "subtle first peek")
+	_assert(chest.contains("SCROLL_DISPLAY_SCALE := 1.12"), "modest scroll display scale")
+	_assert(chest.contains("GLOW_EMERGE_A"), "reduced emerge glow")
 	_assert(chest.contains("EMPHASIS_SCALE := 1.002"), "tiny settle scale only")
 	_assert(chest.contains("_play_scroll_rise_tween"), "continuous scroll Y tween")
 	_assert(chest.contains("_enter_layered_open"), "clean layered open switch")
@@ -107,7 +110,11 @@ func _run() -> void:
 	_assert(main.contains("soft fade into YOUR CHEST") or main.contains("0.34"), "intentional transition fade")
 	_assert(boot.contains("MIN_VISIBLE_SEC := 4.0"), "splash min 4s")
 	_assert(env_script.contains("ENV_DEFAULT_BEACH"), "environment id constant")
-	_assert(env_script.contains("CHEST_GROUND_Y := 0.805"), "ground plane lowered to sand")
+	_assert(env_script.contains("CHEST_GROUND_Y := 0.828"), "ground plane nudged lower")
+	_assert(env_script.contains("ocean_glisten.png"), "ocean glisten asset wired")
+	_assert(env_script.contains("OceanGlistenClip"), "water-only glisten clip")
+	_assert(env_script.contains("WATER_TOP_FRAC"), "water top bound")
+	_assert(env_script.contains("WATER_BOTTOM_FRAC"), "water bottom bound")
 	_assert(env_script.contains("apply_environment"), "swappable environment API")
 	_assert(env_script.contains("EnvironmentBaseFill") or env_script.contains("_base_fill"), "opaque beach base fill")
 	_assert(not env_script.contains("BillingClient") and not env_script.contains("in_app_purchase"), "no store implementation")
@@ -153,12 +160,16 @@ func _run() -> void:
 		"default beach environment art"
 	)
 
-	_assert(flags.contains("APP_VERSION_CODE := 48"), "versionCode 48")
-	_assert(preset.contains("version/code=48"), "export 48")
-	_assert(preset.contains("0.1.48-approved-smooth-chest"), "version name")
-	_assert(preset.contains("v48-approved-smooth-chest-debug.apk"), "APK name")
+	_assert(flags.contains("APP_VERSION_CODE := 49"), "versionCode 49")
+	_assert(preset.contains("version/code=49"), "export 49")
+	_assert(preset.contains("0.1.49-chest-scroll-polish"), "version name")
+	_assert(preset.contains("v49-chest-scroll-polish-debug.apk"), "APK name")
 	_assert(gitignore.contains("*.apk"), "apks ignored by default")
-	_assert(export_sh.contains("v48-approved-smooth-chest-debug.apk"), "export default")
+	_assert(export_sh.contains("v49-chest-scroll-polish-debug.apk"), "export default")
+	_assert(
+		FileAccess.file_exists("res://assets/art/background/environments/ocean_glisten.png"),
+		"ocean glisten texture asset"
+	)
 
 	## Runtime: preload + pose snaps for representative states.
 	LoveNotesChest.preload_assets()
@@ -183,8 +194,18 @@ func _run() -> void:
 	_assert(env._bg != null and env._bg.texture != null, "beach texture loaded")
 	_assert(env.environment_id == ChestEnvironment.ENV_DEFAULT_BEACH, "default beach id active")
 	_assert(env._base_fill != null, "opaque environment base present")
+	_assert(env._water_glisten != null, "ocean glisten layer present")
+	_assert(env._water_clip != null, "ocean glisten clip present")
 	_assert(absf(env.sand_contact_y_frac() - ChestEnvironment.CHEST_GROUND_Y) < 0.001, "ground Y API")
-	_assert(absf(ChestEnvironment.CHEST_GROUND_Y - 0.805) < 0.001, "ground Y is 0.805")
+	_assert(absf(ChestEnvironment.CHEST_GROUND_Y - 0.828) < 0.001, "ground Y is 0.828")
+	env._layout()
+	await process_frame
+	var water_top := env.size.y * ChestEnvironment.WATER_TOP_FRAC
+	var water_bot := env.size.y * ChestEnvironment.WATER_BOTTOM_FRAC
+	_assert(env._water_clip.position.y >= water_top - 1.0, "glisten starts at water top")
+	_assert(env._water_clip.position.y + env._water_clip.size.y <= water_bot + 1.0, "glisten ends at water bottom")
+	_assert(env._water_clip.position.y > env.size.y * 0.45, "glisten below sky")
+	_assert(env._water_clip.position.y + env._water_clip.size.y < env.size.y * 0.60, "glisten above sand")
 
 	## Grounding: contact shadow kisses the foot (no hover gap).
 	node._layout_frames()
@@ -218,7 +239,7 @@ func _run() -> void:
 		{"name": "scroll_70", "p": 0.90, "scroll": true, "expect_i": 12},
 		{"name": "scroll_final", "p": 1.0, "scroll": true, "expect_i": 12},
 	]
-	var validate_dir := OS.get_user_data_dir().path_join("chest_validate_v48")
+	var validate_dir := OS.get_user_data_dir().path_join("chest_validate_v49")
 	DirAccess.make_dir_recursive_absolute(validate_dir)
 	var prev_body_span := -1.0
 	var seen_indices: Dictionary = {}

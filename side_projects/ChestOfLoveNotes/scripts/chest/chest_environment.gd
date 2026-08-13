@@ -5,9 +5,15 @@ class_name ChestEnvironment
 ## Chest animation stays a separate layer above this node.
 ## Future cosmetic swaps can change `environment_id` / texture without
 ## rewriting the chest frame animation. No store/IAP in this pass.
+## v49: subtle water-only ocean glisten + slightly lower chest plant.
 
 const ENV_DEFAULT_BEACH := "default_beach"
 const ENV_DIR := "res://assets/art/background/environments/"
+const OCEAN_GLISTEN := ENV_DIR + "ocean_glisten.png"
+## Authored beach water band (fraction of environment height).
+## Must stay off sky (~above 0.47) and off sand (~below 0.56).
+const WATER_TOP_FRAC := 0.470
+const WATER_BOTTOM_FRAC := 0.560
 
 static var _tex_cache: Dictionary = {}
 static var _preloaded: bool = false
@@ -17,6 +23,8 @@ var _base_fill: ColorRect
 var _bg: TextureRect
 var _top_shade: ColorRect
 var _horizon_sheen: ColorRect
+var _water_clip: Control
+var _water_glisten: TextureRect
 var _ready_visuals: bool = false
 var _idle: float = 0.0
 
@@ -25,6 +33,7 @@ static func preload_assets() -> void:
 	if _preloaded:
 		return
 	_load_cached(_path_for(ENV_DEFAULT_BEACH))
+	_load_cached(OCEAN_GLISTEN)
 	_preloaded = true
 
 
@@ -87,6 +96,25 @@ func _build() -> void:
 	_horizon_sheen.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_horizon_sheen)
 
+	## Water-only romantic glisten — clipped so sand/sky stay untouched.
+	_water_clip = Control.new()
+	_water_clip.name = "OceanGlistenClip"
+	_water_clip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_water_clip.clip_contents = true
+	_water_clip.z_index = 1
+	add_child(_water_clip)
+
+	_water_glisten = TextureRect.new()
+	_water_glisten.name = "OceanGlisten"
+	_water_glisten.texture = _load_cached(OCEAN_GLISTEN)
+	_water_glisten.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_water_glisten.stretch_mode = TextureRect.STRETCH_SCALE
+	_water_glisten.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	_water_glisten.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	## Soft warm sheen — never glitter spam.
+	_water_glisten.modulate = Color(1.0, 0.95, 0.82, 0.62)
+	_water_clip.add_child(_water_glisten)
+
 	apply_environment(environment_id)
 
 
@@ -118,21 +146,36 @@ func _layout() -> void:
 		## Horizon sits ~48% down the authored beach art.
 		_horizon_sheen.position = Vector2(0.0, area.y * 0.48)
 		_horizon_sheen.size = Vector2(area.x, area.y * 0.035)
+	if _water_clip and _water_glisten:
+		var water_top := area.y * WATER_TOP_FRAC
+		var water_h := area.y * (WATER_BOTTOM_FRAC - WATER_TOP_FRAC)
+		_water_clip.position = Vector2(0.0, water_top)
+		_water_clip.size = Vector2(area.x, water_h)
+		## Slightly oversized so slow horizontal drift never shows a hard edge.
+		_water_glisten.size = Vector2(area.x * 1.18, water_h)
+		_water_glisten.position = Vector2(-area.x * 0.09, 0.0)
 
 
 func _process(delta: float) -> void:
-	if not visible or _horizon_sheen == null:
+	if not visible:
 		return
 	_idle += delta
-	## Almost imperceptible shimmer — prefer stable beauty over motion noise.
-	var pulse := 0.045 + 0.015 * sin(_idle * 0.55)
-	_horizon_sheen.color.a = pulse
+	## Almost imperceptible horizon pulse — prefer stable beauty over motion noise.
+	if _horizon_sheen:
+		var pulse := 0.045 + 0.015 * sin(_idle * 0.55)
+		_horizon_sheen.color.a = pulse
+	## Soft water-only glisten: slow sheen drift + gentle breathe.
+	if _water_glisten and _water_clip and size.x > 8.0:
+		var breathe := 0.52 + 0.16 * sin(_idle * 0.42)
+		_water_glisten.modulate.a = breathe
+		var drift := sin(_idle * 0.18) * size.x * 0.035
+		_water_glisten.position.x = -size.x * 0.09 + drift
 
 
 ## Sand contact / ground plane as a fraction of this control's height.
 ## Main chest host aligns LoveNotesChest foot to this constant (CHEST_GROUND_Y).
-## v47: lowered onto the foreground sand plane (was 0.76 — read as hovering).
-const CHEST_GROUND_Y := 0.805
+## v49: nudge lower so the chest rests on sand (was 0.805 → 0.826).
+const CHEST_GROUND_Y := 0.828
 
 
 func sand_contact_y_frac() -> float:
