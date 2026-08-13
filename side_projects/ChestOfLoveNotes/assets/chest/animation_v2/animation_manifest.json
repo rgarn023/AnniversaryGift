@@ -1,0 +1,378 @@
+{
+  "package": "animation_v2",
+  "pass": "asset_preparation_only",
+  "godot_integration": false,
+  "source_files": [
+    {
+      "path": "assets/chest/animation/glowing_treasure_chest_opening_sprite_sheet.png",
+      "dimensions": [
+        1536,
+        1024
+      ],
+      "grid": "6x4",
+      "cell": [
+        256,
+        256
+      ]
+    },
+    {
+      "path": "assets/chest/animation/magical_treasure_chest_animation_sheet.png",
+      "dimensions": [
+        1536,
+        1024
+      ],
+      "grid": "6x4",
+      "cell": [
+        256,
+        256
+      ]
+    }
+  ],
+  "production_canvas": {
+    "width": 512,
+    "height": 512
+  },
+  "base_anchor_target": {
+    "x": 256,
+    "y": 420
+  },
+  "visual_center_target": {
+    "x": 256,
+    "y": "alpha_weighted_per_frame"
+  },
+  "chest_frames": [
+    {
+      "file": "chest_frames/chest_00_closed.png",
+      "label": "closed",
+      "lid_open_pct": 0,
+      "src_sheet": "glowing",
+      "src_index": 0,
+      "crop_h": 241,
+      "base_anchor": {
+        "x": 256.0,
+        "y": 420.0
+      },
+      "visual_center": {
+        "x": 209.3916659745581,
+        "y": 338.1251885995875
+      },
+      "visible_bbox_xyxy": [
+        116,
+        261,
+        301,
+        420
+      ],
+      "canvas_top_hits": 0
+    },
+    {
+      "file": "chest_frames/chest_10_fully_open.png",
+      "label": "fully_open_endpoint",
+      "lid_open_pct": 75,
+      "src_sheet": "glowing",
+      "src_index": 15,
+      "crop_h": 199,
+      "base_anchor": {
+        "x": 256.0,
+        "y": 420.0
+      },
+      "visual_center": {
+        "x": 225.69619648133138,
+        "y": 329.4573136955193
+      },
+      "visible_bbox_xyxy": [
+        126,
+        238,
+        321,
+        420
+      ],
+      "canvas_top_hits": 0,
+      "note": "Most-open non-sheared glowing-sheet pose after next-cell bleed crop. Planted body does NOT match closed geometry (audit XOR\u224851%); intended as hard-cut open endpoint, not a smooth lid in-between."
+    }
+  ],
+  "missing_lid_open_percentages": [
+    10,
+    20,
+    30,
+    40,
+    50,
+    60,
+    70,
+    80,
+    90
+  ],
+  "smooth_8_to_11_frame_sequence_possible": false,
+  "scroll": {
+    "path": "scroll/love_scroll.png",
+    "source": "assets/art/scroll/scroll_rolled.png",
+    "donor_size": [
+      1200,
+      266
+    ],
+    "output_size": [
+      56,
+      132
+    ],
+    "contains_chest_pixels": false,
+    "baked_glow": false
+  },
+  "layers": {
+    "chest_open_back": "layers/chest_open_back.png",
+    "chest_open_front_rim": "layers/chest_open_front_rim.png",
+    "dimensions": [
+      512,
+      512
+    ]
+  },
+  "intended_future_godot_layer_order": [
+    "beach",
+    "open chest/back (chest_open_back.png)",
+    "scroll (love_scroll.png)",
+    "front rim (chest_open_front_rim.png)",
+    "glow/particles",
+    "UI"
+  ],
+  "audit": {
+    "candidates_inspected": 48,
+    "compatible_for_smooth_lid_arc": 1,
+    "accepted_production_frames": 2,
+    "accepted_note": "Only glowing[0] passes hard same-body consistency. glowing[15] accepted solely as a hard-cut open endpoint (documented body mismatch). No clean 10\u201390% mid-lid poses.",
+    "rejected": [
+      {
+        "sheet": "glowing",
+        "index": 1,
+        "reason": "closed near-dupe / idle glow pulse; not a lid-open pose; AI micro-drift vs cell 0"
+      },
+      {
+        "sheet": "glowing",
+        "index": 2,
+        "reason": "closed near-dupe / idle glow pulse; not a lid-open pose; AI micro-drift vs cell 0"
+      },
+      {
+        "sheet": "glowing",
+        "index": 3,
+        "reason": "closed near-dupe / idle glow pulse; not a lid-open pose; AI micro-drift vs cell 0"
+      },
+      {
+        "sheet": "glowing",
+        "index": 4,
+        "reason": "closed near-dupe / idle glow pulse; not a lid-open pose; AI micro-drift vs cell 0"
+      },
+      {
+        "sheet": "glowing",
+        "index": 5,
+        "reason": "closed near-dupe / idle glow pulse; not a lid-open pose; AI micro-drift vs cell 0"
+      },
+      {
+        "sheet": "glowing",
+        "index": 6,
+        "reason": "crack/partial-open row \u2014 planted body remorphs vs closed (XOR\u224840\u201346%); not same physical chest"
+      },
+      {
+        "sheet": "glowing",
+        "index": 7,
+        "reason": "crack/partial-open row \u2014 planted body remorphs vs closed (XOR\u224840\u201346%); not same physical chest"
+      },
+      {
+        "sheet": "glowing",
+        "index": 8,
+        "reason": "crack/partial-open row \u2014 planted body remorphs vs closed (XOR\u224840\u201346%); not same physical chest"
+      },
+      {
+        "sheet": "glowing",
+        "index": 9,
+        "reason": "crack/partial-open row \u2014 planted body remorphs vs closed (XOR\u224840\u201346%); not same physical chest"
+      },
+      {
+        "sheet": "glowing",
+        "index": 10,
+        "reason": "crack/partial-open row \u2014 planted body remorphs vs closed (XOR\u224840\u201346%); not same physical chest"
+      },
+      {
+        "sheet": "glowing",
+        "index": 11,
+        "reason": "crack/partial-open row \u2014 planted body remorphs vs closed (XOR\u224840\u201346%); not same physical chest"
+      },
+      {
+        "sheet": "glowing",
+        "index": 12,
+        "reason": "mid-open row \u2014 body remorph + next-cell bleed; near-dupes of cell 15 cluster; rejected as mid-lid art"
+      },
+      {
+        "sheet": "glowing",
+        "index": 13,
+        "reason": "mid-open row \u2014 body remorph + next-cell bleed; near-dupes of cell 15 cluster; rejected as mid-lid art"
+      },
+      {
+        "sheet": "glowing",
+        "index": 14,
+        "reason": "mid-open row \u2014 body remorph + next-cell bleed; near-dupes of cell 15 cluster; rejected as mid-lid art"
+      },
+      {
+        "sheet": "glowing",
+        "index": 16,
+        "reason": "mid-open row \u2014 body remorph + next-cell bleed; near-dupes of cell 15 cluster; rejected as mid-lid art"
+      },
+      {
+        "sheet": "glowing",
+        "index": 17,
+        "reason": "mid-open row \u2014 body remorph + next-cell bleed; near-dupes of cell 15 cluster; rejected as mid-lid art"
+      },
+      {
+        "sheet": "glowing",
+        "index": 18,
+        "reason": "fully-open row TOP-SHEARED (top-edge content px=189); unusable"
+      },
+      {
+        "sheet": "glowing",
+        "index": 19,
+        "reason": "fully-open row TOP-SHEARED (top-edge content px=289); unusable"
+      },
+      {
+        "sheet": "glowing",
+        "index": 20,
+        "reason": "fully-open row TOP-SHEARED (top-edge content px=314); unusable"
+      },
+      {
+        "sheet": "glowing",
+        "index": 21,
+        "reason": "fully-open row TOP-SHEARED (top-edge content px=323); unusable"
+      },
+      {
+        "sheet": "glowing",
+        "index": 22,
+        "reason": "fully-open row TOP-SHEARED (top-edge content px=328); unusable"
+      },
+      {
+        "sheet": "glowing",
+        "index": 23,
+        "reason": "fully-open row TOP-SHEARED (top-edge content px=334); unusable"
+      },
+      {
+        "sheet": "magical",
+        "index": 0,
+        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
+      },
+      {
+        "sheet": "magical",
+        "index": 1,
+        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
+      },
+      {
+        "sheet": "magical",
+        "index": 2,
+        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
+      },
+      {
+        "sheet": "magical",
+        "index": 3,
+        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
+      },
+      {
+        "sheet": "magical",
+        "index": 4,
+        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
+      },
+      {
+        "sheet": "magical",
+        "index": 5,
+        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
+      },
+      {
+        "sheet": "magical",
+        "index": 6,
+        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
+      },
+      {
+        "sheet": "magical",
+        "index": 7,
+        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
+      },
+      {
+        "sheet": "magical",
+        "index": 8,
+        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
+      },
+      {
+        "sheet": "magical",
+        "index": 9,
+        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
+      },
+      {
+        "sheet": "magical",
+        "index": 10,
+        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
+      },
+      {
+        "sheet": "magical",
+        "index": 11,
+        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
+      },
+      {
+        "sheet": "magical",
+        "index": 12,
+        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
+      },
+      {
+        "sheet": "magical",
+        "index": 13,
+        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
+      },
+      {
+        "sheet": "magical",
+        "index": 14,
+        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
+      },
+      {
+        "sheet": "magical",
+        "index": 15,
+        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
+      },
+      {
+        "sheet": "magical",
+        "index": 16,
+        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
+      },
+      {
+        "sheet": "magical",
+        "index": 17,
+        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
+      },
+      {
+        "sheet": "magical",
+        "index": 18,
+        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
+      },
+      {
+        "sheet": "magical",
+        "index": 19,
+        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
+      },
+      {
+        "sheet": "magical",
+        "index": 20,
+        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
+      },
+      {
+        "sheet": "magical",
+        "index": 21,
+        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
+      },
+      {
+        "sheet": "magical",
+        "index": 22,
+        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
+      },
+      {
+        "sheet": "magical",
+        "index": 23,
+        "reason": "magical-sheet body \u224811% smaller than glowing closed; different proportions; cannot mix into glowing sequence. Mid/late cells also bake scroll + shear."
+      }
+    ]
+  },
+  "validation_temp": {
+    "contact_sheet": "assets/chest/animation_v2/validation/chest_frames_contact_sheet.png",
+    "alignment_overlay": "assets/chest/animation_v2/validation/chest_alignment_overlay.png",
+    "scroll_occlusion_validation": "assets/chest/animation_v2/validation/scroll_occlusion_validation.png",
+    "front_rim_occludes_lower_scroll": true
+  }
+}
