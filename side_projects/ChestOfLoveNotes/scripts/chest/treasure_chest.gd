@@ -1,14 +1,14 @@
 extends Control
 class_name LoveNotesChest
-## animation_v2 approved 13-frame chest opening (v56 scroll origin + top/time).
+## animation_v2 approved 13-frame chest opening (v57 scroll mask cleanup).
 ## Empty + unread share the same smooth multi-frame open (#00→#12).
 ## No chest crossfade / alpha fade / ghost duplicate — exactly ONE visible chest
 ## frame at any instant. Unread then switches cleanly to open-back + scroll +
 ## front-rim layering for a continuous Y-tweened horizontal scroll rise.
 ## Legacy PATH B / glowing-sheet frames are never used at runtime.
-## v56: scroll starts fully behind the front lip (rise=0 → above=0); open-back
-## front-depth pocket cleared so first pixels read inside-front, not rear wall.
-## Approved 13 frames / chest plant remain frozen.
+## v57: remove visible CavityMaskHost (gray chest_cavity_mask.png). Compositing
+## is rear/interior → scroll → front rim only — no rectangular cavity mask draw.
+## Scroll still starts fully behind the front lip; plant/frames remain frozen.
 
 signal tapped
 signal open_finished
@@ -40,7 +40,10 @@ const ANIM_V2 := "res://assets/chest/animation_v2/"
 const CHEST_FRAMES_DIR := ANIM_V2 + "chest_frames/"
 const OPEN_BACK := ANIM_V2 + "layers/chest_open_back.png"
 const FRONT_RIM := ANIM_V2 + "layers/chest_open_front_rim.png"
-const CAVITY_MASK := ANIM_V2 + "layers/chest_cavity_mask.png"
+## Legacy cavity mask asset kept on disk for tooling history only — NOT loaded
+## at runtime (v57). Drawing that gray TextureRect caused the visible cavity
+## rectangle on device even with CLIP_CHILDREN_ONLY.
+const CAVITY_MASK_LEGACY := ANIM_V2 + "layers/chest_cavity_mask.png"
 ## Horizontal romantic reward scroll — packaged from new_love_scroll_master.png
 ## (deskew/crop/resize only). Ribbon + heart remain readable at phone scale.
 const SCROLL_LAYER := ANIM_V2 + "scroll/love_scroll_reward.png"
@@ -90,8 +93,8 @@ const SCROLL_NATIVE := Vector2(720, 305)
 ## without spilling past the right inner wall.
 const SCROLL_OPENING_WIDTH_FRAC := 0.92
 ## Canvas-space cavity / rim geometry — top of re-derived front lip (y≈269).
-## v56: continuous lip + empty front-depth pocket in open-back; cavity mask
-## clips scroll to the mouth. First pixels appear directly behind the front lip.
+## v57: front rim is the only foreground occluder — no cavity-mask TextureRect.
+## First pixels appear directly behind the front lip as the scroll rises.
 const CAVITY_RIM_CANVAS_Y := 269.0
 ## 3/4-view opening is left-biased — scroll must center on the cavity, not canvas.
 const CAVITY_CENTER_CANVAS_X := 219.0
@@ -158,12 +161,9 @@ var _shadow_view: TextureRect
 var _warm_spill: TextureRect
 var _frame_view: TextureRect
 var _scroll_clip: Control
-var _cavity_mask_host: TextureRect
 var _scroll_view: TextureRect
 var _rim_view: TextureRect
 var _glow_pulse: TextureRect
-var _cavity_mask_tex: Texture2D = null
-var _scroll_mask_mat: ShaderMaterial = null
 var _dust: CPUParticles2D
 var _sparks: CPUParticles2D
 var _motes: CPUParticles2D
@@ -215,7 +215,6 @@ static func preload_assets() -> void:
 	_load_cached(SCROLL_LAYER_VERTICAL_SOURCE)
 	_load_cached(FRONT_RIM)
 	_load_cached(OPEN_BACK)
-	_load_cached(CAVITY_MASK)
 	_load_cached(CONTACT_SHADOW)
 	_load_cached(WARM_SPILL)
 	_open_weight_ends = _build_open_weight_ends()
@@ -287,7 +286,6 @@ func _ready() -> void:
 	_scroll_layer_tex = _load_cached(SCROLL_LAYER)
 	_rim_layer_tex = _load_cached(FRONT_RIM)
 	_open_back_tex = _load_cached(OPEN_BACK)
-	_cavity_mask_tex = _load_cached(CAVITY_MASK)
 	_shadow_tex = _load_cached(CONTACT_SHADOW)
 	_build_visuals()
 	_ready_visuals = true
@@ -353,32 +351,23 @@ func _build_visuals() -> void:
 	_frame_view.z_index = 3
 	_root_visual.add_child(_frame_view)
 
-	## Order: rear/interior → scroll (cavity-masked) → front lip → glow → particles → UI.
-	## Cavity host matches the planted canvas; CLIP_CHILDREN_ONLY uses mask alpha.
+	## Order: rear/interior → scroll → front lip → glow → particles → UI.
+	## ScrollCavityClip is a plain Control (no StyleBox / ColorRect / texture) —
+	## it never draws pixels. Front rim is the only intentional occluder.
 	_scroll_clip = Control.new()
 	_scroll_clip.name = "ScrollCavityClip"
 	_scroll_clip.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_scroll_clip.clip_contents = false
+	_scroll_clip.clip_children = CanvasItem.CLIP_CHILDREN_DISABLED
+	_scroll_clip.modulate = Color(1, 1, 1, 1)
+	_scroll_clip.self_modulate = Color(1, 1, 1, 1)
 	_scroll_clip.z_index = 5
 	_scroll_clip.visible = false
 	_root_visual.add_child(_scroll_clip)
 
-	_cavity_mask_host = TextureRect.new()
-	_cavity_mask_host.name = "CavityMaskHost"
-	_cavity_mask_host.texture = _cavity_mask_tex
-	_cavity_mask_host.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	_cavity_mask_host.stretch_mode = TextureRect.STRETCH_SCALE
-	_cavity_mask_host.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
-	_cavity_mask_host.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	## CLIP_CHILDREN_ONLY uses parent texture ALPHA as the cavity silhouette.
-	## v56 mask writes matching alpha + front-biased opacity; early scroll pixels
-	## appear only in the mouth directly behind the front lip — not the rear wall.
-	_cavity_mask_host.clip_children = CanvasItem.CLIP_CHILDREN_ONLY
-	_cavity_mask_host.modulate = Color(1, 1, 1, 1)
-	_scroll_clip.add_child(_cavity_mask_host)
-
-	## Horizontal romantic love-note scroll — Y-rises only inside the cavity mask.
+	## Horizontal romantic love-note scroll — Y-rises behind the front rim.
 	## Orientation is baked into love_scroll_reward.png (no runtime rotation).
+	## No cavity-mask TextureRect / shader — those drew a gray rectangle on device.
 	_scroll_view = TextureRect.new()
 	_scroll_view.name = "ScrollLayer"
 	_scroll_view.texture = _scroll_layer_tex
@@ -388,20 +377,13 @@ func _build_visuals() -> void:
 	_scroll_view.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	## Preserve authored parchment / ribbon / heart colors — no pale wash tint.
 	_scroll_view.modulate = Color(1, 1, 1, 1)
+	_scroll_view.material = null
 	_scroll_view.rotation = 0.0
 	_scroll_view.visible = true
-	## Shader mask as a second occlusion pass (works even if clip_children is limited).
-	var shader := load("res://assets/shaders/cavity_scroll_mask.gdshader") as Shader
-	if shader != null and _cavity_mask_tex != null:
-		_scroll_mask_mat = ShaderMaterial.new()
-		_scroll_mask_mat.shader = shader
-		_scroll_mask_mat.set_shader_parameter("mask_tex", _cavity_mask_tex)
-		_scroll_mask_mat.set_shader_parameter("canvas_size", FRAME_CANVAS.x)
-		_scroll_view.material = _scroll_mask_mat
-	_cavity_mask_host.add_child(_scroll_view)
+	_scroll_clip.add_child(_scroll_view)
 
 	## Front-rim occlusion layer derived from approved fully-open frame #12.
-	## v56: continuous mouth gold lip + front face + side pillars — ABOVE scroll.
+	## Continuous mouth gold lip + front face + side pillars — ABOVE scroll.
 	_rim_view = TextureRect.new()
 	_rim_view.name = "ChestFrontRim"
 	_rim_view.texture = _rim_layer_tex
@@ -585,16 +567,14 @@ func _place_scroll_and_rim() -> void:
 	## Depth fix is open-back front pocket + start-behind-lip, not a Y raise.
 	var cavity_cx := _anchor_rect.position.x + (CAVITY_CENTER_CANVAS_X / FRAME_CANVAS.x) * draw_w
 	var scroll_left := cavity_cx - sw * 0.5
-	## ScrollCavityClip + CavityMaskHost cover the full planted canvas so the
-	## cavity alpha mask stays aligned with open-back / front-rim.
+	## ScrollCavityClip covers the planted canvas as a non-drawing host only.
 	## Prior rectangular clip_contents hard-cut the scroll bottom during emerge;
-	## cavity mask + front rim are now the intentional occluders (no hard cut).
+	## prior CavityMaskHost drew gray cavity pixels on device — both removed.
+	## Front rim alone occludes the lower scroll (no hard cut, no mask fill).
 	if _scroll_clip:
 		_place_rect(_scroll_clip, _anchor_rect)
-	if _cavity_mask_host:
-		_place_rect(_cavity_mask_host, Rect2(Vector2.ZERO, _anchor_rect.size))
-	if _scroll_view and _cavity_mask_host:
-		## Map canvas rim / rise into mask-host-local coordinates (Y only).
+	if _scroll_view and _scroll_clip:
+		## Map canvas rim / rise into clip-local coordinates (Y only).
 		var local_x := scroll_left - _anchor_rect.position.x
 		var local_y := scroll_top - _anchor_rect.position.y
 		_place_rect(_scroll_view, Rect2(local_x, local_y, sw, sh))
@@ -602,17 +582,7 @@ func _place_scroll_and_rim() -> void:
 		_scroll_view.rotation = 0.0
 		_scroll_view.scale = Vector2.ONE
 		_scroll_view.modulate = Color(1, 1, 1, 1)
-		if _scroll_mask_mat != null:
-			## Shader mask uses chest-canvas pixel rect of the scroll.
-			var canvas_x := (local_x / maxf(draw_w, 1.0)) * FRAME_CANVAS.x
-			var canvas_y := (local_y / maxf(draw_h, 1.0)) * FRAME_CANVAS.y
-			var canvas_w := (sw / maxf(draw_w, 1.0)) * FRAME_CANVAS.x
-			var canvas_h := (sh / maxf(draw_h, 1.0)) * FRAME_CANVAS.y
-			_scroll_mask_mat.set_shader_parameter(
-				"scroll_canvas_rect",
-				Vector4(canvas_x, canvas_y, canvas_w, canvas_h)
-			)
-			_scroll_mask_mat.set_shader_parameter("mask_tex", _cavity_mask_tex)
+		_scroll_view.material = null
 	if _rim_view:
 		## Rim stays planted with the chest — gold lip + pillars occlude lower/side scroll.
 		## Draw order: beach → open-back → scroll → front rim → glow → UI.

@@ -149,7 +149,8 @@ func _test_version() -> void:
 	_assert(BuildFlags.APP_VERSION_CODE >= 26, "versionCode >= 24")
 	var preset := FileAccess.get_file_as_string("res://export_presets.cfg")
 	_assert(
-		preset.contains("ChestOfLoveNotes-v56-scroll-origin-top-time-fix-debug.apk")
+		preset.contains("ChestOfLoveNotes-v57-scroll-mask-cleanup-debug.apk")
+		or preset.contains("ChestOfLoveNotes-v56-scroll-origin-top-time-fix-debug.apk")
 		or preset.contains("ChestOfLoveNotes-v55-scroll-depth-top-sky-fix-debug.apk")
 		or preset.contains("ChestOfLoveNotes-v54-scroll-cavity-time-fix-debug.apk")
 		or preset.contains("ChestOfLoveNotes-v53-scroll-layer-sky-polish-debug.apk")
@@ -170,7 +171,7 @@ func _test_version() -> void:
 		"APK filename"
 	)
 	_assert(
-		preset.contains("version/code=56") or preset.contains("version/code=55") or preset.contains("version/code=54") or preset.contains("version/code=53") or preset.contains("version/code=52") or preset.contains("version/code=51") or preset.contains("version/code=50") or preset.contains("version/code=49") or preset.contains("version/code=48") or preset.contains("version/code=47") or preset.contains("version/code=46") or preset.contains("version/code=45")
+		preset.contains("version/code=57") or preset.contains("version/code=56") or preset.contains("version/code=55") or preset.contains("version/code=54") or preset.contains("version/code=53") or preset.contains("version/code=52") or preset.contains("version/code=51") or preset.contains("version/code=50") or preset.contains("version/code=49") or preset.contains("version/code=48") or preset.contains("version/code=47") or preset.contains("version/code=46") or preset.contains("version/code=45")
 		or preset.contains("version/code=41")
 		or preset.contains("version/code=40")
 		or preset.contains("version/code=39")

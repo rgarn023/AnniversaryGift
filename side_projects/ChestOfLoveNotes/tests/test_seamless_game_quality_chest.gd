@@ -1,5 +1,5 @@
 extends SceneTree
-## v56: scroll origin behind front lip + opaque day sky top + local-time day.
+## v57: remove visible cavity mask; rear → scroll → front rim compositing.
 
 var _passed: int = 0
 var _failed: int = 0
@@ -19,7 +19,7 @@ func _assert(cond: bool, label: String) -> void:
 
 
 func _run() -> void:
-	print("=== Chest scroll origin / top sky / local-time fix (v56) ===")
+	print("=== Chest scroll mask cleanup (v57) ===")
 	var chest := FileAccess.get_file_as_string("res://scripts/chest/treasure_chest.gd")
 	var env_script := FileAccess.get_file_as_string("res://scripts/chest/chest_environment.gd")
 	var main := FileAccess.get_file_as_string("res://scripts/main.gd")
@@ -147,9 +147,13 @@ func _run() -> void:
 	_assert(not env_script.contains("get_location") and not env_script.contains("LocationHelper"), "no location API for sky")
 	_assert(chest.contains("CAVITY_RIM_CANVAS_Y := 269.0"), "rim Y matches re-derived lip top")
 	_assert(chest.contains("CAVITY_CENTER_CANVAS_X := 219.0"), "scroll centered on 3/4 cavity")
-	_assert(chest.contains("chest_cavity_mask.png") or chest.contains("CAVITY_MASK"), "cavity mask wired")
-	_assert(chest.contains("CavityMaskHost"), "cavity mask host node")
-	_assert(chest.contains("cavity_scroll_mask.gdshader") or chest.contains("CLIP_CHILDREN_ONLY"), "cavity occlusion method")
+	_assert(chest.contains("CAVITY_MASK_LEGACY"), "legacy mask const retained for history")
+	_assert(not chest.contains('name = "CavityMaskHost"'), "CavityMaskHost node not created")
+	_assert(not chest.contains("var _cavity_mask_host"), "cavity mask host var removed")
+	_assert(not chest.contains("var _scroll_mask_mat"), "scroll mask shader material removed")
+	_assert(not chest.contains("clip_children = CanvasItem.CLIP_CHILDREN_ONLY"), "no CLIP_CHILDREN_ONLY assignment")
+	_assert(not chest.contains('load("res://assets/shaders/cavity_scroll_mask.gdshader")'), "mask shader not loaded at runtime")
+	_assert(chest.contains("Front rim alone occludes") or chest.contains("front rim is the only"), "front-rim occlusion policy")
 	_assert(chest.contains("GLOW_EMERGE_A := 0.0010") or chest.contains("GLOW_EMERGE_A := 0.001"), "reduced emerge glow")
 	_assert(chest.contains("z_index = 5") and chest.contains("ScrollCavityClip"), "scroll z above back")
 	_assert(env_script.contains("local_timezone_bias_minutes"), "timezone bias helper")
@@ -181,11 +185,11 @@ func _run() -> void:
 	)
 	_assert(
 		FileAccess.file_exists("res://assets/chest/animation_v2/layers/chest_cavity_mask.png"),
-		"cavity mask asset"
+		"legacy cavity mask asset preserved on disk"
 	)
 	_assert(
 		FileAccess.file_exists("res://assets/shaders/cavity_scroll_mask.gdshader"),
-		"cavity scroll mask shader"
+		"legacy cavity scroll mask shader preserved on disk"
 	)
 	_assert(
 		FileAccess.file_exists("res://assets/chest/animation_v2/scroll/love_scroll.png"),
@@ -211,12 +215,12 @@ func _run() -> void:
 		"default beach environment art"
 	)
 
-	_assert(flags.contains("APP_VERSION_CODE := 56"), "versionCode 56")
-	_assert(preset.contains("version/code=56"), "export 56")
-	_assert(preset.contains("0.1.56-scroll-origin-top-time-fix"), "version name")
-	_assert(preset.contains("v56-scroll-origin-top-time-fix-debug.apk"), "APK name")
+	_assert(flags.contains("APP_VERSION_CODE := 57"), "versionCode 57")
+	_assert(preset.contains("version/code=57"), "export 57")
+	_assert(preset.contains("0.1.57-scroll-mask-cleanup"), "version name")
+	_assert(preset.contains("v57-scroll-mask-cleanup-debug.apk"), "APK name")
 	_assert(gitignore.contains("*.apk"), "apks ignored by default")
-	_assert(export_sh.contains("v56-scroll-origin-top-time-fix-debug.apk"), "export default")
+	_assert(export_sh.contains("v57-scroll-mask-cleanup-debug.apk"), "export default")
 	_assert(not env_script.contains("var _top_shade"), "top shade var removed")
 	_assert(not env_script.contains('name = "TopReadabilityShade"'), "top shade node not created")
 	_assert(env_script.contains("get_datetime_dict_from_system"), "local time via system datetime")
@@ -285,7 +289,10 @@ func _run() -> void:
 	_assert(node._scroll_clip.z_index > node._frame_view.z_index, "scroll above open-back")
 	_assert(node._rim_view.z_index > node._scroll_clip.z_index, "rim above scroll")
 	_assert(node._glow_pulse.z_index > node._rim_view.z_index, "glow above rim")
-	_assert(node._cavity_mask_host != null, "cavity mask host present")
+	_assert(node.get_node_or_null("ChestAnimationRoot/ScrollCavityClip/CavityMaskHost") == null, "no CavityMaskHost in tree")
+	_assert(node._scroll_view.get_parent() == node._scroll_clip, "scroll parented under plain clip")
+	_assert(node._scroll_view.material == null, "scroll has no mask shader material")
+	_assert(node._scroll_clip.clip_children == CanvasItem.CLIP_CHILDREN_DISABLED, "clip host does not mask-draw")
 	_assert(absf(LoveNotesChest.CAVITY_RIM_CANVAS_Y - 269.0) < 0.01, "cavity rim at lip top")
 	_assert(absf(LoveNotesChest.CAVITY_CENTER_CANVAS_X - 219.0) < 0.01, "cavity center x")
 
