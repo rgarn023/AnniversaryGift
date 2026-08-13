@@ -1,12 +1,12 @@
 extends Control
 class_name LoveNotesChest
-## animation_v2 approved 13-frame chest opening (v51 scroll/ground/shimmer polish).
+## animation_v2 approved 13-frame chest opening (v52 scroll/shimmer/dynamic-sky).
 ## Empty + unread share the same smooth multi-frame open (#00→#12).
 ## No chest crossfade / alpha fade / ghost duplicate — exactly ONE visible chest
 ## frame at any instant. Unread then switches cleanly to open-back + scroll +
 ## front-rim layering for a continuous Y-tweened horizontal scroll rise.
 ## Legacy PATH B / glowing-sheet frames are never used at runtime.
-## v51: romantic horizontal reward scroll + grounded plant — approved 13 frames frozen.
+## v52: higher final scroll reveal + cavity-clip fix — approved 13 frames frozen.
 
 signal tapped
 signal open_finished
@@ -73,7 +73,7 @@ const SCROLL_POST_OPEN_BEAT_SEC := 0.11
 ## Target ~0.45–0.65s; slightly quicker initial peek then soft settle.
 const SCROLL_EMERGE_SEC := 0.55
 ## Intentional hold on the completed reward pose before note handoff.
-const REWARD_HOLD_SEC := 0.50
+const REWARD_HOLD_SEC := 0.60
 ## Tiny settle pulse only — must not read as the chest growing while opening.
 const EMPHASIS_SCALE := 1.002
 ## Progress split when sampling combined unread progress (validation / short path).
@@ -86,18 +86,18 @@ const SCROLL_NATIVE := Vector2(720, 305)
 const SCROLL_OPENING_WIDTH_FRAC := 0.70
 ## Canvas-space cavity / rim geometry (matches prepare_animation_v2_assets).
 const CAVITY_RIM_CANVAS_Y := 285.0
-## Final reward: ~70% of horizontal-scroll HEIGHT above the front rim.
-const SCROLL_FINAL_ABOVE_RIM := 0.70
+## Final reward: ~90% of horizontal-scroll HEIGHT above the front rim (85–90%).
+const SCROLL_FINAL_ABOVE_RIM := 0.90
 ## First visible tip — ~8% so emergence starts almost hidden in the cavity.
 const SCROLL_PEEK_ABOVE_RIM := 0.08
 ## Soft glow peaks — restrained warm accent; never washes out rim/scroll/wood.
-## v51: further reduced during emerge so ribbon/heart stay readable.
+## v52: slightly softer central glow during emerge/hold for crisp parchment.
 const GLOW_OPEN_A := 0.012
 const GLOW_SETTLE_A := 0.016
 const GLOW_RETAP_A := 0.028
-const GLOW_REWARD_HOLD_A := 0.007
+const GLOW_REWARD_HOLD_A := 0.0045
 const GLOW_MID_A := 0.013
-const GLOW_EMERGE_A := 0.0025
+const GLOW_EMERGE_A := 0.0016
 ## Per-frame dwell weights — restrained start, smooth mid accel, soft finish.
 ## Sum-normalized against OPEN_DURATION_SEC; no pauses between frames.
 const OPEN_POSE_WEIGHTS := [
@@ -304,8 +304,8 @@ func _build_visuals() -> void:
 	_shadow_view.stretch_mode = TextureRect.STRETCH_SCALE
 	_shadow_view.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	_shadow_view.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	## Tight / restrained — neutral dark contact kissing the feet (no yellow halo).
-	_shadow_view.modulate = Color(0.28, 0.26, 0.24, 0.78)
+	## Tight / restrained — neutral dark contact kissing the feet (no bright halo).
+	_shadow_view.modulate = Color(0.14, 0.12, 0.11, 0.88)
 	_shadow_view.z_index = 1
 	_root_visual.add_child(_shadow_view)
 
@@ -335,7 +335,9 @@ func _build_visuals() -> void:
 	_root_visual.add_child(_frame_view)
 
 	## Cavity clip — scroll rises between open-back and front-rim.
-	## Clip keeps sides tidy; front rim is the authoritative lower occluder.
+	## clip_contents trims only extreme side spill; front rim is the lower occluder.
+	## v52: expanded rect so the full horizontal scroll texture can render (prior
+	## short clip hard-cut the scroll bottom during emerge — looked chopped).
 	_scroll_clip = Control.new()
 	_scroll_clip.name = "ScrollCavityClip"
 	_scroll_clip.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -473,10 +475,10 @@ func _layout_frames() -> void:
 	_place_scroll_and_rim()
 	## Contact shadow: tight under the foot, kissing the base (no hover gap).
 	if _shadow_view:
-		var sh_w := draw_w * 0.34
-		var sh_h := draw_h * 0.018
+		var sh_w := draw_w * 0.30
+		var sh_h := draw_h * 0.014
 		## Top of shadow overlaps the foot row — grounded weight on sand.
-		var sh_y := foot_y - sh_h * 0.85
+		var sh_y := foot_y - sh_h * 1.05
 		_place_rect(_shadow_view, Rect2(
 			_anchor_rect.position.x + (draw_w - sh_w) * 0.5,
 			sh_y,
@@ -484,10 +486,11 @@ func _layout_frames() -> void:
 			sh_h
 		))
 	## Warm spill sits slightly below/around the foot — never replaces the shadow.
+	## Keep alpha low so it cannot read as a bright floating halo under the base.
 	if _warm_spill:
-		var sp_w := draw_w * 0.30
-		var sp_h := draw_h * 0.022
-		var sp_y := foot_y - sp_h * 0.05
+		var sp_w := draw_w * 0.28
+		var sp_h := draw_h * 0.018
+		var sp_y := foot_y - sp_h * 0.02
 		_place_rect(_warm_spill, Rect2(
 			_anchor_rect.position.x + (draw_w - sp_w) * 0.5,
 			sp_y,
@@ -497,10 +500,10 @@ func _layout_frames() -> void:
 	## Soft radial pulse over the cavity — circular texture, not a box.
 	## Smaller/softer so it never blowouts behind the horizontal scroll.
 	_place_rect(_glow_pulse, Rect2(
-		_anchor_rect.position.x + draw_w * 0.36,
-		_anchor_rect.position.y + draw_h * 0.46,
-		draw_w * 0.28,
-		draw_h * 0.12
+		_anchor_rect.position.x + draw_w * 0.37,
+		_anchor_rect.position.y + draw_h * 0.47,
+		draw_w * 0.26,
+		draw_h * 0.10
 	))
 	var cavity_center := Vector2(area.x * 0.5, _anchor_rect.position.y + draw_h * 0.48)
 	_dust.position = cavity_center
@@ -521,30 +524,46 @@ func _place_scroll_and_rim() -> void:
 		return
 	var draw_w := _anchor_rect.size.x
 	var draw_h := _anchor_rect.size.y
-	## Cavity clip: wide enough for horizontal scroll; high enough lid never covers top.
-	## Front rim is the authoritative lower occluder (bottom of scroll stays inside).
-	var clip_x := _anchor_rect.position.x + draw_w * 0.24
-	var clip_w := draw_w * 0.52
-	var clip_y := _anchor_rect.position.y + draw_h * 0.18
-	var clip_h := draw_h * 0.46
+	## Preserve native texture aspect — size by opening width, never stretch.
+	var native := SCROLL_NATIVE
+	if _scroll_layer_tex != null:
+		var tex_size := _scroll_layer_tex.get_size()
+		if tex_size.x > 1.0 and tex_size.y > 1.0:
+			native = tex_size
+	var opening_w := draw_w * 0.47
+	var sw := opening_w * SCROLL_OPENING_WIDTH_FRAC
+	var aspect := native.x / maxf(native.y, 1.0)
+	var sh := sw / maxf(aspect, 0.01)
+	var rim_y := _anchor_rect.position.y + (CAVITY_RIM_CANVAS_Y / FRAME_CANVAS.y) * draw_h
+	var above := lerpf(SCROLL_PEEK_ABOVE_RIM, SCROLL_FINAL_ABOVE_RIM, _scroll_rise)
+	var scroll_top := rim_y - sh * above
+	var scroll_left := _anchor_rect.position.x + (draw_w - sw) * 0.5
+	## Cavity clip must fully contain the scroll texture at every rise amount.
+	## Root cause (v51): clip bottom sat at ~0.64 canvas while peek/mid rise put
+	## scroll bottom near ~0.68 — Control.clip_contents hard-cut the parchment
+	## before the front rim could occlude it (looked chopped / half-scroll).
+	## Fix: expand clip to cover peek→final extents (+margin); rim remains the
+	## only intentional lower occluder. Lid never covers the upper scroll.
+	var clip_pad_x := draw_w * 0.04
+	var clip_pad_y := draw_h * 0.03
+	var peek_top := rim_y - sh * SCROLL_FINAL_ABOVE_RIM
+	var peek_bot := rim_y + sh * (1.0 - SCROLL_PEEK_ABOVE_RIM)
+	var clip_x := mini(scroll_left, _anchor_rect.position.x + draw_w * 0.18) - clip_pad_x
+	var clip_r := maxf(scroll_left + sw, _anchor_rect.position.x + draw_w * 0.82) + clip_pad_x
+	var clip_y := mini(peek_top, _anchor_rect.position.y + draw_h * 0.10) - clip_pad_y
+	var clip_b := maxf(peek_bot, _anchor_rect.position.y + draw_h * 0.78) + clip_pad_y
+	## Keep clip inside the planted canvas so side wood stays tidy.
+	clip_x = maxf(clip_x, _anchor_rect.position.x + draw_w * 0.12)
+	clip_r = minf(clip_r, _anchor_rect.position.x + draw_w * 0.88)
+	clip_y = maxf(clip_y, _anchor_rect.position.y + draw_h * 0.06)
+	clip_b = minf(clip_b, _anchor_rect.position.y + draw_h * 0.82)
+	var clip_w := maxf(clip_r - clip_x, sw + clip_pad_x * 2.0)
+	var clip_h := maxf(clip_b - clip_y, sh + clip_pad_y * 2.0)
 	if _scroll_clip:
 		_place_rect(_scroll_clip, Rect2(clip_x, clip_y, clip_w, clip_h))
 	if _scroll_view and _scroll_clip:
-		## Preserve native texture aspect — size by opening width, never stretch.
-		var native := SCROLL_NATIVE
-		if _scroll_layer_tex != null:
-			var tex_size := _scroll_layer_tex.get_size()
-			if tex_size.x > 1.0 and tex_size.y > 1.0:
-				native = tex_size
-		var opening_w := draw_w * 0.47
-		var sw := opening_w * SCROLL_OPENING_WIDTH_FRAC
-		var aspect := native.x / maxf(native.y, 1.0)
-		var sh := sw / maxf(aspect, 0.01)
 		## Map canvas rim / rise into clip-local coordinates (Y translation only).
-		var rim_y := _anchor_rect.position.y + (CAVITY_RIM_CANVAS_Y / FRAME_CANVAS.y) * draw_h
-		var above := lerpf(SCROLL_PEEK_ABOVE_RIM, SCROLL_FINAL_ABOVE_RIM, _scroll_rise)
-		var scroll_top := rim_y - sh * above
-		var local_x := (_anchor_rect.position.x + (draw_w - sw) * 0.5) - clip_x
+		var local_x := scroll_left - clip_x
 		var local_y := scroll_top - clip_y
 		_place_rect(_scroll_view, Rect2(local_x, local_y, sw, sh))
 		## Keep orientation locked — never rotate/tilt while rising.
@@ -781,7 +800,7 @@ func _set_frame_progress(raw_amount: float, emerge_scroll: bool) -> void:
 		_glow_pulse.modulate.a = lerpf(0.0, GLOW_MID_A, glow_ease)
 	if _warm_spill and not _layered_open:
 		## Keep spill softer than the contact shadow so feet stay grounded.
-		_warm_spill.modulate.a = lerpf(0.0, 0.10, glow_ease)
+		_warm_spill.modulate.a = lerpf(0.0, 0.06, glow_ease)
 
 	## Particles arm near mid-open — restrained, secondary to the chest.
 	if not reduced_motion and linear >= 0.45 and not _particles_armed:
@@ -1066,15 +1085,15 @@ func _play_scroll_rise_tween(duration: float) -> void:
 	if _frame_view:
 		var back_dim := create_tween()
 		## Modest cavity dim so ribbon/heart stay readable against baked open-back light.
-		back_dim.tween_property(_frame_view, "modulate", Color(0.84, 0.80, 0.72, 1.0), duration * 0.18).set_trans(Tween.TRANS_SINE)
+		back_dim.tween_property(_frame_view, "modulate", Color(0.80, 0.76, 0.68, 1.0), duration * 0.18).set_trans(Tween.TRANS_SINE)
 	if _glow_pulse:
 		var glow_in := create_tween()
 		glow_in.tween_property(_glow_pulse, "modulate:a", GLOW_EMERGE_A, duration * 0.14).set_trans(Tween.TRANS_SINE)
 	if _warm_spill:
 		var spill_in := create_tween()
-		spill_in.tween_property(_warm_spill, "modulate:a", 0.04, duration * 0.14).set_trans(Tween.TRANS_SINE)
+		spill_in.tween_property(_warm_spill, "modulate:a", 0.025, duration * 0.14).set_trans(Tween.TRANS_SINE)
 	var rise := create_tween()
-	## Continuous ease-out Y rise: ~8% peek → mid → final (~70% height above rim).
+	## Continuous ease-out Y rise: ~8% peek → mid → final (~90% height above rim).
 	## Single continuous tween — no bounce / elastic / overshoot / frame swap.
 	rise.tween_method(_set_scroll_rise_amount, 0.00, 1.00, duration).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 	await rise.finished
@@ -1141,7 +1160,7 @@ func _open_full() -> void:
 	if _glow_pulse:
 		settle.tween_property(_glow_pulse, "modulate:a", GLOW_SETTLE_A, SETTLE_SEC).set_trans(Tween.TRANS_SINE)
 	if _warm_spill:
-		settle.tween_property(_warm_spill, "modulate:a", 0.11, SETTLE_SEC).set_trans(Tween.TRANS_SINE)
+		settle.tween_property(_warm_spill, "modulate:a", 0.07, SETTLE_SEC).set_trans(Tween.TRANS_SINE)
 	await settle.finished
 	if _skip:
 		_apply_finished_state()
@@ -1176,7 +1195,7 @@ func _open_full() -> void:
 			MAGICAL_SWELL_SEC
 		)
 	if _warm_spill and not _show_scroll_on_finish:
-		swell.tween_property(_warm_spill, "modulate:a", 0.06, MAGICAL_SWELL_SEC)
+		swell.tween_property(_warm_spill, "modulate:a", 0.04, MAGICAL_SWELL_SEC)
 	await swell.finished
 	_emphasis_scale = 1.0
 	_apply_root_transform()
@@ -1243,7 +1262,7 @@ func _apply_finished_state() -> void:
 	if _glow_pulse:
 		_glow_pulse.modulate.a = GLOW_REWARD_HOLD_A if _show_scroll_on_finish else GLOW_SETTLE_A * 0.45
 	if _warm_spill:
-		_warm_spill.modulate.a = 0.06 if _show_scroll_on_finish else 0.05
+		_warm_spill.modulate.a = 0.03 if _show_scroll_on_finish else 0.035
 	_enforce_chest_opaque()
 
 

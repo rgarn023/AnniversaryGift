@@ -1,5 +1,5 @@
 extends SceneTree
-## v51: romantic scroll, grounding, and water shimmer polish on frozen animation_v2.
+## v52: scroll reveal, shimmer strength, and dynamic local-time sky on frozen animation_v2.
 
 var _passed: int = 0
 var _failed: int = 0
@@ -19,7 +19,7 @@ func _assert(cond: bool, label: String) -> void:
 
 
 func _run() -> void:
-	print("=== Chest scroll / ground / shimmer polish (v51) ===")
+	print("=== Chest scroll / shimmer / dynamic sky (v52) ===")
 	var chest := FileAccess.get_file_as_string("res://scripts/chest/treasure_chest.gd")
 	var env_script := FileAccess.get_file_as_string("res://scripts/chest/chest_environment.gd")
 	var main := FileAccess.get_file_as_string("res://scripts/main.gd")
@@ -50,10 +50,11 @@ func _run() -> void:
 	_assert(chest.contains("OPEN_POSE_WEIGHTS"), "variable frame timing")
 	_assert(chest.contains("SCROLL_EMERGE_SEC := 0.55"), "scroll emerge duration ~0.55s")
 	_assert(chest.contains("SCROLL_POST_OPEN_BEAT_SEC := 0.11"), "post-open beat")
-	_assert(chest.contains("REWARD_HOLD_SEC := 0.50"), "reward hold ~0.50s")
-	_assert(chest.contains("SCROLL_FINAL_ABOVE_RIM := 0.70"), "final reveal ~70%")
+	_assert(chest.contains("REWARD_HOLD_SEC := 0.60"), "reward hold ~0.60s")
+	_assert(chest.contains("SCROLL_FINAL_ABOVE_RIM := 0.90"), "final reveal ~90%")
 	_assert(chest.contains("SCROLL_PEEK_ABOVE_RIM := 0.08"), "first peek ~8%")
 	_assert(chest.contains("GLOW_EMERGE_A"), "reduced emerge glow")
+	_assert(chest.contains("hard-cut the scroll bottom") or chest.contains("clip_contents hard-cut"), "clipping root-cause documented")
 	_assert(chest.contains("EMPHASIS_SCALE := 1.002"), "tiny settle scale only")
 	_assert(chest.contains("_play_scroll_rise_tween"), "continuous scroll Y tween")
 	_assert(chest.contains("_enter_layered_open"), "clean layered open switch")
@@ -116,17 +117,25 @@ func _run() -> void:
 	_assert(main.contains("soft fade into YOUR CHEST") or main.contains("0.34"), "intentional transition fade")
 	_assert(boot.contains("MIN_VISIBLE_SEC := 4.0"), "splash min 4s")
 	_assert(env_script.contains("ENV_DEFAULT_BEACH"), "environment id constant")
-	_assert(env_script.contains("CHEST_GROUND_Y := 0.852"), "ground plane nudged down")
+	_assert(env_script.contains("CHEST_GROUND_Y := 0.870"), "ground plane nudged down")
 	_assert(env_script.contains("ocean_glisten.png"), "ocean glisten asset wired")
 	_assert(env_script.contains("OceanGlistenClip"), "water-only glisten clip")
 	_assert(env_script.contains("OceanGlistenB"), "second shimmer glint band")
 	_assert(env_script.contains("OceanGlint_"), "discrete ocean glint streaks")
-	_assert(env_script.contains("GLINT_COUNT := 4"), "four visible glints")
+	_assert(env_script.contains("GLINT_COUNT := 5"), "five visible glints")
 	_assert(env_script.contains("WATER_TOP_FRAC"), "water top bound")
 	_assert(env_script.contains("WATER_BOTTOM_FRAC"), "water bottom bound")
 	_assert(env_script.contains("apply_environment"), "swappable environment API")
 	_assert(env_script.contains("EnvironmentBaseFill") or env_script.contains("_base_fill"), "opaque beach base fill")
+	_assert(env_script.contains("tod_palette_at"), "time-of-day palette interpolation")
+	_assert(env_script.contains("local_hour_frac"), "device local clock helper")
+	_assert(env_script.contains("debug_hour_override"), "dev hour override for validation")
+	_assert(env_script.contains("SkyTimeClip"), "sky-only time wash clip")
+	_assert(env_script.contains("SkyStars"), "sky stars layer")
+	_assert(env_script.contains("OceanTimeTint"), "ocean time tint")
+	_assert(env_script.contains("\"night\"") and env_script.contains("\"dawn\"") and env_script.contains("\"day\"") and env_script.contains("\"sunset\""), "four TOD phases")
 	_assert(not env_script.contains("BillingClient") and not env_script.contains("in_app_purchase"), "no store implementation")
+	_assert(not env_script.contains("get_location") and not env_script.contains("LocationHelper"), "no location API for sky")
 
 	for i in range(13):
 		var fname := ""
@@ -173,12 +182,12 @@ func _run() -> void:
 		"default beach environment art"
 	)
 
-	_assert(flags.contains("APP_VERSION_CODE := 51"), "versionCode 51")
-	_assert(preset.contains("version/code=51"), "export 51")
-	_assert(preset.contains("0.1.51-scroll-ground-shimmer-polish"), "version name")
-	_assert(preset.contains("v51-scroll-ground-shimmer-polish-debug.apk"), "APK name")
+	_assert(flags.contains("APP_VERSION_CODE := 52"), "versionCode 52")
+	_assert(preset.contains("version/code=52"), "export 52")
+	_assert(preset.contains("0.1.52-scroll-shimmer-dynamic-sky"), "version name")
+	_assert(preset.contains("v52-scroll-shimmer-dynamic-sky-debug.apk"), "APK name")
 	_assert(gitignore.contains("*.apk"), "apks ignored by default")
-	_assert(export_sh.contains("v51-scroll-ground-shimmer-polish-debug.apk"), "export default")
+	_assert(export_sh.contains("v52-scroll-shimmer-dynamic-sky-debug.apk"), "export default")
 	_assert(
 		FileAccess.file_exists("res://assets/art/background/environments/ocean_glisten.png"),
 		"ocean glisten texture asset"
@@ -213,8 +222,12 @@ func _run() -> void:
 	_assert(env._water_glisten_b != null, "second ocean glisten layer present")
 	_assert(env._water_clip != null, "ocean glisten clip present")
 	_assert(env._glints.size() == ChestEnvironment.GLINT_COUNT, "discrete glint count")
+	_assert(ChestEnvironment.GLINT_COUNT == 5, "five glints configured")
 	_assert(absf(env.sand_contact_y_frac() - ChestEnvironment.CHEST_GROUND_Y) < 0.001, "ground Y API")
-	_assert(absf(ChestEnvironment.CHEST_GROUND_Y - 0.852) < 0.001, "ground Y is 0.852")
+	_assert(absf(ChestEnvironment.CHEST_GROUND_Y - 0.870) < 0.001, "ground Y is 0.870")
+	_assert(env._sky_clip != null, "sky time clip present")
+	_assert(env._stars != null, "sky stars present")
+	_assert(env._ocean_tint != null, "ocean tint present")
 	env._layout()
 	await process_frame
 	var water_top := env.size.y * ChestEnvironment.WATER_TOP_FRAC
@@ -223,10 +236,38 @@ func _run() -> void:
 	_assert(env._water_clip.position.y + env._water_clip.size.y <= water_bot + 1.0, "glisten ends at water bottom")
 	_assert(env._water_clip.position.y > env.size.y * 0.45, "glisten below sky")
 	_assert(env._water_clip.position.y + env._water_clip.size.y < env.size.y * 0.60, "glisten above sand")
+	_assert(env._sky_clip.size.y <= env.size.y * ChestEnvironment.SKY_BOTTOM_FRAC + 1.0, "stars/sky wash clipped to sky")
 	for g in env._glints:
 		_assert(g.get_parent() == env._water_clip, "glint parented under water clip")
 		_assert(g.position.y >= -1.0, "glint inside water clip top")
 		_assert(g.position.y + g.size.y <= env._water_clip.size.y + 1.0, "glint inside water clip bottom")
+
+	## Dynamic sky interpolation (device-local clock; mock hours for validation only).
+	var prev_override := ChestEnvironment.debug_hour_override
+	for hour_case in [
+		{"h": 0.0, "phase": "night", "stars_min": 0.6},
+		{"h": 6.5, "phase": "dawn", "stars_max": 0.35},
+		{"h": 12.0, "phase": "day", "stars_max": 0.01},
+		{"h": 18.5, "phase": "sunset", "stars_min": 0.1},
+	]:
+		ChestEnvironment.debug_hour_override = float(hour_case["h"])
+		var pal := ChestEnvironment.tod_palette_at(float(hour_case["h"]))
+		_assert(str(pal["phase"]) == str(hour_case["phase"]), "phase %s @%.1f" % [hour_case["phase"], float(hour_case["h"])])
+		env._apply_time_of_day(true)
+		await process_frame
+		if hour_case.has("stars_min"):
+			_assert(float(pal["star_a"]) >= float(hour_case["stars_min"]), "stars visible @%.1f" % float(hour_case["h"]))
+		if hour_case.has("stars_max"):
+			_assert(float(pal["star_a"]) <= float(hour_case["stars_max"]), "stars faded @%.1f" % float(hour_case["h"]))
+		_assert(env._ocean_tint.color.a > 0.05, "ocean tint active @%.1f" % float(hour_case["h"]))
+	## Smooth mid-phase blend (06:30 should sit between dawn keyframes).
+	var dawn_mid := ChestEnvironment.tod_palette_at(6.5)
+	var dawn_start := ChestEnvironment.tod_palette_at(5.0)
+	var dawn_end := ChestEnvironment.tod_palette_at(8.0)
+	_assert(float(dawn_mid["star_a"]) < float(dawn_start["star_a"]), "dawn mid stars below night-edge")
+	_assert(float(dawn_mid["star_a"]) > float(dawn_end["star_a"]), "dawn mid stars above day")
+	ChestEnvironment.debug_hour_override = prev_override
+	env._apply_time_of_day(true)
 
 	## Grounding: contact shadow kisses the foot (no hover gap).
 	node._layout_frames()
@@ -253,11 +294,23 @@ func _run() -> void:
 	var native_aspect := LoveNotesChest.SCROLL_NATIVE.x / LoveNotesChest.SCROLL_NATIVE.y
 	var runtime_aspect := scroll_w / maxf(scroll_h, 0.01)
 	_assert(absf(runtime_aspect - native_aspect) < 0.05, "scroll aspect preserved")
-	## Final pose: ~70% of scroll HEIGHT above rim.
+	## Final pose: ~85–90% of scroll HEIGHT above rim.
 	var rim_y_check := node._anchor_rect.position.y + (LoveNotesChest.CAVITY_RIM_CANVAS_Y / LoveNotesChest.FRAME_CANVAS.y) * node._anchor_rect.size.y
 	var scroll_top_check := node._scroll_clip.position.y + node._scroll_view.position.y
+	var scroll_bot_check := scroll_top_check + scroll_h
 	var above_frac := (rim_y_check - scroll_top_check) / maxf(scroll_h, 0.01)
-	_assert(above_frac >= 0.62 and above_frac <= 0.78, "final visible height ~65-75%% (got %.2f)" % above_frac)
+	_assert(above_frac >= 0.85 and above_frac <= 0.94, "final visible height ~85-90%% (got %.2f)" % above_frac)
+	## Clipping root-cause fix: cavity clip must fully contain scroll at peek and final.
+	_assert(scroll_top_check >= node._scroll_clip.position.y - 0.5, "final scroll top inside clip")
+	_assert(scroll_bot_check <= node._scroll_clip.position.y + node._scroll_clip.size.y + 0.5, "final scroll bottom inside clip")
+	node._set_scroll_rise_amount(0.0)
+	await process_frame
+	var peek_top := node._scroll_clip.position.y + node._scroll_view.position.y
+	var peek_bot := peek_top + node._scroll_view.size.y
+	_assert(peek_top >= node._scroll_clip.position.y - 0.5, "peek scroll top inside clip")
+	_assert(peek_bot <= node._scroll_clip.position.y + node._scroll_clip.size.y + 0.5, "peek scroll bottom inside clip (no hard cut)")
+	node._set_scroll_rise_amount(1.0)
+	await process_frame
 
 	## Open-frame → layer handoff alignment (identical plant rect).
 	node._exit_layered_open()

@@ -19,5 +19,5 @@ const SHOW_ONBOARDING_BANNER := false
 const DEV_CHEST_SCROLL_PREVIEW := false
 ## Debug/test builds may offer "Send to Myself (Test)" using the real send path.
 const DEBUG_SELF_SEND := true
-const APP_VERSION_NAME := "0.1.51-scroll-ground-shimmer-polish"
-const APP_VERSION_CODE := 51
+const APP_VERSION_NAME := "0.1.52-scroll-shimmer-dynamic-sky"
+const APP_VERSION_CODE := 52

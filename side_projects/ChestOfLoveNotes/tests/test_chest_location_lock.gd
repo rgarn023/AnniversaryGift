@@ -162,7 +162,7 @@ func _test_version() -> void:
 		"APK name"
 	)
 	_assert(
-		preset.contains("version/code=51") or preset.contains("version/code=50") or preset.contains("version/code=49") or preset.contains("version/code=48") or preset.contains("version/code=47") or preset.contains("version/code=46") or preset.contains("version/code=45")
+		preset.contains("version/code=52") or preset.contains("version/code=51") or preset.contains("version/code=50") or preset.contains("version/code=49") or preset.contains("version/code=48") or preset.contains("version/code=47") or preset.contains("version/code=46") or preset.contains("version/code=45")
 		or preset.contains("version/code=41")
 		or preset.contains("version/code=40")
 		or preset.contains("version/code=39")
