@@ -100,7 +100,7 @@ func _run() -> void:
 	_assert(flags.contains("APP_VERSION_CODE :="), "versionCode present")
 	_assert(preset.contains("version/code="), "export version present")
 	_assert(
-		preset.contains("v49-chest-scroll-polish-debug.apk") or preset.contains("v47-chest-clean-transition-debug.apk") or preset.contains("v46-chest-geometry-grounding-debug.apk") or preset.contains("v45-chest-grounding-scroll-fix-debug.apk") or preset.contains("v44-chest-render-scroll-beach-polish-debug.apk")
+		preset.contains("v50-horizontal-scroll-water-shimmer-debug.apk") or preset.contains("v49-chest-scroll-polish-debug.apk") or preset.contains("v47-chest-clean-transition-debug.apk") or preset.contains("v46-chest-geometry-grounding-debug.apk") or preset.contains("v45-chest-grounding-scroll-fix-debug.apk") or preset.contains("v44-chest-render-scroll-beach-polish-debug.apk")
 		or preset.contains("v42-one-chest-beach-layout-debug.apk")
 		or preset.contains("v40-chest-smoothing-hidden-fix-debug.apk")
 		or preset.contains("v39-chest-polish-debug.apk")
@@ -119,7 +119,7 @@ func _run() -> void:
 		"gitignore allow"
 	)
 	_assert(
-		export_sh.contains("v49-chest-scroll-polish-debug.apk") or export_sh.contains("v49-chest-scroll-polish-debug.apk") or export_sh.contains("v47-chest-clean-transition-debug.apk") or export_sh.contains("v46-chest-geometry-grounding-debug.apk") or export_sh.contains("v45-chest-grounding-scroll-fix-debug.apk") or export_sh.contains("v44-chest-render-scroll-beach-polish-debug.apk")
+		export_sh.contains("v50-horizontal-scroll-water-shimmer-debug.apk") or export_sh.contains("v49-chest-scroll-polish-debug.apk") or export_sh.contains("v49-chest-scroll-polish-debug.apk") or export_sh.contains("v49-chest-scroll-polish-debug.apk") or export_sh.contains("v47-chest-clean-transition-debug.apk") or export_sh.contains("v46-chest-geometry-grounding-debug.apk") or export_sh.contains("v45-chest-grounding-scroll-fix-debug.apk") or export_sh.contains("v44-chest-render-scroll-beach-polish-debug.apk")
 		or export_sh.contains("v42-one-chest-beach-layout-debug.apk")
 		or export_sh.contains("v40-chest-smoothing-hidden-fix-debug.apk")
 		or export_sh.contains("v39-chest-polish-debug.apk")

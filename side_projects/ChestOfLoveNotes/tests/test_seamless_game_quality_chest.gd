@@ -1,5 +1,5 @@
 extends SceneTree
-## v49: grounding / scroll reveal / glow / ocean-glisten polish on frozen animation_v2.
+## v50: horizontal scroll emerge + water shimmer polish on frozen animation_v2.
 
 var _passed: int = 0
 var _failed: int = 0
@@ -19,7 +19,7 @@ func _assert(cond: bool, label: String) -> void:
 
 
 func _run() -> void:
-	print("=== Chest scroll/ground/glisten polish (v49) ===")
+	print("=== Chest horizontal-scroll / water-shimmer polish (v50) ===")
 	var chest := FileAccess.get_file_as_string("res://scripts/chest/treasure_chest.gd")
 	var env_script := FileAccess.get_file_as_string("res://scripts/chest/chest_environment.gd")
 	var main := FileAccess.get_file_as_string("res://scripts/main.gd")
@@ -38,16 +38,19 @@ func _run() -> void:
 	_assert(chest.contains("chest_12_fully_open.png"), "frame 12 wired")
 	_assert(chest.contains("chest_open_back.png"), "open-back layer")
 	_assert(chest.contains("chest_open_front_rim.png"), "front-rim layer")
-	_assert(chest.contains("love_scroll.png"), "production scroll")
+	_assert(chest.contains("love_scroll_horizontal.png"), "horizontal production scroll")
+	_assert(chest.contains("love_scroll.png"), "original vertical scroll preserved in source const")
+	_assert(chest.contains("SCROLL_NATIVE := Vector2(132, 56)"), "horizontal native size")
 	_assert(chest.contains("CONTACT_SHADOW"), "contact shadow grounding")
 	_assert(chest.contains("WARM_SPILL"), "warm spill separate from shadow")
 	_assert(chest.contains("OPEN_DURATION_SEC := 1.0"), "open duration ~1.0s")
 	_assert(chest.contains("OPEN_POSE_WEIGHTS"), "variable frame timing")
-	_assert(chest.contains("SCROLL_EMERGE_SEC := 1.22"), "scroll emerge duration")
+	_assert(chest.contains("SCROLL_EMERGE_SEC := 0.55"), "scroll emerge duration ~0.55s")
+	_assert(chest.contains("SCROLL_POST_OPEN_BEAT_SEC := 0.11"), "post-open beat")
 	_assert(chest.contains("REWARD_HOLD_SEC := 0.45"), "reward hold ~0.45s")
-	_assert(chest.contains("SCROLL_FINAL_ABOVE_RIM := 0.65"), "final reveal ~65%")
-	_assert(chest.contains("SCROLL_PEEK_ABOVE_RIM := 0.045"), "subtle first peek")
-	_assert(chest.contains("SCROLL_DISPLAY_SCALE := 1.12"), "modest scroll display scale")
+	_assert(chest.contains("SCROLL_FINAL_ABOVE_RIM := 0.60"), "final reveal ~60%")
+	_assert(chest.contains("SCROLL_PEEK_ABOVE_RIM := 0.08"), "first peek ~8%")
+	_assert(chest.contains("SCROLL_DISPLAY_SCALE := 1.28"), "horizontal scroll display scale")
 	_assert(chest.contains("GLOW_EMERGE_A"), "reduced emerge glow")
 	_assert(chest.contains("EMPHASIS_SCALE := 1.002"), "tiny settle scale only")
 	_assert(chest.contains("_play_scroll_rise_tween"), "continuous scroll Y tween")
@@ -64,6 +67,7 @@ func _run() -> void:
 	_assert(chest.contains("_set_scroll_rise_amount"), "layered scroll rise")
 	_assert(chest.contains("foot_y_in_control"), "foot helper for ground plane")
 	_assert(chest.contains("No chest crossfade") or chest.contains("no crossfade"), "no crossfade policy")
+	_assert(chest.contains("rotation = 0.0"), "scroll rotation locked at 0")
 	_assert(not chest.contains("ColorRect.new()"), "no rectangular ColorRect glow")
 	_assert(not chest.contains("ChestOpaqueUnderlay"), "no duplicate chest underlay")
 	_assert(chest.contains("_ease_open_curve"), "quality easing")
@@ -110,9 +114,10 @@ func _run() -> void:
 	_assert(main.contains("soft fade into YOUR CHEST") or main.contains("0.34"), "intentional transition fade")
 	_assert(boot.contains("MIN_VISIBLE_SEC := 4.0"), "splash min 4s")
 	_assert(env_script.contains("ENV_DEFAULT_BEACH"), "environment id constant")
-	_assert(env_script.contains("CHEST_GROUND_Y := 0.828"), "ground plane nudged lower")
+	_assert(env_script.contains("CHEST_GROUND_Y := 0.828"), "ground plane plant kept")
 	_assert(env_script.contains("ocean_glisten.png"), "ocean glisten asset wired")
 	_assert(env_script.contains("OceanGlistenClip"), "water-only glisten clip")
+	_assert(env_script.contains("OceanGlistenB"), "second shimmer glint band")
 	_assert(env_script.contains("WATER_TOP_FRAC"), "water top bound")
 	_assert(env_script.contains("WATER_BOTTOM_FRAC"), "water bottom bound")
 	_assert(env_script.contains("apply_environment"), "swappable environment API")
@@ -121,14 +126,6 @@ func _run() -> void:
 
 	for i in range(13):
 		var fname := ""
-		match i:
-			0:
-				fname = "chest_00_closed.png"
-			12:
-				fname = "chest_12_fully_open.png"
-			_:
-				var pcts := [0, 8, 17, 25, 33, 42, 50, 58, 67, 75, 83, 92, 100]
-				fname = "chest_%02d_open_%02d.png" % [i, pcts[i]] if i < 12 else "chest_12_fully_open.png"
 		if i == 0:
 			fname = "chest_00_closed.png"
 		elif i == 12:
@@ -150,7 +147,11 @@ func _run() -> void:
 	)
 	_assert(
 		FileAccess.file_exists("res://assets/chest/animation_v2/scroll/love_scroll.png"),
-		"production scroll asset"
+		"original vertical scroll asset preserved"
+	)
+	_assert(
+		FileAccess.file_exists("res://assets/chest/animation_v2/scroll/love_scroll_horizontal.png"),
+		"horizontal production scroll asset"
 	)
 	_assert(FileAccess.file_exists("res://assets/art/chest/soft_glow_pulse.png"), "soft glow asset")
 	_assert(FileAccess.file_exists("res://assets/art/chest/chest_contact_shadow.png"), "contact shadow asset")
@@ -160,12 +161,12 @@ func _run() -> void:
 		"default beach environment art"
 	)
 
-	_assert(flags.contains("APP_VERSION_CODE := 49"), "versionCode 49")
-	_assert(preset.contains("version/code=49"), "export 49")
-	_assert(preset.contains("0.1.49-chest-scroll-polish"), "version name")
-	_assert(preset.contains("v49-chest-scroll-polish-debug.apk"), "APK name")
+	_assert(flags.contains("APP_VERSION_CODE := 50"), "versionCode 50")
+	_assert(preset.contains("version/code=50"), "export 50")
+	_assert(preset.contains("0.1.50-horizontal-scroll-water-shimmer"), "version name")
+	_assert(preset.contains("v50-horizontal-scroll-water-shimmer-debug.apk"), "APK name")
 	_assert(gitignore.contains("*.apk"), "apks ignored by default")
-	_assert(export_sh.contains("v49-chest-scroll-polish-debug.apk"), "export default")
+	_assert(export_sh.contains("v50-horizontal-scroll-water-shimmer-debug.apk"), "export default")
 	_assert(
 		FileAccess.file_exists("res://assets/art/background/environments/ocean_glisten.png"),
 		"ocean glisten texture asset"
@@ -191,10 +192,12 @@ func _run() -> void:
 	_assert(node._open_back_tex != null, "open-back texture loaded")
 	_assert(node._rim_layer_tex != null, "rim texture loaded")
 	_assert(node._scroll_layer_tex != null, "scroll texture loaded")
+	_assert(str(node._scroll_layer_tex.resource_path).contains("love_scroll_horizontal"), "runtime uses horizontal scroll")
 	_assert(env._bg != null and env._bg.texture != null, "beach texture loaded")
 	_assert(env.environment_id == ChestEnvironment.ENV_DEFAULT_BEACH, "default beach id active")
 	_assert(env._base_fill != null, "opaque environment base present")
 	_assert(env._water_glisten != null, "ocean glisten layer present")
+	_assert(env._water_glisten_b != null, "second ocean glisten layer present")
 	_assert(env._water_clip != null, "ocean glisten clip present")
 	_assert(absf(env.sand_contact_y_frac() - ChestEnvironment.CHEST_GROUND_Y) < 0.001, "ground Y API")
 	_assert(absf(ChestEnvironment.CHEST_GROUND_Y - 0.828) < 0.001, "ground Y is 0.828")
@@ -216,6 +219,18 @@ func _run() -> void:
 	_assert(shadow_top <= foot_y + 2.0, "shadow top at/above foot")
 	_assert(shadow_bot >= foot_y - 1.0, "shadow reaches foot (no hover gap)")
 	_assert(absf(foot_y - node.size.y * LoveNotesChest.CHEST_FOOT_Y_FRAC) < 3.0, "foot on ground frac")
+	_assert(node._shadow_view.size.x <= node._anchor_rect.size.x * 0.46, "shadow tight under feet")
+
+	## Horizontal scroll geometry at final pose.
+	node._enter_layered_open()
+	node._set_scroll_rise_amount(1.0)
+	await process_frame
+	var scroll_w := node._scroll_view.size.x
+	var opening_w := node._anchor_rect.size.x * 0.47
+	var width_frac := scroll_w / maxf(opening_w, 1.0)
+	_assert(width_frac >= 0.62 and width_frac <= 0.82, "scroll width ~65-75%% of opening (got %.2f)" % width_frac)
+	_assert(node._scroll_view.size.x > node._scroll_view.size.y, "scroll is horizontal (w>h)")
+	_assert(is_zero_approx(node._scroll_view.rotation), "scroll rotation stays 0")
 
 	## Sample near each pose-weight end so all 13 frames are exercised.
 	var open_states := [
@@ -235,11 +250,11 @@ func _run() -> void:
 		{"name": "scroll_hidden", "p": 0.48, "scroll": true, "expect_i": 12},
 		{"name": "scroll_peek", "p": 0.55, "scroll": true, "expect_i": 12},
 		{"name": "scroll_25", "p": 0.66, "scroll": true, "expect_i": 12},
-		{"name": "scroll_50", "p": 0.78, "scroll": true, "expect_i": 12},
-		{"name": "scroll_70", "p": 0.90, "scroll": true, "expect_i": 12},
+		{"name": "scroll_45", "p": 0.78, "scroll": true, "expect_i": 12},
+		{"name": "scroll_60", "p": 0.90, "scroll": true, "expect_i": 12},
 		{"name": "scroll_final", "p": 1.0, "scroll": true, "expect_i": 12},
 	]
-	var validate_dir := OS.get_user_data_dir().path_join("chest_validate_v49")
+	var validate_dir := OS.get_user_data_dir().path_join("chest_validate_v50")
 	DirAccess.make_dir_recursive_absolute(validate_dir)
 	var prev_body_span := -1.0
 	var seen_indices: Dictionary = {}
@@ -268,6 +283,8 @@ func _run() -> void:
 			_assert(path_str.contains("chest_open_back"), "state %s shows open-back" % s["name"])
 			_assert(node._scroll_clip.z_index > node._frame_view.z_index, "state %s scroll above chest" % s["name"])
 			_assert(node._rim_view.z_index > node._scroll_clip.z_index, "state %s rim above scroll" % s["name"])
+			_assert(is_zero_approx(node._scroll_view.rotation), "state %s scroll no rotation" % s["name"])
+			_assert(node._scroll_view.size.x > node._scroll_view.size.y, "state %s scroll horizontal" % s["name"])
 		if not bool(s["scroll"]):
 			_assert(not node._layered_open, "state %s not layered before scroll" % s["name"])
 			_assert(not node._rim_view.visible, "state %s rim hidden before scroll" % s["name"])
@@ -316,6 +333,14 @@ func _run() -> void:
 	_assert(node._rim_view.z_index > node._scroll_clip.z_index, "rim occludes lower scroll only")
 	_assert(node._scroll_clip.z_index > node._frame_view.z_index, "upper scroll above chest")
 	_assert(str(node._frame_view.texture.resource_path).contains("chest_open_back"), "final uses open-back")
+
+	## Occlusion geometry: scroll bottom below rim; scroll top above rim but below lid clip top.
+	var rim_y := node._anchor_rect.position.y + (LoveNotesChest.CAVITY_RIM_CANVAS_Y / LoveNotesChest.FRAME_CANVAS.y) * node._anchor_rect.size.y
+	var scroll_top_g := node._scroll_clip.position.y + node._scroll_view.position.y
+	var scroll_bot_g := scroll_top_g + node._scroll_view.size.y
+	_assert(scroll_bot_g > rim_y, "lower scroll below front rim (occluded)")
+	_assert(scroll_top_g < rim_y, "upper scroll above front rim (visible)")
+	_assert(scroll_top_g > node._scroll_clip.position.y - 1.0, "scroll top inside cavity (not under lid)")
 
 	node.set_unread_badge(3)
 	node._set_badge_suppressed(true)

@@ -5,7 +5,7 @@ class_name ChestEnvironment
 ## Chest animation stays a separate layer above this node.
 ## Future cosmetic swaps can change `environment_id` / texture without
 ## rewriting the chest frame animation. No store/IAP in this pass.
-## v49: subtle water-only ocean glisten + slightly lower chest plant.
+## v50: subtle multi-glint water-only ocean shimmer (no new artwork).
 
 const ENV_DEFAULT_BEACH := "default_beach"
 const ENV_DIR := "res://assets/art/background/environments/"
@@ -25,6 +25,7 @@ var _top_shade: ColorRect
 var _horizon_sheen: ColorRect
 var _water_clip: Control
 var _water_glisten: TextureRect
+var _water_glisten_b: TextureRect
 var _ready_visuals: bool = false
 var _idle: float = 0.0
 
@@ -96,7 +97,7 @@ func _build() -> void:
 	_horizon_sheen.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_horizon_sheen)
 
-	## Water-only romantic glisten — clipped so sand/sky stay untouched.
+	## Water-only romantic shimmer — clipped so sand/sky/chest stay untouched.
 	_water_clip = Control.new()
 	_water_clip.name = "OceanGlistenClip"
 	_water_clip.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -104,16 +105,28 @@ func _build() -> void:
 	_water_clip.z_index = 1
 	add_child(_water_clip)
 
+	var glisten_tex := _load_cached(OCEAN_GLISTEN)
 	_water_glisten = TextureRect.new()
 	_water_glisten.name = "OceanGlisten"
-	_water_glisten.texture = _load_cached(OCEAN_GLISTEN)
+	_water_glisten.texture = glisten_tex
 	_water_glisten.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	_water_glisten.stretch_mode = TextureRect.STRETCH_SCALE
 	_water_glisten.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	_water_glisten.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	## Soft warm sheen — never glitter spam.
-	_water_glisten.modulate = Color(1.0, 0.95, 0.82, 0.62)
+	## Soft warm sheen — noticeable but never glitter spam.
+	_water_glisten.modulate = Color(1.0, 0.96, 0.84, 0.48)
 	_water_clip.add_child(_water_glisten)
+
+	## Second offset glint band — different phase/opacity so shimmer feels alive.
+	_water_glisten_b = TextureRect.new()
+	_water_glisten_b.name = "OceanGlistenB"
+	_water_glisten_b.texture = glisten_tex
+	_water_glisten_b.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_water_glisten_b.stretch_mode = TextureRect.STRETCH_SCALE
+	_water_glisten_b.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	_water_glisten_b.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_water_glisten_b.modulate = Color(1.0, 0.93, 0.80, 0.30)
+	_water_clip.add_child(_water_glisten_b)
 
 	apply_environment(environment_id)
 
@@ -152,8 +165,11 @@ func _layout() -> void:
 		_water_clip.position = Vector2(0.0, water_top)
 		_water_clip.size = Vector2(area.x, water_h)
 		## Slightly oversized so slow horizontal drift never shows a hard edge.
-		_water_glisten.size = Vector2(area.x * 1.18, water_h)
-		_water_glisten.position = Vector2(-area.x * 0.09, 0.0)
+		_water_glisten.size = Vector2(area.x * 1.22, water_h)
+		_water_glisten.position = Vector2(-area.x * 0.11, 0.0)
+		if _water_glisten_b:
+			_water_glisten_b.size = Vector2(area.x * 1.30, water_h * 0.92)
+			_water_glisten_b.position = Vector2(-area.x * 0.16, water_h * 0.04)
 
 
 func _process(delta: float) -> void:
@@ -164,17 +180,22 @@ func _process(delta: float) -> void:
 	if _horizon_sheen:
 		var pulse := 0.045 + 0.015 * sin(_idle * 0.55)
 		_horizon_sheen.color.a = pulse
-	## Soft water-only glisten: slow sheen drift + gentle breathe.
+	## Soft water-only shimmer: slow sheen drift + gentle breathe (two phases).
 	if _water_glisten and _water_clip and size.x > 8.0:
-		var breathe := 0.52 + 0.16 * sin(_idle * 0.42)
-		_water_glisten.modulate.a = breathe
-		var drift := sin(_idle * 0.18) * size.x * 0.035
-		_water_glisten.position.x = -size.x * 0.09 + drift
+		var breathe_a := 0.36 + 0.16 * sin(_idle * 0.36)
+		_water_glisten.modulate.a = breathe_a
+		var drift_a := sin(_idle * 0.15) * size.x * 0.045
+		_water_glisten.position.x = -size.x * 0.11 + drift_a
+		if _water_glisten_b:
+			var breathe_b := 0.20 + 0.12 * sin(_idle * 0.27 + 1.7)
+			_water_glisten_b.modulate.a = breathe_b
+			var drift_b := sin(_idle * 0.19 + 2.4) * size.x * 0.032
+			_water_glisten_b.position.x = -size.x * 0.16 + drift_b
 
 
 ## Sand contact / ground plane as a fraction of this control's height.
 ## Main chest host aligns LoveNotesChest foot to this constant (CHEST_GROUND_Y).
-## v49: nudge lower so the chest rests on sand (was 0.805 → 0.826).
+## v49/v50: keep plant; grounding polish is via tighter contact shadow only.
 const CHEST_GROUND_Y := 0.828
 
 

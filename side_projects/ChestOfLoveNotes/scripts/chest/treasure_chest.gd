@@ -1,12 +1,12 @@
 extends Control
 class_name LoveNotesChest
-## animation_v2 approved 13-frame chest opening (v49 polish).
+## animation_v2 approved 13-frame chest opening (v50 horizontal scroll).
 ## Empty + unread share the same smooth multi-frame open (#00→#12).
 ## No chest crossfade / alpha fade / ghost duplicate — exactly ONE visible chest
 ## frame at any instant. Unread then switches cleanly to open-back + scroll +
-## front-rim layering for a continuous Y-tweened scroll rise.
+## front-rim layering for a continuous Y-tweened horizontal scroll rise.
 ## Legacy PATH B / glowing-sheet frames are never used at runtime.
-## v49: grounding/shadow/scroll-reveal/glow polish only — frames frozen.
+## v50: horizontal scroll emerge + glow/ground polish — approved 13 frames frozen.
 
 signal tapped
 signal open_finished
@@ -38,7 +38,10 @@ const ANIM_V2 := "res://assets/chest/animation_v2/"
 const CHEST_FRAMES_DIR := ANIM_V2 + "chest_frames/"
 const OPEN_BACK := ANIM_V2 + "layers/chest_open_back.png"
 const FRONT_RIM := ANIM_V2 + "layers/chest_open_front_rim.png"
-const SCROLL_LAYER := ANIM_V2 + "scroll/love_scroll.png"
+## Horizontal production scroll — derived (exact 90° CW) from love_scroll.png.
+const SCROLL_LAYER := ANIM_V2 + "scroll/love_scroll_horizontal.png"
+## Original vertical source preserved (not used at runtime in v50+).
+const SCROLL_LAYER_VERTICAL_SOURCE := ANIM_V2 + "scroll/love_scroll.png"
 const SOFT_GLOW := "res://assets/art/chest/soft_glow_pulse.png"
 const CONTACT_SHADOW := "res://assets/art/chest/chest_contact_shadow.png"
 const WARM_SPILL := "res://assets/art/chest/chest_warm_spill.png"
@@ -59,8 +62,11 @@ const OPEN_DURATION_RM := 0.42
 const ANTICIPATION_SEC := 0.06
 const SETTLE_SEC := 0.10
 const MAGICAL_SWELL_SEC := 0.10
-## Scroll emerge after open — continuous Y: subtle peek→25%→50%→70%→final.
-const SCROLL_EMERGE_SEC := 1.22
+## Brief intentional beat after fully open before scroll motion begins.
+const SCROLL_POST_OPEN_BEAT_SEC := 0.11
+## Scroll emerge after open — continuous Y only (horizontal scroll, no rotation).
+## Target ~0.45–0.65s; slightly quicker initial peek then soft settle.
+const SCROLL_EMERGE_SEC := 0.55
 ## Intentional hold on the completed reward pose before note handoff.
 const REWARD_HOLD_SEC := 0.45
 ## Tiny settle pulse only — must not read as the chest growing while opening.
@@ -69,24 +75,25 @@ const EMPHASIS_SCALE := 1.002
 const SCROLL_REVEAL_START_PROGRESS := 0.48
 ## Compat index marker (legacy baked scroll frames; runtime uses layers).
 const SCROLL_REVEAL_START_INDEX := 2
-## Native scroll art size (love_scroll.png).
-const SCROLL_NATIVE := Vector2(56, 132)
-## Modest display scale — keep love-note proportions; never morph/resize mid-rise.
-const SCROLL_DISPLAY_SCALE := 1.12
+## Native horizontal scroll art size (love_scroll_horizontal.png = 132×56).
+const SCROLL_NATIVE := Vector2(132, 56)
+## Display scale → ~70% of chest opening width (~0.47 canvas), aspect locked.
+## 132 * 1.28 ≈ 169 ≈ 0.70 * 240 opening mid-body.
+const SCROLL_DISPLAY_SCALE := 1.28
 ## Canvas-space cavity / rim geometry (matches prepare_animation_v2_assets).
 const CAVITY_RIM_CANVAS_Y := 285.0
-## Final reward: ~65% of scroll body above the front rim.
-const SCROLL_FINAL_ABOVE_RIM := 0.65
-## First visible tip — delicate peek so emergence starts lower in the cavity.
-const SCROLL_PEEK_ABOVE_RIM := 0.045
+## Final reward: ~60% of horizontal-scroll height above the front rim.
+const SCROLL_FINAL_ABOVE_RIM := 0.60
+## First visible tip — ~8% so emergence starts almost hidden in the cavity.
+const SCROLL_PEEK_ABOVE_RIM := 0.08
 ## Soft glow peaks — restrained warm accent; never washes out rim/scroll/wood.
-## v49: modestly lower during open/emerge so parchment edges stay readable.
+## v50: slightly lower during emerge so parchment silhouette stays crisp.
 const GLOW_OPEN_A := 0.012
-const GLOW_SETTLE_A := 0.018
+const GLOW_SETTLE_A := 0.016
 const GLOW_RETAP_A := 0.028
-const GLOW_REWARD_HOLD_A := 0.010
-const GLOW_MID_A := 0.014
-const GLOW_EMERGE_A := 0.006
+const GLOW_REWARD_HOLD_A := 0.009
+const GLOW_MID_A := 0.013
+const GLOW_EMERGE_A := 0.004
 ## Per-frame dwell weights — restrained start, smooth mid accel, soft finish.
 ## Sum-normalized against OPEN_DURATION_SEC; no pauses between frames.
 const OPEN_POSE_WEIGHTS := [
@@ -184,6 +191,7 @@ static func preload_assets() -> void:
 	_scroll_cache = []
 	_load_cached(SOFT_GLOW)
 	_load_cached(SCROLL_LAYER)
+	_load_cached(SCROLL_LAYER_VERTICAL_SOURCE)
 	_load_cached(FRONT_RIM)
 	_load_cached(OPEN_BACK)
 	_load_cached(CONTACT_SHADOW)
@@ -291,8 +299,8 @@ func _build_visuals() -> void:
 	_shadow_view.stretch_mode = TextureRect.STRETCH_SCALE
 	_shadow_view.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	_shadow_view.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	## Soft / restrained — neutral dark contact, not a yellow hover blot.
-	_shadow_view.modulate = Color(0.78, 0.74, 0.70, 0.95)
+	## Tight / restrained — neutral dark contact kissing the feet (no hover oval).
+	_shadow_view.modulate = Color(0.62, 0.58, 0.54, 0.92)
 	_shadow_view.z_index = 1
 	_root_visual.add_child(_shadow_view)
 
@@ -331,7 +339,8 @@ func _build_visuals() -> void:
 	_scroll_clip.visible = false
 	_root_visual.add_child(_scroll_clip)
 
-	## Separate vertical love-note scroll — rises inside the clipped cavity.
+	## Horizontal love-note scroll — Y-rises only inside the clipped cavity.
+	## Orientation is baked into love_scroll_horizontal.png (no runtime rotation).
 	_scroll_view = TextureRect.new()
 	_scroll_view.name = "ScrollLayer"
 	_scroll_view.texture = _scroll_layer_tex
@@ -340,6 +349,7 @@ func _build_visuals() -> void:
 	_scroll_view.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	_scroll_view.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_scroll_view.modulate = Color(1, 1, 1, 1)
+	_scroll_view.rotation = 0.0
 	_scroll_view.visible = true
 	_scroll_clip.add_child(_scroll_view)
 
@@ -455,12 +465,12 @@ func _layout_frames() -> void:
 	_anchor_rect = Rect2(left, top, draw_w, draw_h)
 	_place_rect(_frame_view, _anchor_rect)
 	_place_scroll_and_rim()
-	## Contact shadow: directly under the foot, kissing the base (no hover gap).
+	## Contact shadow: tight under the foot, kissing the base (no hover gap).
 	if _shadow_view:
-		var sh_w := draw_w * 0.48
-		var sh_h := draw_h * 0.036
+		var sh_w := draw_w * 0.40
+		var sh_h := draw_h * 0.024
 		## Top of shadow overlaps the foot row — grounded weight on sand.
-		var sh_y := foot_y - sh_h * 0.92
+		var sh_y := foot_y - sh_h * 1.05
 		_place_rect(_shadow_view, Rect2(
 			_anchor_rect.position.x + (draw_w - sh_w) * 0.5,
 			sh_y,
@@ -469,9 +479,9 @@ func _layout_frames() -> void:
 		))
 	## Warm spill sits slightly below/around the foot — never replaces the shadow.
 	if _warm_spill:
-		var sp_w := draw_w * 0.46
-		var sp_h := draw_h * 0.042
-		var sp_y := foot_y - sp_h * 0.22
+		var sp_w := draw_w * 0.38
+		var sp_h := draw_h * 0.030
+		var sp_y := foot_y - sp_h * 0.10
 		_place_rect(_warm_spill, Rect2(
 			_anchor_rect.position.x + (draw_w - sp_w) * 0.5,
 			sp_y,
@@ -479,11 +489,12 @@ func _layout_frames() -> void:
 			sp_h
 		))
 	## Soft radial pulse over the cavity — circular texture, not a box.
+	## Slightly smaller/softer so it never blowouts behind the horizontal scroll.
 	_place_rect(_glow_pulse, Rect2(
-		_anchor_rect.position.x + draw_w * 0.32,
-		_anchor_rect.position.y + draw_h * 0.42,
-		draw_w * 0.36,
-		draw_h * 0.18
+		_anchor_rect.position.x + draw_w * 0.34,
+		_anchor_rect.position.y + draw_h * 0.44,
+		draw_w * 0.32,
+		draw_h * 0.15
 	))
 	var cavity_center := Vector2(area.x * 0.5, _anchor_rect.position.y + draw_h * 0.48)
 	_dust.position = cavity_center
@@ -504,28 +515,32 @@ func _place_scroll_and_rim() -> void:
 		return
 	var draw_w := _anchor_rect.size.x
 	var draw_h := _anchor_rect.size.y
-	## Cavity clip: high enough that lid never covers scroll top; rim occludes bottom.
-	var clip_x := _anchor_rect.position.x + draw_w * 0.34
-	var clip_w := draw_w * 0.32
-	var clip_y := _anchor_rect.position.y + draw_h * 0.22
-	var clip_h := draw_h * 0.40
+	## Cavity clip: wide enough for horizontal scroll; high enough lid never covers top.
+	## Front rim is the authoritative lower occluder (bottom of scroll stays inside).
+	var clip_x := _anchor_rect.position.x + draw_w * 0.26
+	var clip_w := draw_w * 0.48
+	var clip_y := _anchor_rect.position.y + draw_h * 0.20
+	var clip_h := draw_h * 0.42
 	if _scroll_clip:
 		_place_rect(_scroll_clip, Rect2(clip_x, clip_y, clip_w, clip_h))
 	if _scroll_view and _scroll_clip:
 		var sw := SCROLL_NATIVE.x * _fit_scale * SCROLL_DISPLAY_SCALE
 		var sh := SCROLL_NATIVE.y * _fit_scale * SCROLL_DISPLAY_SCALE
-		## Map canvas rim / rise into clip-local coordinates.
+		## Map canvas rim / rise into clip-local coordinates (Y translation only).
 		var rim_y := _anchor_rect.position.y + (CAVITY_RIM_CANVAS_Y / FRAME_CANVAS.y) * draw_h
 		var above := lerpf(SCROLL_PEEK_ABOVE_RIM, SCROLL_FINAL_ABOVE_RIM, _scroll_rise)
 		var scroll_top := rim_y - sh * above
 		var local_x := (_anchor_rect.position.x + (draw_w - sw) * 0.5) - clip_x
 		var local_y := scroll_top - clip_y
 		_place_rect(_scroll_view, Rect2(local_x, local_y, sw, sh))
+		## Keep orientation locked — never rotate/tilt while rising.
+		_scroll_view.rotation = 0.0
+		_scroll_view.scale = Vector2.ONE
 		## Warm parchment read — never bright-white / tube-washed.
 		_scroll_view.modulate = Color(1.0, 0.94, 0.86, 1.0)
 	if _rim_view:
 		## Rim stays planted with the chest — gold lip sits over lower scroll.
-		## Draw order: beach → open-back → scroll (clip) → front rim → glow → UI.
+		## Draw order: beach → open-back → horizontal scroll → front rim → glow → UI.
 		_place_rect(_rim_view, _anchor_rect)
 
 
@@ -669,6 +684,7 @@ func _exit_layered_open() -> void:
 	_set_scroll_layers_visible(false)
 	if _active_frames.size() > 0 and _frame_view:
 		_frame_view.texture = _active_frames[clampi(_frame_index, 0, _active_frames.size() - 1)]
+		_frame_view.modulate = Color(1, 1, 1, 1)
 	_enforce_chest_opaque()
 
 
@@ -1019,34 +1035,41 @@ func _open_short() -> void:
 	_open_amount = 1.0
 	_enforce_chest_opaque()
 	if _show_scroll_on_finish and not _skip:
-		await _play_scroll_rise_tween(SCROLL_EMERGE_SEC * 0.55)
+		await get_tree().create_timer(SCROLL_POST_OPEN_BEAT_SEC * 0.7).timeout
+		await _play_scroll_rise_tween(SCROLL_EMERGE_SEC * 0.70)
 		await get_tree().create_timer(REWARD_HOLD_SEC * 0.6).timeout
 	else:
 		await get_tree().create_timer(0.06).timeout
 
 
 func _play_scroll_rise_tween(duration: float) -> void:
-	## Continuous Y translation with readable stages — never baked pose pops.
+	## Continuous Y translation of ONE horizontal scroll — never rotate/scale/swap.
 	chest_state = ChestState.OPEN_SCROLL_EMERGING
 	_enter_layered_open()
 	_set_scroll_rise_amount(0.0)
-	## Soften glow/spill at first emergence so parchment edges stay crisp.
+	## Soften glow/spill + baked open-back light during rise so parchment stays crisp.
+	if _frame_view:
+		var back_dim := create_tween()
+		back_dim.tween_property(_frame_view, "modulate", Color(0.86, 0.80, 0.70, 1.0), duration * 0.18).set_trans(Tween.TRANS_SINE)
 	if _glow_pulse:
 		var glow_in := create_tween()
-		glow_in.tween_property(_glow_pulse, "modulate:a", GLOW_EMERGE_A, duration * 0.16).set_trans(Tween.TRANS_SINE)
+		glow_in.tween_property(_glow_pulse, "modulate:a", GLOW_EMERGE_A, duration * 0.14).set_trans(Tween.TRANS_SINE)
 	if _warm_spill:
 		var spill_in := create_tween()
-		spill_in.tween_property(_warm_spill, "modulate:a", 0.08, duration * 0.16).set_trans(Tween.TRANS_SINE)
+		spill_in.tween_property(_warm_spill, "modulate:a", 0.05, duration * 0.14).set_trans(Tween.TRANS_SINE)
 	var rise := create_tween()
-	## hidden → delicate tip peek → 25% → 50% → 70% → final (~60–70% body above rim).
-	## Longer early phase so the first visible moment stays subtle/graceful.
-	rise.tween_method(_set_scroll_rise_amount, 0.00, 0.04, duration * 0.18).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-	rise.tween_method(_set_scroll_rise_amount, 0.04, 0.20, duration * 0.18).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
-	rise.tween_method(_set_scroll_rise_amount, 0.20, 0.48, duration * 0.20).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
-	rise.tween_method(_set_scroll_rise_amount, 0.48, 0.72, duration * 0.20).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-	rise.tween_method(_set_scroll_rise_amount, 0.72, 1.00, duration * 0.24).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	## hidden → ~8% peek → 25% → 45% → 60% → final (~60% height above rim).
+	## Quicker initial emergence, then gentle ease-out into the reward pose.
+	rise.tween_method(_set_scroll_rise_amount, 0.00, 0.06, duration * 0.12).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	rise.tween_method(_set_scroll_rise_amount, 0.06, 0.28, duration * 0.18).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	rise.tween_method(_set_scroll_rise_amount, 0.28, 0.52, duration * 0.20).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	rise.tween_method(_set_scroll_rise_amount, 0.52, 0.74, duration * 0.22).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	rise.tween_method(_set_scroll_rise_amount, 0.74, 1.00, duration * 0.28).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 	await rise.finished
 	_set_scroll_rise_amount(1.0)
+	if _frame_view:
+		var back_hold := create_tween()
+		back_hold.tween_property(_frame_view, "modulate", Color(0.92, 0.88, 0.80, 1.0), 0.14).set_trans(Tween.TRANS_SINE)
 	if _glow_pulse:
 		var glow_hold := create_tween()
 		glow_hold.tween_property(_glow_pulse, "modulate:a", GLOW_REWARD_HOLD_A, 0.12).set_trans(Tween.TRANS_SINE)
@@ -1112,8 +1135,19 @@ func _open_full() -> void:
 		_apply_finished_state()
 		return
 
-	## Layered scroll rise (unread only), continuous Y tween after fully open.
+	## Switch to open-back + rim (scroll still hidden), brief beat, then Y-rise.
 	if _show_scroll_on_finish:
+		_enter_layered_open()
+		_set_scroll_rise_amount(0.0)
+		## Soften baked cavity light before the scroll peeks — parchment stays crisp.
+		if _frame_view:
+			_frame_view.modulate = Color(0.90, 0.84, 0.74, 1.0)
+		if _glow_pulse:
+			_glow_pulse.modulate.a = GLOW_EMERGE_A
+		await get_tree().create_timer(SCROLL_POST_OPEN_BEAT_SEC).timeout
+		if _skip:
+			_apply_finished_state()
+			return
 		await _play_scroll_rise_tween(SCROLL_EMERGE_SEC)
 		if _skip:
 			_apply_finished_state()
@@ -1181,11 +1215,14 @@ func _apply_finished_state() -> void:
 		_enter_layered_open()
 		_set_scroll_rise_amount(1.0)
 		_set_scroll_layers_visible(true)
+		if _frame_view:
+			_frame_view.modulate = Color(0.92, 0.88, 0.80, 1.0)
 	else:
 		_layered_open = false
 		_set_scroll_layers_visible(false)
 		if _frame_view and _chest_frames.size() > 0:
 			_frame_view.texture = _chest_frames[_chest_frames.size() - 1]
+			_frame_view.modulate = Color(1, 1, 1, 1)
 		_place_scroll_and_rim()
 	_anticipation_y = 0.0
 	_emphasis_scale = 1.0
@@ -1193,7 +1230,7 @@ func _apply_finished_state() -> void:
 	if _glow_pulse:
 		_glow_pulse.modulate.a = GLOW_REWARD_HOLD_A if _show_scroll_on_finish else GLOW_SETTLE_A * 0.45
 	if _warm_spill:
-		_warm_spill.modulate.a = 0.08 if _show_scroll_on_finish else 0.05
+		_warm_spill.modulate.a = 0.06 if _show_scroll_on_finish else 0.05
 	_enforce_chest_opaque()
 
 
