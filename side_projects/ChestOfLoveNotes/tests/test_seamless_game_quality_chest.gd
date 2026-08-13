@@ -1,5 +1,5 @@
 extends SceneTree
-## v59: scroll recovery + continuous rectangular water clip; no cavity mask.
+## v60: scroll handoff (visible while buried) + layered chest match + day@15:34.
 
 var _passed: int = 0
 var _failed: int = 0
@@ -19,7 +19,7 @@ func _assert(cond: bool, label: String) -> void:
 
 
 func _run() -> void:
-	print("=== Chest scroll + water recovery (v59) ===")
+	print("=== Chest scroll handoff + day fix (v60) ===")
 	var chest := FileAccess.get_file_as_string("res://scripts/chest/treasure_chest.gd")
 	var env_script := FileAccess.get_file_as_string("res://scripts/chest/chest_environment.gd")
 	var main := FileAccess.get_file_as_string("res://scripts/main.gd")
@@ -225,12 +225,18 @@ func _run() -> void:
 		"default beach environment art"
 	)
 
-	_assert(flags.contains("APP_VERSION_CODE := 59"), "versionCode 59")
-	_assert(preset.contains("version/code=59"), "export 59")
-	_assert(preset.contains("0.1.59-scroll-water-recovery"), "version name")
-	_assert(preset.contains("v59-scroll-water-recovery-debug.apk"), "APK name")
+	_assert(flags.contains("APP_VERSION_CODE := 60"), "versionCode 60")
+	_assert(preset.contains("version/code=60"), "export 60")
+	_assert(preset.contains("0.1.60-scroll-handoff-day-fix"), "version name")
+	_assert(preset.contains("v60-scroll-handoff-day-fix-debug.apk"), "APK name")
 	_assert(gitignore.contains("*.apk"), "apks ignored by default")
-	_assert(export_sh.contains("v59-scroll-water-recovery-debug.apk"), "export default")
+	_assert(export_sh.contains("v60-scroll-handoff-day-fix-debug.apk"), "export default")
+	_assert(chest.contains("_arm_scroll_hidden_behind_lip"), "scroll armed visible while buried")
+	_assert(chest.contains("SCROLL_START_ABOVE_RIM := -0.42"), "deeper buried scroll start")
+	_assert(chest.contains("SCROLL_FINAL_ABOVE_RIM := 0.84"), "final exposure ~84%")
+	_assert(chest.contains("TRANS_SINE") and chest.contains("EASE_IN_OUT"), "smooth in-out scroll rise")
+	_assert(env_script.contains("15.5"), "late-afternoon DAY keyframe")
+	_assert(env_script.contains("phase == \"day\""), "DAY hard-hides stars/moon")
 	_assert(not env_script.contains("var _top_shade"), "top shade var removed")
 	_assert(not env_script.contains('name = "TopReadabilityShade"'), "top shade node not created")
 	_assert(env_script.contains("get_datetime_dict_from_system"), "local time via system datetime")
@@ -318,7 +324,8 @@ func _run() -> void:
 	_assert(absf(LoveNotesChest.CAVITY_RIM_CANVAS_Y - 269.0) < 0.01, "cavity rim at lip top")
 	_assert(absf(LoveNotesChest.CAVITY_CENTER_CANVAS_X - 219.0) < 0.01, "geometric cavity center x")
 	_assert(absf(LoveNotesChest.SCROLL_X_BIAS_CANVAS - 28.0) < 0.01, "scroll X bias 28 canvas")
-	_assert(LoveNotesChest.SCROLL_START_ABOVE_RIM < -0.15, "scroll start buried below rim")
+	_assert(LoveNotesChest.SCROLL_START_ABOVE_RIM <= -0.35, "scroll start deeply buried below rim")
+	_assert(LoveNotesChest.SCROLL_FINAL_ABOVE_RIM >= 0.80 and LoveNotesChest.SCROLL_FINAL_ABOVE_RIM <= 0.90, "final exposure 80-90%")
 	_assert(LoveNotesChest.SCROLL_CONTENT_TOP_PAD < 0.02, "top pad matches measured art")
 	_assert(LoveNotesChest.SCROLL_CONTENT_BOTTOM_PAD < 0.02, "bottom pad matches measured art")
 
@@ -330,6 +337,7 @@ func _run() -> void:
 		{"h": 10.0, "phase": "day", "stars_max": 0.01, "stars_hidden": true},
 		{"h": 11.0, "phase": "day", "stars_max": 0.01, "stars_hidden": true},
 		{"h": 12.0, "phase": "day", "stars_max": 0.01, "stars_hidden": true},
+		{"h": 15.566, "phase": "day", "stars_max": 0.01, "stars_hidden": true, "day_horizon": true},
 		{"h": 18.5, "phase": "sunset", "stars_min": 0.1},
 		{"h": 21.0, "phase": "night", "stars_min": 0.6},
 	]:
@@ -344,21 +352,27 @@ func _run() -> void:
 			_assert(float(pal["star_a"]) <= float(hour_case["stars_max"]), "stars faded @%.1f" % float(hour_case["h"]))
 		if hour_case.get("stars_hidden", false):
 			_assert(env._stars.visible == false or env._stars.modulate.a <= 0.01, "stars hidden @%.1f" % float(hour_case["h"]))
+		if hour_case.get("day_horizon", false):
+			## 15:34 must stay daytime blue — not orange/pink sunset-dominant horizon.
+			var hz := pal["sky_horizon"] as Color
+			_assert(hz.b >= hz.r * 0.90, "15:34 horizon still daytime blue-dominant")
+			_assert((pal["sky_top"] as Color).a >= 0.98, "15:34 sky_top opaque")
+			_assert(env._stars.visible == false or env._stars.modulate.a <= 0.01, "15:34 moon/stars hidden")
 		_assert(env._ocean_tint.color.a > 0.05, "ocean tint active @%.1f" % float(hour_case["h"]))
-	## 11:47 late-morning must clearly be DAY (physical-device review hour).
-	var day_pal := ChestEnvironment.tod_palette_at(11.783)
-	_assert(str(day_pal["phase"]) == "day", "11:47 is DAY")
-	_assert(float(day_pal["star_a"]) <= 0.001, "11:47 stars fully hidden")
-	_assert((day_pal["sky_top"] as Color).a >= 0.95, "11:47 sky wash opaque enough for day")
-	ChestEnvironment.debug_hour_override = 11.783
+	## 15:34 mid-afternoon must clearly be DAY (physical-device review hour).
+	var day_pal := ChestEnvironment.tod_palette_at(15.566)
+	_assert(str(day_pal["phase"]) == "day", "15:34 is DAY")
+	_assert(float(day_pal["star_a"]) <= 0.001, "15:34 stars fully hidden")
+	_assert((day_pal["sky_top"] as Color).a >= 0.98, "15:34 sky wash opaque enough for day")
+	ChestEnvironment.debug_hour_override = 15.566
 	env._apply_time_of_day(true)
 	await process_frame
-	_assert(env._stars.visible == false or env._stars.modulate.a <= 0.01, "11:47 stars node hidden")
-	_assert(env._base_fill.color.a >= 0.999, "11:47 base fill opaque")
+	_assert(env._stars.visible == false or env._stars.modulate.a <= 0.01, "15:34 stars node hidden")
+	_assert(env._base_fill.color.a >= 0.999, "15:34 base fill opaque")
 	var top_delta := absf(env._base_fill.color.r - (day_pal["sky_top"] as Color).r) \
 		+ absf(env._base_fill.color.g - (day_pal["sky_top"] as Color).g) \
 		+ absf(env._base_fill.color.b - (day_pal["sky_top"] as Color).b)
-	_assert(top_delta < 0.02, "11:47 base_fill matches opaque sky_top (no top strip)")
+	_assert(top_delta < 0.02, "15:34 base_fill matches opaque sky_top (no top strip)")
 	## Smooth mid-phase blend (06:30 should sit between dawn keyframes).
 	var dawn_mid := ChestEnvironment.tod_palette_at(6.5)
 	var dawn_start := ChestEnvironment.tod_palette_at(5.0)
@@ -420,7 +434,7 @@ func _run() -> void:
 	var native_aspect := LoveNotesChest.SCROLL_NATIVE.x / LoveNotesChest.SCROLL_NATIVE.y
 	var runtime_aspect := scroll_w / maxf(scroll_h, 0.01)
 	_assert(absf(runtime_aspect - native_aspect) < 0.05, "scroll aspect preserved")
-	## Final pose: ~85–90% of CONTENT height above rim (pad-aware).
+	## Final pose: ~80–90% of CONTENT height above rim (pad-aware).
 	var rim_y_check := node._anchor_rect.position.y + (LoveNotesChest.CAVITY_RIM_CANVAS_Y / LoveNotesChest.FRAME_CANVAS.y) * node._anchor_rect.size.y
 	var scroll_top_check := node._scroll_clip.position.y + node._scroll_view.position.y
 	var scroll_bot_check := scroll_top_check + scroll_h
@@ -428,13 +442,17 @@ func _run() -> void:
 	var content_h := scroll_h * content_frac
 	var content_top := scroll_top_check + scroll_h * LoveNotesChest.SCROLL_CONTENT_TOP_PAD
 	var above_frac := (rim_y_check - content_top) / maxf(content_h, 0.01)
-	_assert(above_frac >= 0.85 and above_frac <= 0.92, "final content visible ~85-90%% (got %.2f)" % above_frac)
+	_assert(above_frac >= 0.80 and above_frac <= 0.90, "final content visible ~80-90%% (got %.2f)" % above_frac)
 	## Clipping root-cause fix: cavity clip must fully contain scroll at peek and final.
 	_assert(scroll_top_check >= node._scroll_clip.position.y - 0.5, "final scroll top inside clip")
 	_assert(scroll_bot_check <= node._scroll_clip.position.y + node._scroll_clip.size.y + 0.5, "final scroll bottom inside clip")
-	## rise=0: content buried below lip. Peek probe uses rise↔above helper.
-	node._set_scroll_rise_amount(0.0)
+	## rise=0: content buried below lip AND already visible (no late visible=true).
+	node._arm_scroll_hidden_behind_lip()
 	await process_frame
+	_assert(node._scroll_clip.visible, "scroll clip visible while still buried")
+	_assert(node._scroll_view.visible, "scroll view visible while still buried")
+	_assert(node._rim_view.visible, "rim visible while scroll buried")
+	_assert(node._frame_view.modulate == Color(1, 1, 1, 1), "open-back neutral at buried arm")
 	var hidden_top := node._scroll_clip.position.y + node._scroll_view.position.y
 	var rim_y_start := node._anchor_rect.position.y + (LoveNotesChest.CAVITY_RIM_CANVAS_Y / LoveNotesChest.FRAME_CANVAS.y) * node._anchor_rect.size.y
 	var hidden_content_top := hidden_top + node._scroll_view.size.y * LoveNotesChest.SCROLL_CONTENT_TOP_PAD

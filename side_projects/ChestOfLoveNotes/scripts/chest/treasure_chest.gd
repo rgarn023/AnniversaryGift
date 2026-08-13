@@ -1,6 +1,6 @@
 extends Control
 class_name LoveNotesChest
-## animation_v2 approved 13-frame chest opening (v59 scroll + water recovery).
+## animation_v2 approved 13-frame chest opening (v60 scroll handoff + day fix).
 ## Empty + unread share the same smooth multi-frame open (#00→#12).
 ## No chest crossfade / alpha fade / ghost duplicate — exactly ONE visible chest
 ## frame at any instant. Unread then switches cleanly to open-back + scroll +
@@ -10,6 +10,9 @@ class_name LoveNotesChest
 ## opaque open-back cavity wood (v56 had zeroed cavity alpha → hole / gray band).
 ## v59: keep the simple rear → scroll → front-rim stack; bury start fully behind
 ## the lip; small additional +X; accurate content-pad rise math. No cavity mask.
+## v60: arm scroll visible WHILE still fully buried behind the front lip; deepen
+## start Y; keep open-back modulate neutral at handoff; layers re-derived from
+## chest_12 for exact composite match; slightly lower final pose.
 ## Chest plant/frames/size remain frozen.
 
 signal tapped
@@ -110,12 +113,13 @@ const CAVITY_CENTER_CANVAS_X := 219.0
 const SCROLL_X_BIAS_CANVAS := 28.0
 const CAVITY_INNER_LEFT_X := 137.0
 const CAVITY_INNER_RIGHT_X := 301.0
-## Final reward: ~88% of CONTENT height above the front rim (85–90% visible).
-## Keeps a clear lower bite behind the front lip so the scroll reads as inside.
-const SCROLL_FINAL_ABOVE_RIM := 0.88
+## Final reward: ~84% of CONTENT height above the front rim (80–90% visible).
+## Slightly below v59 so the parchment does not sit on the rear-lid / hinge band.
+const SCROLL_FINAL_ABOVE_RIM := 0.84
 ## At rise=0 the CONTENT is buried below the lip (negative = lower / forward in
-## the front pocket). Fully hidden; first visible tip ~5% then 10–15% → final.
-const SCROLL_START_ABOVE_RIM := -0.24
+## the front pocket). Fully hidden behind the lip BEFORE the tween starts; first
+## visible tip ~5% then 10 → 25 → 50 → 75 → final.
+const SCROLL_START_ABOVE_RIM := -0.42
 const SCROLL_PEEK_ABOVE_RIM := 0.05
 ## Soft glow peaks — restrained warm accent; never washes out rim/scroll/wood.
 ## v53: slightly softer central glow during emerge/hold for crisp parchment.
@@ -731,9 +735,12 @@ func _show_frame_index(index: int) -> void:
 
 func _enter_layered_open() -> void:
 	## Clean switch from fully-open frame #12 to open-back + rim (no duplicate).
+	## open_back + front_rim are re-derived to pixel-match chest_12 — keep
+	## modulate neutral so the handoff does not darken the rear/interior.
 	_layered_open = true
 	if _frame_view and _open_back_tex:
 		_frame_view.texture = _open_back_tex
+		_frame_view.modulate = Color(1, 1, 1, 1)
 	_set_scroll_layers_visible(true)
 	_enforce_chest_opaque()
 
@@ -743,6 +750,25 @@ func _exit_layered_open() -> void:
 	_set_scroll_layers_visible(false)
 	if _active_frames.size() > 0 and _frame_view:
 		_frame_view.texture = _active_frames[clampi(_frame_index, 0, _active_frames.size() - 1)]
+		_frame_view.modulate = Color(1, 1, 1, 1)
+	_enforce_chest_opaque()
+
+
+func _arm_scroll_hidden_behind_lip() -> void:
+	## CRITICAL order: enter layered open + place at buried Y + set visible=true
+	## WHILE the scroll is still fully hidden behind the front lip. The tween
+	## must start from this already-visible buried pose (no late alpha pop).
+	_enter_layered_open()
+	_scroll_rise = 0.0
+	_place_scroll_and_rim()
+	if _scroll_clip:
+		_scroll_clip.visible = true
+	if _scroll_view:
+		_scroll_view.visible = true
+		_scroll_view.modulate = Color(1, 1, 1, 1)
+	if _rim_view:
+		_rim_view.visible = true
+	if _frame_view:
 		_frame_view.modulate = Color(1, 1, 1, 1)
 	_enforce_chest_opaque()
 
@@ -802,18 +828,22 @@ static func scroll_above_rim_at_rise(rise: float) -> float:
 
 func _set_scroll_rise_amount(amount: float) -> void:
 	_scroll_rise = clampf(amount, 0.0, 1.0)
-	if _scroll_rise > 0.001 and not _layered_open:
+	if not _layered_open:
 		_enter_layered_open()
 	_place_scroll_and_rim()
+	## Keep layers visible for the whole emerge — never wait until the scroll
+	## has already moved above the lip before turning visible on.
+	_set_scroll_layers_visible(true)
+	if _scroll_view:
+		_scroll_view.visible = true
+		_scroll_view.modulate = Color(1, 1, 1, 1)
 	var above_now := scroll_above_rim_at_rise(_scroll_rise)
 	## Emit once the tip clears the lip — not while still buried in the front pocket.
-	if above_now > 0.01:
-		_set_scroll_layers_visible(true)
-		if not _scroll_emerged_emitted:
-			_scroll_emerged_emitted = true
-			chest_state = ChestState.OPEN_SCROLL_EMERGING
-			sfx_scroll_emerge.emit()
-			scroll_emerged.emit(get_scroll_global_center())
+	if above_now > 0.01 and not _scroll_emerged_emitted:
+		_scroll_emerged_emitted = true
+		chest_state = ChestState.OPEN_SCROLL_EMERGING
+		sfx_scroll_emerge.emit()
+		scroll_emerged.emit(get_scroll_global_center())
 
 
 func _set_frame_progress(raw_amount: float, emerge_scroll: bool) -> void:
@@ -1119,13 +1149,9 @@ func _open_short() -> void:
 func _play_scroll_rise_tween(duration: float) -> void:
 	## Continuous Y translation of ONE horizontal scroll — never rotate/scale/swap.
 	chest_state = ChestState.OPEN_SCROLL_EMERGING
-	_enter_layered_open()
-	_set_scroll_rise_amount(0.0)
-	## Soften glow/spill + baked open-back light during rise so parchment stays crisp.
-	if _frame_view:
-		var back_dim := create_tween()
-		## Dim cavity light behind scroll — keep warm ambiance without washing parchment.
-		back_dim.tween_property(_frame_view, "modulate", Color(0.74, 0.70, 0.62, 1.0), duration * 0.18).set_trans(Tween.TRANS_SINE)
+	## Visible + buried first; tween begins only after that pose is committed.
+	_arm_scroll_hidden_behind_lip()
+	## Restrained glow/spill only — do NOT dim open-back (handoff must match #12).
 	if _glow_pulse:
 		var glow_in := create_tween()
 		glow_in.tween_property(_glow_pulse, "modulate:a", GLOW_EMERGE_A, duration * 0.14).set_trans(Tween.TRANS_SINE)
@@ -1133,14 +1159,15 @@ func _play_scroll_rise_tween(duration: float) -> void:
 		var spill_in := create_tween()
 		spill_in.tween_property(_warm_spill, "modulate:a", 0.018, duration * 0.14).set_trans(Tween.TRANS_SINE)
 	var rise := create_tween()
-	## Continuous ease-out Y rise: fully hidden → ~5% peek → final (~88%).
+	## Smooth in-out Y rise: buried → ~5% peek → final (~84%).
+	## Avoid ease-out-only (that races past the lip before the first readable frame).
 	## Single continuous tween — no bounce / elastic / overshoot / frame swap.
-	rise.tween_method(_set_scroll_rise_amount, 0.00, 1.00, duration).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	rise.tween_method(_set_scroll_rise_amount, 0.00, 1.00, duration).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	await rise.finished
 	_set_scroll_rise_amount(1.0)
 	if _frame_view:
-		var back_hold := create_tween()
-		back_hold.tween_property(_frame_view, "modulate", Color(0.90, 0.87, 0.80, 1.0), 0.14).set_trans(Tween.TRANS_SINE)
+		## Keep rear/interior neutral through the hold (identical to #12 composite).
+		_frame_view.modulate = Color(1, 1, 1, 1)
 	if _glow_pulse:
 		var glow_hold := create_tween()
 		glow_hold.tween_property(_glow_pulse, "modulate:a", GLOW_REWARD_HOLD_A, 0.12).set_trans(Tween.TRANS_SINE)
@@ -1206,14 +1233,11 @@ func _open_full() -> void:
 		_apply_finished_state()
 		return
 
-	## Switch to open-back + rim (scroll still hidden), brief beat, then Y-rise.
-	## Handoff keeps identical plant/size/scale as frame #12 — only texture swaps.
+	## Switch to open-back + rim with scroll already visible but fully buried,
+	## brief beat, then Y-rise. Handoff keeps identical plant/size/scale/color
+	## as frame #12 — only the layer split (exact pixel composite).
 	if _show_scroll_on_finish:
-		_enter_layered_open()
-		_set_scroll_rise_amount(0.0)
-		## Keep open-back nearly neutral at handoff (avoid a visible brightness jump).
-		if _frame_view:
-			_frame_view.modulate = Color(0.94, 0.91, 0.86, 1.0)
+		_arm_scroll_hidden_behind_lip()
 		if _glow_pulse:
 			_glow_pulse.modulate.a = GLOW_EMERGE_A
 		await get_tree().create_timer(SCROLL_POST_OPEN_BEAT_SEC).timeout
@@ -1288,7 +1312,7 @@ func _apply_finished_state() -> void:
 		_set_scroll_rise_amount(1.0)
 		_set_scroll_layers_visible(true)
 		if _frame_view:
-			_frame_view.modulate = Color(0.90, 0.87, 0.80, 1.0)
+			_frame_view.modulate = Color(1, 1, 1, 1)
 	else:
 		_layered_open = false
 		_set_scroll_layers_visible(false)

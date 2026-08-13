@@ -10,6 +10,8 @@ class_name ChestEnvironment
 ## v59: restore continuous rectangular water-band clip (v57). The v58 shoreline
 ## TextureRect + CLIP_CHILDREN_ONLY mask produced vertical band / tile glitches.
 ## Shimmer stays one water-only region — no segmented mask panels.
+## v60: hold a true DAY keyframe through mid-afternoon (15:30) so 15:34 local
+## cannot 80%-blend into the 17:00 sunset palette (moon/orange horizon leak).
 ## Device-LOCAL via Time.get_datetime_dict_from_system(); resume + periodic TOD.
 
 const ENV_DEFAULT_BEACH := "default_beach"
@@ -68,7 +70,8 @@ const TOD_REFRESH_SEC := 60.0
 
 ## Time-of-day keyframes (local clock hours). Smooth lerp between neighbors.
 ## Phases: NIGHT 20–05, DAWN 05–08, DAY 08–17, SUNSET 17–20.
-const TOD_HOURS := [0.0, 5.0, 6.5, 8.0, 12.0, 17.0, 18.5, 20.0, 24.0]
+## Late-afternoon DAY hold at 15.5 prevents early sunset wash before 17:00.
+const TOD_HOURS := [0.0, 5.0, 6.5, 8.0, 12.0, 15.5, 17.0, 18.5, 20.0, 24.0]
 
 
 static func preload_assets() -> void:
@@ -206,9 +209,21 @@ static func tod_palette_at(hour: float) -> Dictionary:
 			"star_a": 0.0,
 			"glisten_a": 0.90,
 		},
-		{ ## 17:00 sunset start — keep upper sky nearly opaque so late DAY
-			## (e.g. 15:56) cannot lerp into a translucent wash that reveals the
-			## baked moon/stars in default_beach.png before true sunset.
+		{ ## 15:30 late-afternoon DAY hold — still clearly day at ~15:34.
+			## Very subtle warm horizon only; moon/stars stay fully hidden; sky
+			## wash stays opaque so baked crescent in default_beach.png cannot show.
+			"base": Color(0.36, 0.56, 0.84, 1.0),
+			"sky_top": Color(0.32, 0.60, 0.98, 1.0),
+			"sky_mid": Color(0.50, 0.76, 1.0, 1.0),
+			"sky_lower": Color(0.70, 0.88, 1.0, 0.98),
+			"sky_horizon": Color(0.88, 0.94, 0.98, 0.90),
+			"bg_mod": Color(1.10, 1.08, 1.04, 1.0),
+			"ocean": Color(0.20, 0.56, 0.80, 0.20),
+			"shimmer": Color(1.0, 0.98, 0.90, 1.0),
+			"star_a": 0.0,
+			"glisten_a": 0.88,
+		},
+		{ ## 17:00 sunset start — sunset colors begin here, not during DAY.
 			"base": Color(0.22, 0.28, 0.48, 1.0),
 			"sky_top": Color(0.28, 0.42, 0.78, 0.96),
 			"sky_mid": Color(0.48, 0.40, 0.70, 0.90),
@@ -583,12 +598,32 @@ func _apply_time_of_day(force: bool = false) -> void:
 	RenderingServer.set_default_clear_color(top_fill)
 	if _bg:
 		_bg.modulate = pal["bg_mod"] as Color
+	## DAY hard rule: keep sky wash near-opaque so baked beach moon cannot show.
+	var phase := str(pal.get("phase", ""))
+	if phase == "day":
+		var st := pal["sky_top"] as Color
+		var sm := pal["sky_mid"] as Color
+		var sl := pal["sky_lower"] as Color
+		var sh := pal["sky_horizon"] as Color
+		pal["sky_top"] = Color(st.r, st.g, st.b, maxf(st.a, 0.98))
+		pal["sky_mid"] = Color(sm.r, sm.g, sm.b, maxf(sm.a, 0.96))
+		pal["sky_lower"] = Color(sl.r, sl.g, sl.b, maxf(sl.a, 0.92))
+		pal["sky_horizon"] = Color(sh.r, sh.g, sh.b, maxf(sh.a, 0.85))
+		pal["star_a"] = 0.0
+		sky_top = pal["sky_top"] as Color
+		top_fill = Color(sky_top.r, sky_top.g, sky_top.b, 1.0)
+		if _base_fill:
+			_base_fill.color = top_fill
+		RenderingServer.set_default_clear_color(top_fill)
 	_apply_sky_gradient(pal)
 	if _stars:
 		var sa := float(pal["star_a"])
+		## HARD RULE: DAY keeps moon/stars fully off (no partial / stale residue).
+		if phase == "day":
+			sa = 0.0
 		_stars.modulate = Color(1.0, 1.0, 1.05, sa)
 		## DAY: fully hidden (no moon/starfield). Dawn/sunset interpolate via alpha.
-		## Baked moon in beach art is covered by near-opaque day sky wash.
+		## Baked moon in beach art is covered by opaque day sky wash.
 		_stars.visible = sa > 0.01
 	if _ocean_tint:
 		_ocean_tint.color = pal["ocean"] as Color
