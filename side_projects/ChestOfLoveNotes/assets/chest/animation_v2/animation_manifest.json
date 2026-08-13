@@ -2,6 +2,13 @@
   "package": "animation_v2",
   "pass": "asset_preparation_only",
   "godot_integration": false,
+  "incoming_new_art": {
+    "status": "validation_failed_regenerate_art",
+    "verdict": "FAIL — REGENERATE ART",
+    "report": "notes/INCOMING_NEW_ART_VALIDATION_FAIL.md",
+    "audit_json": "notes/incoming_new_art_audit.json",
+    "production_assets_replaced": false
+  },
   "source_files": [
     {
       "path": "assets/chest/animation/glowing_treasure_chest_opening_sprite_sheet.png",

@@ -103,8 +103,20 @@ Under `validation/`:
 
 ## Tooling
 
-Regenerate with:
+Regenerate prior (glowing/magical) package with:
 
 ```bash
 python3 tools/prepare_animation_v2_assets.py
 ```
+
+Audit new candidate masters under `incoming_new_art/` with:
+
+```bash
+python3 tools/audit_incoming_animation_v2_art.py
+```
+
+### incoming_new_art (2026-08-13)
+
+**FAIL — REGENERATE ART.** Measured 4×4 / 384×256 grid, 13 occupied cells.  
+Frames 0–8 geometry-compatible; 9–12 rejected (narrowing; #11 top-sheared).  
+No production replacements. Details: `notes/INCOMING_NEW_ART_VALIDATION_FAIL.md`.

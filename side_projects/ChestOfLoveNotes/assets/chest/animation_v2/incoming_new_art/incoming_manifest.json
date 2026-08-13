@@ -1,8 +1,22 @@
 {
-  "status": "candidate_assets_pending_validation",
+  "status": "validation_failed_regenerate_art",
   "chest_master_sheet": "new_chest_opening_master_sheet.png",
   "scroll_master": "new_love_scroll_master.png",
   "integration_allowed": false,
-  "next_action": "Cursor asset validation and extraction only",
-  "important": "Derive open-back and front-rim layers from the exact accepted fully-open frame, not from independently generated images."
+  "audit": {
+    "master_dimensions": [1536, 1024],
+    "grid": "4x4",
+    "cell": [384, 256],
+    "candidates_inspected": 13,
+    "geometry_compatible_indices": [0, 1, 2, 3, 4, 5, 6, 7, 8],
+    "rejected_indices": [9, 10, 11, 12],
+    "production_frames_extracted": 0,
+    "layers_derived": false,
+    "scroll_production_committed": false,
+    "verdict": "FAIL — REGENERATE ART",
+    "report": "../notes/INCOMING_NEW_ART_VALIDATION_FAIL.md",
+    "audit_json": "../notes/incoming_new_art_audit.json"
+  },
+  "important": "Do not integrate this sheet. Late open poses narrow/remorph; frame 11 is top-sheared. Derive open-back/front-rim only from an accepted fully-open frame after regeneration.",
+  "next_action": "Regenerate late-open and fully-open poses matching frame 0 body width with extra vertical headroom; re-run tools/audit_incoming_animation_v2_art.py"
 }
