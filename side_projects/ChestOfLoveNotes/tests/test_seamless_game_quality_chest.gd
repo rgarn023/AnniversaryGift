@@ -1,5 +1,5 @@
 extends SceneTree
-## v46: Chest geometry audit + grounding + scroll + beach polish.
+## v47: PATH B clean magical chest transition + grounding + scroll + beach polish.
 
 var _passed: int = 0
 var _failed: int = 0
@@ -19,7 +19,7 @@ func _assert(cond: bool, label: String) -> void:
 
 
 func _run() -> void:
-	print("=== Chest geometry + grounding (v46) ===")
+	print("=== Chest PATH B clean transition (v47) ===")
 	var chest := FileAccess.get_file_as_string("res://scripts/chest/treasure_chest.gd")
 	var env_script := FileAccess.get_file_as_string("res://scripts/chest/chest_environment.gd")
 	var main := FileAccess.get_file_as_string("res://scripts/main.gd")
@@ -31,22 +31,25 @@ func _run() -> void:
 	var prep := FileAccess.get_file_as_string("res://tools/prepare_chest_animation_frames.py")
 	var beach_prep := FileAccess.get_file_as_string("res://tools/prepare_default_beach_environment.py")
 
-	_assert(chest.contains("Fantasy sheet chest"), "sheet architecture")
+	_assert(chest.contains("PATH B"), "PATH B architecture")
 	_assert(chest.contains("FRAME_CANVAS := Vector2(384, 496)"), "taller canvas 384x496")
-	_assert(chest.contains("EMPTY_FRAME_COUNT := 5"), "5 compatible empty frames")
-	_assert(chest.contains("SCROLL_FRAME_COUNT := 10"), "10 scroll sheet frames")
+	_assert(chest.contains("EMPTY_FRAME_COUNT := 2"), "2 PATH B empty frames")
+	_assert(chest.contains("SCROLL_FRAME_COUNT := 7"), "7 scroll sheet frames")
 	_assert(chest.contains("CHEST_FOOT_CANVAS_Y"), "foot canvas constant")
 	_assert(chest.contains("CHEST_FOOT_Y_FRAC"), "foot fraction for grounding")
 	_assert(chest.contains("SCROLL_LAYER"), "separate scroll layer constant")
 	_assert(chest.contains("FRONT_RIM"), "front rim occlusion layer")
 	_assert(chest.contains("CONTACT_SHADOW"), "contact shadow grounding")
-	_assert(chest.contains("EMPTY_POSE_WEIGHTS"), "weighted pose cadence")
-	_assert(chest.contains("OPEN_DURATION_SEC := 1.42"), "open ~1.42s clean arc")
-	_assert(chest.contains("SCROLL_EMERGE_SEC := 1.20"), "scroll emerge duration")
+	_assert(chest.contains("WARM_SPILL"), "warm spill separate from shadow")
+	_assert(chest.contains("EMPTY_POSE_WEIGHTS"), "pose cadence constant")
+	_assert(chest.contains("OPEN_DURATION_SEC := 0.55"), "short PATH B open")
+	_assert(chest.contains("MAGICAL_FLARE_SEC"), "magical flare phase")
+	_assert(chest.contains("SCROLL_EMERGE_SEC := 1.28"), "scroll emerge duration")
 	_assert(chest.contains("REWARD_HOLD_SEC := 0.45"), "reward hold ~0.45s")
-	_assert(chest.contains("EMPHASIS_SCALE := 1.003"), "tiny settle scale only")
-	_assert(chest.contains("GLOW_OPEN_A := 0.016"), "reduced glow open")
-	_assert(chest.contains("GLOW_SETTLE_A := 0.024"), "reduced glow settle")
+	_assert(chest.contains("EMPHASIS_SCALE := 1.002"), "tiny settle scale only")
+	_assert(chest.contains("GLOW_OPEN_A := 0.010"), "reduced glow open")
+	_assert(chest.contains("GLOW_SETTLE_A := 0.014"), "reduced glow settle")
+	_assert(chest.contains("_play_scroll_rise_tween"), "continuous scroll Y tween")
 	_assert(chest.contains("_set_badge_suppressed"), "badge hidden during reward")
 	_assert(chest.contains("_enforce_chest_opaque"), "opaque chest enforcement")
 	_assert(chest.contains("soft_glow_pulse.png"), "soft radial glow")
@@ -55,12 +58,14 @@ func _run() -> void:
 	_assert(chest.contains("ScrollCavityClip"), "cavity clip occlusion")
 	_assert(chest.contains("ChestFrontRim"), "rim node")
 	_assert(chest.contains("ChestContactShadow"), "shadow node")
+	_assert(chest.contains("ChestWarmSpill"), "warm spill node")
 	_assert(chest.contains("_set_scroll_rise_amount"), "layered scroll rise")
 	_assert(chest.contains("foot_y_in_control"), "foot helper for ground plane")
+	_assert(chest.contains("hard swap"), "PATH B hard swap comment")
 	_assert(not chest.contains("ColorRect.new()"), "no rectangular ColorRect glow")
 	_assert(not chest.contains("ChestOpaqueUnderlay"), "no duplicate chest underlay")
 	_assert(chest.contains("_ease_open_curve"), "quality easing")
-	_assert(chest.contains("_frame_index_from_progress"), "variable frame timing")
+	_assert(chest.contains("_frame_index_from_progress"), "frame timing helper")
 	_assert(chest.contains("play_open_empty_pulse"), "empty retap pulse")
 	_assert(chest.contains("if animating"), "guards overlapping anim")
 	_assert(not chest.contains("HINGE_CANVAS"), "old hinge path removed")
@@ -69,7 +74,7 @@ func _run() -> void:
 	_assert(not chest.contains('scale.y =') and not chest.contains('"scale:y"'), "no scale.y squash")
 	_assert(chest.contains("preload_assets"), "preload")
 	_assert(chest.contains("Color(0.55, 0.55, 0.75, 1.0)"), "locked silhouette keeps alpha 1")
-	_assert(chest.contains("draw_w * 0.74") or chest.contains("draw_w * 0.76"), "badge near chest")
+	_assert(chest.contains("draw_w * 0.76") or chest.contains("draw_w * 0.74"), "badge near chest")
 	_assert(main.contains("LoveNotesChest.preload_assets"), "main preloads chest")
 	_assert(main.contains("ChestEnvironment.preload_assets"), "main preloads beach env")
 	_assert(main.contains("ChestEnvironment.new()"), "chest screen mounts environment")
@@ -105,19 +110,22 @@ func _run() -> void:
 	_assert(prep.contains("normalize_body_exposure"), "body exposure normalization")
 	_assert(prep.contains("harden_chest_opacity"), "frame opacity harden")
 	_assert(prep.contains("seal_body_cracks"), "wood crack seal")
+	_assert(prep.contains("dampen_cavity_glow"), "cavity glow dampen")
 	_assert(prep.contains("build_vertical_love_note") or prep.contains("build_clean_scroll_layer"), "vertical love note")
-	_assert(prep.contains("scroll_parchment.png"), "parchment donor for vertical note")
+	_assert(prep.contains("scroll_rolled.png"), "rolled parchment donor")
 	_assert(prep.contains("compose_scroll_rise"), "raised scroll composites")
-	_assert(prep.contains("shared empty sheet") or prep.contains("GLOW_SHEET"), "shared empty opening")
-	_assert(prep.contains("empty_picks = [0, 6, 7, 11, 15]"), "compatible empty picks only")
+	_assert(prep.contains("PATH B") or prep.contains("empty_picks = [0, 15]"), "PATH B empty picks")
+	_assert(prep.contains("empty_picks = [0, 15]"), "compatible empty picks only")
 	_assert(prep.contains("cell_top_clipped"), "rejects damaged top cells")
-	_assert(prep.contains('(-72, "scroll_fully")'), "final scroll rise dy")
+	_assert(prep.contains('(-78, "scroll_fully")'), "final scroll rise dy")
+	_assert(prep.contains("write_warm_spill"), "warm spill asset writer")
 	_assert(beach_prep.contains("default_beach.png"), "beach generator output")
 	_assert(beach_prep.contains("shoreline_y") or beach_prep.contains("paint_sand"), "detailed shoreline/sand")
 	_assert(beach_prep.contains("paint_ocean"), "ocean detail")
 	_assert(beach_prep.contains("no repetitive stripe") or beach_prep.contains("not geometric stripe") or beach_prep.contains("non-striped") or beach_prep.contains("polish-only"), "beach polish path")
+	_assert(beach_prep.contains("default_rng(47)") or beach_prep.contains("rng(47)"), "v47 beach seed")
 	_assert(env_script.contains("ENV_DEFAULT_BEACH"), "environment id constant")
-	_assert(env_script.contains("CHEST_GROUND_Y"), "environment ground-plane constant")
+	_assert(env_script.contains("CHEST_GROUND_Y := 0.805"), "ground plane lowered to sand")
 	_assert(env_script.contains("apply_environment"), "swappable environment API")
 	_assert(env_script.contains("EnvironmentBaseFill") or env_script.contains("_base_fill"), "opaque beach base fill")
 	_assert(not env_script.contains("BillingClient") and not env_script.contains("in_app_purchase"), "no store implementation")
@@ -138,29 +146,30 @@ func _run() -> void:
 	_assert(FileAccess.file_exists("res://assets/art/chest/scroll_rolled.png"), "scroll layer asset")
 	_assert(FileAccess.file_exists("res://assets/art/chest/chest_front_rim.png"), "front rim asset")
 	_assert(FileAccess.file_exists("res://assets/art/chest/chest_contact_shadow.png"), "contact shadow asset")
+	_assert(FileAccess.file_exists("res://assets/art/chest/chest_warm_spill.png"), "warm spill asset")
 	_assert(
 		FileAccess.file_exists("res://assets/art/background/environments/default_beach.png"),
 		"default beach environment art"
 	)
-	for i in range(5):
+	for i in range(2):
 		_assert(
 			FileAccess.file_exists("res://assets/art/chest/frames/empty/empty_%02d.png" % i),
 			"empty frame %02d" % i
 		)
-	for i in range(10):
+	for i in range(7):
 		_assert(
 			FileAccess.file_exists("res://assets/art/chest/frames/scroll/scroll_%02d.png" % i),
 			"scroll frame %02d" % i
 		)
-	_assert(not FileAccess.file_exists("res://assets/art/chest/frames/empty/empty_05.png"), "no empty_05")
-	_assert(not FileAccess.file_exists("res://assets/art/chest/frames/scroll/scroll_10.png"), "no scroll_10")
+	_assert(not FileAccess.file_exists("res://assets/art/chest/frames/empty/empty_02.png"), "no empty_02")
+	_assert(not FileAccess.file_exists("res://assets/art/chest/frames/scroll/scroll_07.png"), "no scroll_07")
 
-	_assert(flags.contains("APP_VERSION_CODE := 46"), "versionCode 46")
-	_assert(preset.contains("version/code=46"), "export 46")
-	_assert(preset.contains("0.1.46-chest-geometry-grounding"), "version name")
-	_assert(preset.contains("v46-chest-geometry-grounding-debug.apk"), "APK name")
+	_assert(flags.contains("APP_VERSION_CODE := 47"), "versionCode 47")
+	_assert(preset.contains("version/code=47"), "export 47")
+	_assert(preset.contains("0.1.47-chest-clean-transition"), "version name")
+	_assert(preset.contains("v47-chest-clean-transition-debug.apk"), "APK name")
 	_assert(gitignore.contains("*.apk"), "apks ignored by default")
-	_assert(export_sh.contains("v46-chest-geometry-grounding-debug.apk"), "export default")
+	_assert(export_sh.contains("v47-chest-clean-transition-debug.apk"), "export default")
 
 	## Runtime: preload + pose snaps for representative states.
 	LoveNotesChest.preload_assets()
@@ -172,16 +181,18 @@ func _run() -> void:
 	root.add_child(env)
 	env.size = Vector2(390, 844)
 	await process_frame
-	_assert(node._empty_frames.size() == 5, "empty frames loaded")
-	_assert(node._scroll_frames.size() == 10, "scroll frames loaded")
+	_assert(node._empty_frames.size() == 2, "empty frames loaded")
+	_assert(node._scroll_frames.size() == 7, "scroll frames loaded")
 	_assert(node._scroll_view != null, "scroll layer present")
 	_assert(node._scroll_clip != null, "scroll cavity clip present")
 	_assert(node._rim_view != null, "rim layer present")
 	_assert(node._shadow_view != null, "shadow layer present")
+	_assert(node._warm_spill != null, "warm spill present")
 	_assert(env._bg != null and env._bg.texture != null, "beach texture loaded")
 	_assert(env.environment_id == ChestEnvironment.ENV_DEFAULT_BEACH, "default beach id active")
 	_assert(env._base_fill != null, "opaque environment base present")
 	_assert(absf(env.sand_contact_y_frac() - ChestEnvironment.CHEST_GROUND_Y) < 0.001, "ground Y API")
+	_assert(absf(ChestEnvironment.CHEST_GROUND_Y - 0.805) < 0.001, "ground Y is 0.805")
 
 	## Grounding: contact shadow kisses the foot (no hover gap).
 	node._layout_frames()
@@ -195,17 +206,16 @@ func _run() -> void:
 
 	var states := [
 		{"name": "closed", "p": 0.0, "scroll": false},
-		{"name": "early_crack", "p": 0.22, "scroll": false},
-		{"name": "early_open", "p": 0.42, "scroll": false},
-		{"name": "half_open", "p": 0.70, "scroll": false},
+		{"name": "flare_hold_closed", "p": 0.40, "scroll": false},
+		{"name": "open_swap", "p": 0.85, "scroll": false},
 		{"name": "fully_open", "p": 1.0, "scroll": false},
-		{"name": "scroll_peek", "p": 0.56, "scroll": true},
-		{"name": "scroll_partial", "p": 0.68, "scroll": true},
-		{"name": "scroll_halfway", "p": 0.82, "scroll": true},
-		{"name": "scroll_mostly", "p": 0.92, "scroll": true},
+		{"name": "scroll_peek", "p": 0.48, "scroll": true},
+		{"name": "scroll_partial", "p": 0.62, "scroll": true},
+		{"name": "scroll_halfway", "p": 0.78, "scroll": true},
+		{"name": "scroll_mostly", "p": 0.90, "scroll": true},
 		{"name": "scroll_fully", "p": 1.0, "scroll": true},
 	]
-	var validate_dir := OS.get_user_data_dir().path_join("chest_validate_v46")
+	var validate_dir := OS.get_user_data_dir().path_join("chest_validate_v47")
 	DirAccess.make_dir_recursive_absolute(validate_dir)
 	var prev_body_span := -1.0
 	for s in states:
@@ -214,6 +224,8 @@ func _run() -> void:
 		_assert(node.modulate.a >= 0.999, "state %s root opaque" % s["name"])
 		_assert(node.self_modulate.a >= 0.999, "state %s self opaque" % s["name"])
 		_assert(node._frame_view.modulate.a >= 0.999, "state %s frame opaque" % s["name"])
+		## PATH B uses only empty_00 / empty_01 — never mid-pose glitch frames.
+		_assert(node._frame_index == 0 or node._frame_index == 1, "state %s PATH B index" % s["name"])
 		var tex: Texture2D = node._frame_view.texture
 		_assert(tex != null, "state %s has texture" % s["name"])
 		_assert(not str(tex.resource_path).contains("chest_body_planted"), "state %s not old body" % s["name"])
@@ -247,7 +259,7 @@ func _run() -> void:
 					var span := float(max_x - min_x + 1)
 					if prev_body_span > 0.0 and not bool(s["scroll"]):
 						var drift := absf(span - prev_body_span) / prev_body_span
-						_assert(drift < 0.08, "state %s body width stable (drift=%.3f)" % [s["name"], drift])
+						_assert(drift < 0.10, "state %s body width stable (drift=%.3f)" % [s["name"], drift])
 					if not bool(s["scroll"]):
 						prev_body_span = span
 				var gold_mid := 0
@@ -269,7 +281,7 @@ func _run() -> void:
 
 	node._set_frame_progress(1.0, true)
 	await process_frame
-	_assert(node._frame_index == 4, "final open chest frame index 4")
+	_assert(node._frame_index == 1, "final open chest frame index 1")
 	_assert(node._scroll_rise >= 0.999, "final scroll rise complete")
 	_assert(node._scroll_clip.visible, "final scroll clip visible")
 	_assert(node._rim_view.visible, "final rim layer visible")

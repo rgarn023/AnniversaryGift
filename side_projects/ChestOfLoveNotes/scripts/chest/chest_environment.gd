@@ -130,7 +130,8 @@ func _process(delta: float) -> void:
 
 ## Sand contact / ground plane as a fraction of this control's height.
 ## Main chest host aligns LoveNotesChest foot to this constant (CHEST_GROUND_Y).
-const CHEST_GROUND_Y := 0.76
+## v47: lowered onto the foreground sand plane (was 0.76 — read as hovering).
+const CHEST_GROUND_Y := 0.805
 
 
 func sand_contact_y_frac() -> float:

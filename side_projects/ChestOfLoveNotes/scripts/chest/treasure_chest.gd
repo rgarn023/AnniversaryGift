@@ -1,10 +1,11 @@
 extends Control
 class_name LoveNotesChest
-## Fantasy sheet chest animation — deterministic cropped frames from the
-## authoritative sprite sheets (not the old hinged bronze lid path).
-## Empty + unread share glowing-sheet opening geometry (one chest family).
-## Unread then reveals a SEPARATE parchment scroll layer under a front-rim
-## occlusion layer (never lid-over-scroll baked composites at runtime).
+## Fantasy sheet chest animation — PATH B clean short magical transition.
+## Source sheets lack enough matched lid in-betweens for a fluid multi-frame open.
+## Empty + unread share glowing-sheet endpoints only: closed → magical flare →
+## hard swap to open (never translucent crossfade / warped lid / mid-pose glitches).
+## Unread then reveals a SEPARATE rolled parchment scroll layer under a front-rim
+## occlusion layer (continuous Y tween — never baked scroll pose jumps at runtime).
 ## Exactly one TextureRect chest sprite is visible at all times — never a
 ## second chest overlay / contaminated scroll-layer chest pixels.
 
@@ -40,48 +41,46 @@ const SOFT_GLOW := "res://assets/art/chest/soft_glow_pulse.png"
 const SCROLL_LAYER := "res://assets/art/chest/scroll_rolled.png"
 const FRONT_RIM := "res://assets/art/chest/chest_front_rim.png"
 const CONTACT_SHADOW := "res://assets/art/chest/chest_contact_shadow.png"
-## Taller transparent canvas (foot locked at y=367) — extra headroom, no plant drift.
+const WARM_SPILL := "res://assets/art/chest/chest_warm_spill.png"
+## Taller transparent canvas (foot locked) — extra headroom, no plant drift.
 const FRAME_CANVAS := Vector2(384, 496)
 ## Absolute plant row in authored frames (matches prepare lock foot / BASE_Y).
 const CHEST_FOOT_CANVAS_Y := 394.0
 ## Foot as fraction of FRAME_CANVAS height — scene grounding uses this.
 const CHEST_FOOT_Y_FRAC := CHEST_FOOT_CANVAS_Y / 496.0
-## Clean geometrically-compatible opening only (v46 audit): closed→crack→early→half→open.
-const EMPTY_FRAME_COUNT := 5
-## Scroll sheet: 5 shared open poses + 5 layered rise composites (preload only).
-const SCROLL_FRAME_COUNT := 10
-## Deliberate reward cadence — shorter clean arc beats longer mismatched swaps.
-const OPEN_DURATION_SEC := 1.42
-const OPEN_DURATION_RM := 0.32
+## PATH B: only closed + open endpoints (no incompatible mid-lid poses).
+const EMPTY_FRAME_COUNT := 2
+## Scroll sheet: 2 shared endpoints + 5 layered rise composites (preload only).
+const SCROLL_FRAME_COUNT := 7
+## PATH B cadence — short intentional magical open, not a long broken lid arc.
+const OPEN_DURATION_SEC := 0.55
+const OPEN_DURATION_RM := 0.22
 const ANTICIPATION_SEC := 0.10
-const SETTLE_SEC := 0.11
-const MAGICAL_SWELL_SEC := 0.12
-## Scroll emerge after fully open — peek→25%→50%→65–70%→final.
-const SCROLL_EMERGE_SEC := 1.20
+const MAGICAL_FLARE_SEC := 0.26
+const SETTLE_SEC := 0.14
+const MAGICAL_SWELL_SEC := 0.10
+## Scroll emerge after open — continuous Y: peek→25%→50%→70%→final.
+const SCROLL_EMERGE_SEC := 1.28
 ## Intentional hold on the completed reward pose before note handoff.
 const REWARD_HOLD_SEC := 0.45
 ## Tiny settle pulse only — must not read as the chest growing while opening.
-const EMPHASIS_SCALE := 1.003
+const EMPHASIS_SCALE := 1.002
 ## Progress split when sampling combined unread progress (validation / short path).
-const SCROLL_REVEAL_START_PROGRESS := 0.52
+const SCROLL_REVEAL_START_PROGRESS := 0.42
 ## Compat index marker (legacy baked scroll frames; runtime uses layers).
-const SCROLL_REVEAL_START_INDEX := 5
+const SCROLL_REVEAL_START_INDEX := 2
 ## Canvas-pixel rise of the separate scroll layer (matches prep final dy span).
-const SCROLL_RISE_CANVAS_PX := 72.0
-## Soft glow peaks — warm accent only; never washes out rim/scroll/wood.
-const GLOW_OPEN_A := 0.016
-const GLOW_SETTLE_A := 0.024
-const GLOW_RETAP_A := 0.048
-const GLOW_REWARD_HOLD_A := 0.012
-
-## Relative dwell weights for the 5 compatible poses — anticipation dwells short;
-## larger lid motion (early→half→open) gets more time. Normalized at playback.
+const SCROLL_RISE_CANVAS_PX := 78.0
+## Soft glow peaks — restrained warm accent; never washes out rim/scroll/wood.
+const GLOW_OPEN_A := 0.010
+const GLOW_SETTLE_A := 0.014
+const GLOW_RETAP_A := 0.032
+const GLOW_REWARD_HOLD_A := 0.008
+const GLOW_FLARE_A := 0.040
+## PATH B pose weights (closed dwell during flare, then open).
 const EMPTY_POSE_WEIGHTS := [
-	0.48, ## 0 closed
-	0.72, ## 1 early_crack
-	1.05, ## 2 early_open
-	1.28, ## 3 half_open
-	0.90, ## 4 fully_open
+	1.0, ## 0 closed
+	1.0, ## 1 fully_open
 ]
 
 @export var reduced_motion: bool = false
@@ -94,6 +93,7 @@ var _input_locked: bool = false
 var _label: Label
 var _root_visual: Control
 var _shadow_view: TextureRect
+var _warm_spill: TextureRect
 var _frame_view: TextureRect
 var _scroll_clip: Control
 var _scroll_view: TextureRect
@@ -142,8 +142,9 @@ static func preload_assets() -> void:
 	_load_cached(SCROLL_LAYER)
 	_load_cached(FRONT_RIM)
 	_load_cached(CONTACT_SHADOW)
-	_sprite_frames_empty = _build_sprite_frames("empty_open", _empty_cache, 8.0)
-	_sprite_frames_scroll = _build_sprite_frames("scroll_open", _scroll_cache, 10.0)
+	_load_cached(WARM_SPILL)
+	_sprite_frames_empty = _build_sprite_frames("empty_open", _empty_cache, 6.0)
+	_sprite_frames_scroll = _build_sprite_frames("scroll_open", _scroll_cache, 8.0)
 	_preloaded = true
 
 
@@ -230,9 +231,21 @@ func _build_visuals() -> void:
 	_shadow_view.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	_shadow_view.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	## Soft / restrained — never a hard blot that reads as a hover gap.
-	_shadow_view.modulate = Color(1, 1, 1, 0.62)
+	_shadow_view.modulate = Color(1, 1, 1, 0.82)
 	_shadow_view.z_index = 1
 	_root_visual.add_child(_shadow_view)
+
+	## Tiny warm magical spill on sand — separate from the dark contact shadow.
+	_warm_spill = TextureRect.new()
+	_warm_spill.name = "ChestWarmSpill"
+	_warm_spill.texture = _load_cached(WARM_SPILL)
+	_warm_spill.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_warm_spill.stretch_mode = TextureRect.STRETCH_SCALE
+	_warm_spill.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	_warm_spill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_warm_spill.modulate = Color(1, 1, 1, 0.0)
+	_warm_spill.z_index = 2
+	_root_visual.add_child(_warm_spill)
 
 	## Exactly ONE opaque chest sprite — no duplicate underlay / crossfade layers.
 	_frame_view = TextureRect.new()
@@ -383,21 +396,33 @@ func _layout_frames() -> void:
 	_place_scroll_and_rim()
 	## Contact shadow: directly under the foot, kissing the base (no hover gap).
 	if _shadow_view:
-		var sh_w := draw_w * 0.62
-		var sh_h := draw_h * 0.048
-		var sh_y := foot_y - sh_h * 0.22
+		var sh_w := draw_w * 0.56
+		var sh_h := draw_h * 0.038
+		## Top of shadow overlaps the foot row — zero visible hover gap.
+		var sh_y := foot_y - sh_h * 0.78
 		_place_rect(_shadow_view, Rect2(
 			_anchor_rect.position.x + (draw_w - sh_w) * 0.5,
 			sh_y,
 			sh_w,
 			sh_h
 		))
+	## Warm spill sits slightly below/around the foot — never replaces the shadow.
+	if _warm_spill:
+		var sp_w := draw_w * 0.52
+		var sp_h := draw_h * 0.055
+		var sp_y := foot_y - sp_h * 0.35
+		_place_rect(_warm_spill, Rect2(
+			_anchor_rect.position.x + (draw_w - sp_w) * 0.5,
+			sp_y,
+			sp_w,
+			sp_h
+		))
 	## Soft radial pulse over the cavity — circular texture, not a box.
 	_place_rect(_glow_pulse, Rect2(
-		_anchor_rect.position.x + draw_w * 0.30,
-		_anchor_rect.position.y + draw_h * 0.40,
-		draw_w * 0.40,
-		draw_h * 0.22
+		_anchor_rect.position.x + draw_w * 0.32,
+		_anchor_rect.position.y + draw_h * 0.42,
+		draw_w * 0.36,
+		draw_h * 0.18
 	))
 	var cavity_center := Vector2(area.x * 0.5, _anchor_rect.position.y + draw_h * 0.48)
 	_dust.position = cavity_center
@@ -407,8 +432,8 @@ func _layout_frames() -> void:
 	if _badge:
 		## Near the closed chest — slightly above/right, not on lid, not horizon.
 		_badge.position = Vector2(
-			_anchor_rect.position.x + draw_w * 0.74,
-			_anchor_rect.position.y + draw_h * 0.28
+			_anchor_rect.position.x + draw_w * 0.76,
+			_anchor_rect.position.y + draw_h * 0.30
 		)
 		_badge.size = Vector2(40, 40)
 
@@ -565,26 +590,14 @@ func _show_frame_index(index: int) -> void:
 
 
 func _weighted_frame_index(eased: float) -> int:
-	## Map eased 0–1 onto discrete poses using non-uniform dwell weights.
+	## PATH B: binary closed/open — stay closed until late, then hard swap open.
+	## Never interpolate through incompatible mid-lid geometry.
 	var max_i := _active_frames.size() - 1
 	if max_i <= 0:
 		return 0
-	if eased >= 0.999:
+	if eased >= 0.72:
 		return max_i
-	var weights: Array = EMPTY_POSE_WEIGHTS
-	var n := mini(weights.size(), max_i + 1)
-	var total := 0.0
-	for i in range(n):
-		total += float(weights[i])
-	if total <= 0.0:
-		return clampi(int(round(eased * float(max_i))), 0, max_i)
-	var target := clampf(eased, 0.0, 1.0) * total
-	var acc := 0.0
-	for i in range(n):
-		acc += float(weights[i])
-		if target <= acc:
-			return i
-	return max_i
+	return 0
 
 
 func _frame_index_from_progress(eased: float, emerge_scroll: bool) -> int:
@@ -630,15 +643,18 @@ func _set_frame_progress(raw_amount: float, emerge_scroll: bool) -> void:
 	var idx := _frame_index_from_progress(eased if not emerge_scroll else linear, emerge_scroll)
 	_show_frame_index(idx)
 
-	## Particles after interior is visibly open — reinforce lid motion, don't outpace it.
-	if not reduced_motion and linear >= 0.26 and not _particles_armed:
+	## Particles arm near the open swap — never before the intentional flare.
+	if not reduced_motion and linear >= 0.70 and not _particles_armed:
 		_particles_armed = true
 		_emit_burst()
 		_start_motes()
-		## Soft cavity glow eases in with the open — radial, not rectangular.
+		## Soft cavity glow eases in after open — radial, not rectangular.
 		if _glow_pulse:
 			var g := create_tween()
-			g.tween_property(_glow_pulse, "modulate:a", GLOW_OPEN_A, 0.28).set_trans(Tween.TRANS_SINE)
+			g.tween_property(_glow_pulse, "modulate:a", GLOW_OPEN_A, 0.22).set_trans(Tween.TRANS_SINE)
+		if _warm_spill:
+			var ws := create_tween()
+			ws.tween_property(_warm_spill, "modulate:a", 0.22, 0.28).set_trans(Tween.TRANS_SINE)
 
 	## Layered scroll rise for unread combined progress samples.
 	if emerge_scroll:
@@ -675,6 +691,8 @@ func _reset_pose() -> void:
 		_root_visual.modulate = Color.WHITE
 	if _glow_pulse:
 		_glow_pulse.modulate.a = 0.0
+	if _warm_spill:
+		_warm_spill.modulate.a = 0.0
 	_set_scroll_layers_visible(false)
 	_layout_frames()
 	_select_sequence(false)
@@ -875,31 +893,56 @@ func apply_ready_idle_state() -> void:
 
 
 func _open_short() -> void:
-	_set_frame_progress(0.0, false)
+	## Reduced-motion PATH B: closed → brief flare → hard open → optional scroll.
+	_show_frame_index(0)
 	_layout_frames()
-	var tw := create_tween()
-	tw.tween_method(
-		func(v: float) -> void: _set_frame_progress(v, false),
-		0.0,
-		1.0,
-		OPEN_DURATION_RM
-	).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-	await tw.finished
+	if _glow_pulse:
+		var flare := create_tween()
+		flare.tween_property(_glow_pulse, "modulate:a", GLOW_FLARE_A * 0.7, OPEN_DURATION_RM * 0.45)
+		flare.tween_property(_glow_pulse, "modulate:a", GLOW_OPEN_A, OPEN_DURATION_RM * 0.35)
+		await flare.finished
+	else:
+		await get_tree().create_timer(OPEN_DURATION_RM).timeout
+	_show_frame_index(_empty_frames.size() - 1)
+	_open_amount = 1.0
+	_enforce_chest_opaque()
 	if _show_scroll_on_finish and not _skip:
-		_show_frame_index(_empty_frames.size() - 1)
-		var rise := create_tween()
-		rise.tween_method(_set_scroll_rise_amount, 0.0, 1.0, SCROLL_EMERGE_SEC * 0.45).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
-		await rise.finished
+		await _play_scroll_rise_tween(SCROLL_EMERGE_SEC * 0.55)
 		await get_tree().create_timer(REWARD_HOLD_SEC * 0.6).timeout
 	else:
 		await get_tree().create_timer(0.06).timeout
 
 
+func _play_scroll_rise_tween(duration: float) -> void:
+	## Continuous Y translation with readable stages — never baked pose pops.
+	chest_state = ChestState.OPEN_SCROLL_EMERGING
+	_set_scroll_layers_visible(true)
+	_set_scroll_rise_amount(0.0)
+	var rise := create_tween()
+	## hidden → tiny peek → 25% → 50% → 70% → final (~60–70% body above rim).
+	rise.tween_method(_set_scroll_rise_amount, 0.00, 0.08, duration * 0.12).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	rise.tween_method(_set_scroll_rise_amount, 0.08, 0.25, duration * 0.18).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	rise.tween_method(_set_scroll_rise_amount, 0.25, 0.50, duration * 0.22).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	rise.tween_method(_set_scroll_rise_amount, 0.50, 0.70, duration * 0.22).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	rise.tween_method(_set_scroll_rise_amount, 0.70, 1.00, duration * 0.26).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	await rise.finished
+	_set_scroll_rise_amount(1.0)
+	if not _scroll_emerged_emitted:
+		_scroll_emerged_emitted = true
+		sfx_scroll_emerge.emit()
+		scroll_emerged.emit(get_scroll_global_center())
+
+
 func _open_full() -> void:
+	## PATH B — clean short magical transition between closed and open endpoints.
+	## Do NOT play incompatible mid-lid poses. Chest stays opaque the whole time.
 	_layout_frames()
 	_anticipation_y = 0.0
 	_emphasis_scale = 1.0
 	_apply_root_transform()
+	_show_frame_index(0)
+	_open_amount = 0.0
+	_enforce_chest_opaque()
 	await get_tree().create_timer(ANTICIPATION_SEC).timeout
 	if _skip:
 		_apply_finished_state()
@@ -908,58 +951,57 @@ func _open_full() -> void:
 	sfx_latch_release.emit()
 	HapticHelper.lock_release()
 
-	## Phase 1 — shared empty opening cadence (weighted pose dwells, hard swaps).
-	var lid := create_tween()
-	lid.tween_method(
-		func(v: float) -> void: _set_frame_progress(v, false),
-		0.0,
-		1.0,
-		OPEN_DURATION_SEC
-	).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
-	await lid.finished
+	## Phase 1 — restrained warm magical flare around the lid seam (still closed).
+	_particles_armed = true
+	_emit_burst()
+	_start_motes()
+	var flare := create_tween()
+	flare.set_parallel(true)
+	if _glow_pulse:
+		flare.tween_property(_glow_pulse, "modulate:a", GLOW_FLARE_A, MAGICAL_FLARE_SEC * 0.55).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	if _warm_spill:
+		flare.tween_property(_warm_spill, "modulate:a", 0.28, MAGICAL_FLARE_SEC * 0.55).set_trans(Tween.TRANS_SINE)
+	flare.tween_method(func(v: float) -> void:
+		_emphasis_scale = v
+		_apply_root_transform()
+	, 1.0, EMPHASIS_SCALE, MAGICAL_FLARE_SEC * 0.45).set_trans(Tween.TRANS_SINE)
+	await flare.finished
 	if _skip:
 		_apply_finished_state()
 		return
 
-	## Ensure fully-open empty pose before any scroll reveal.
+	## Phase 2 — hard swap to the clean open endpoint (no alpha crossfade / warp).
 	_show_frame_index(_empty_frames.size() - 1)
+	_open_amount = 1.0
+	_enforce_chest_opaque()
+	sfx_magical_swell.emit()
+	_emit_burst()
 
-	## Phase 2 — layered scroll rise (unread only).
-	if _show_scroll_on_finish:
-		chest_state = ChestState.OPEN_SCROLL_EMERGING
-		_set_scroll_layers_visible(true)
-		_set_scroll_rise_amount(0.0)
-		## Smooth Y rise with easing: peek → 25% → 50% → 65–70% → final.
-		var rise := create_tween()
-		rise.tween_method(_set_scroll_rise_amount, 0.0, 1.0, SCROLL_EMERGE_SEC).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
-		await rise.finished
-		if _skip:
-			_apply_finished_state()
-			return
-		_set_scroll_rise_amount(1.0)
-		if not _scroll_emerged_emitted:
-			_scroll_emerged_emitted = true
-			sfx_scroll_emerge.emit()
-			scroll_emerged.emit(get_scroll_global_center())
-
-	## Settle + magical swell (tiny emphasis only — no squash).
+	## Phase 3 — glow settles; open pose holds.
 	var settle := create_tween()
 	settle.set_parallel(true)
 	settle.tween_method(func(v: float) -> void:
 		_emphasis_scale = v
 		_apply_root_transform()
-	, 1.0, EMPHASIS_SCALE, SETTLE_SEC * 0.55).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	, EMPHASIS_SCALE, 1.0, SETTLE_SEC).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	if _glow_pulse:
 		settle.tween_property(_glow_pulse, "modulate:a", GLOW_SETTLE_A, SETTLE_SEC).set_trans(Tween.TRANS_SINE)
+	if _warm_spill:
+		settle.tween_property(_warm_spill, "modulate:a", 0.16, SETTLE_SEC).set_trans(Tween.TRANS_SINE)
 	await settle.finished
+	if _skip:
+		_apply_finished_state()
+		return
 
-	sfx_magical_swell.emit()
+	## Phase 4 — layered scroll rise (unread only), continuous Y tween.
+	if _show_scroll_on_finish:
+		await _play_scroll_rise_tween(SCROLL_EMERGE_SEC)
+		if _skip:
+			_apply_finished_state()
+			return
+
 	var swell := create_tween()
 	swell.set_parallel(true)
-	swell.tween_method(func(v: float) -> void:
-		_emphasis_scale = v
-		_apply_root_transform()
-	, EMPHASIS_SCALE, 1.0, MAGICAL_SWELL_SEC).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	if _glow_pulse:
 		swell.tween_property(
 			_glow_pulse,
@@ -967,6 +1009,8 @@ func _open_full() -> void:
 			GLOW_REWARD_HOLD_A if _show_scroll_on_finish else 0.0,
 			MAGICAL_SWELL_SEC
 		)
+	if _warm_spill and not _show_scroll_on_finish:
+		swell.tween_property(_warm_spill, "modulate:a", 0.0, MAGICAL_SWELL_SEC)
 	await swell.finished
 	_emphasis_scale = 1.0
 	_apply_root_transform()
@@ -1021,6 +1065,8 @@ func _apply_finished_state() -> void:
 	_apply_root_transform()
 	if _glow_pulse:
 		_glow_pulse.modulate.a = 0.0
+	if _warm_spill:
+		_warm_spill.modulate.a = 0.12 if _show_scroll_on_finish else 0.0
 	_enforce_chest_opaque()
 
 

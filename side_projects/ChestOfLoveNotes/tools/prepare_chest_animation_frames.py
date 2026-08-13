@@ -11,15 +11,15 @@ Outputs:
   assets/art/chest/scroll_rolled.png   (clean parchment-only scroll layer)
   assets/art/chest/chest_front_rim.png (thin front-lip occlusion for scroll rise)
 
-v46 polish:
-  - HARD GEOMETRY: only use source poses with matching body construction
-  - primary-mass crop rejects next-cell lid bleed (row-3 base corruption)
-  - fewer compatible opening poses (clean 5-stage) over dense mismatched sets
-  - empty + unread share glowing-sheet opening geometry (one chest family)
-  - scroll rise uses ONE upright vertical love-note (standalone parchment)
+v47 polish — PATH B (clean short magical transition):
+  - AUDIT: glowing + magical sheets lack enough matched lid in-betweens
+  - KEEP only closed (glow 0) + open endpoint (glow 15); reject all mid poses
+  - Do NOT ship incompatible multi-frame lid swaps (geometry jumps)
+  - empty + unread share the same two glowing-sheet endpoints
+  - scroll rise uses ONE upright rolled parchment (standalone layer)
   - never stacked horizontal rollers / white plank slabs
   - never magical-sheet chest pixels in the scroll layer
-  - runtime prefers separate scroll + rim layers over baked late frames
+  - dampen blown-out cavity glow on the open pose
   - normalize body exposure / lower-body scale (foot-locked)
   - reject top-sheared source cells
 """
@@ -658,89 +658,100 @@ def _strip_black_matte(rgba: np.ndarray) -> np.ndarray:
 
 
 def build_vertical_love_note(target_w: int, target_h: int) -> np.ndarray:
-	"""Build one crisp vertical love-note scroll from parchment + rollers.
+	"""Build one crisp upright rolled love-note (not a flat bright sheet).
 
-	Classic reading-scroll silhouette (top roller / parchment / bottom roller)
-	narrow enough for the chest cavity — never a wide horizontal white plank.
+	Prefer the high-res rolled parchment tube, rotated upright so curl / roller
+	detail reads clearly inside the chest cavity.
 	"""
-	parch_path = ROOT / "assets" / "art" / "scroll" / "scroll_parchment.png"
-	top_path = ROOT / "assets" / "art" / "scroll" / "scroll_top_roller.png"
-	bot_path = ROOT / "assets" / "art" / "scroll" / "scroll_bottom_roller.png"
 	rolled_path = ROOT / "assets" / "art" / "scroll" / "scroll_rolled.png"
-	if not (parch_path.exists() and top_path.exists() and bot_path.exists()):
-		## Fallback: upright rolled tube from high-res rolled art.
-		src = rolled_path if rolled_path.exists() else ROOT / "assets" / "art" / "scroll" / "scroll_mini_unread.png"
-		rolled = _strip_black_matte(np.array(Image.open(src).convert("RGBA")))
-		ys, xs = np.where(rolled[:, :, 3] > 40)
-		crop = rolled[int(ys.min()) : int(ys.max()) + 1, int(xs.min()) : int(xs.max()) + 1]
-		upright = np.array(Image.fromarray(crop, "RGBA").transpose(Image.Transpose.ROTATE_90))
-		rw = max(48, int(target_w))
-		rh = max(72, min(int(target_h), int(rw * 1.9)))
-		scroll = np.array(Image.fromarray(upright, "RGBA").resize((rw, rh), Image.Resampling.LANCZOS))
-		return _opaque_force(scroll)
-
-	parch = _strip_black_matte(np.array(Image.open(parch_path).convert("RGBA")))
-	top = _strip_black_matte(np.array(Image.open(top_path).convert("RGBA")))
-	bot = _strip_black_matte(np.array(Image.open(bot_path).convert("RGBA")))
-
-	rw = max(48, int(target_w))
-	## Rollers slightly wider than parchment so finials read clearly.
-	roller_w = min(int(rw * 1.18), rw + 18)
-	th = max(12, int(round(rw * 0.22)))
-	bh = max(14, int(round(rw * 0.26)))
-	## Parchment body height — leave room for rollers inside target_h.
-	body_h = max(48, int(target_h) - th - bh + 10)
-	body_h = min(body_h, int(rw * 1.55))
-	filt = Image.Resampling.LANCZOS
-
-	## Crop parchment to a neat vertical love-note strip (center content).
-	ys, xs = np.where(parch[:, :, 3] > 40)
-	y0, y1 = int(ys.min()), int(ys.max()) + 1
-	x0, x1 = int(xs.min()), int(xs.max()) + 1
-	pc = parch[y0:y1, x0:x1]
-	## Take a centered vertical band so edges stay organic but width is controlled.
-	pw = pc.shape[1]
-	band_w = max(8, int(pw * 0.55))
-	bx0 = (pw - band_w) // 2
-	pc = pc[:, bx0 : bx0 + band_w]
-	parch_r = np.array(Image.fromarray(pc, "RGBA").resize((rw, body_h), filt))
-	top_r = np.array(Image.fromarray(top, "RGBA").resize((roller_w, th), filt))
-	bot_r = np.array(Image.fromarray(bot, "RGBA").resize((roller_w, bh), filt))
-
-	bundle_h = th + body_h + bh - 8
-	bundle_w = max(rw, roller_w)
-	bundle = np.zeros((bundle_h, bundle_w, 4), dtype=np.uint8)
-
-	def _paste(dst: np.ndarray, src: np.ndarray, y0: int, x0: int) -> None:
-		y1 = min(dst.shape[0], y0 + src.shape[0])
-		x1 = min(dst.shape[1], x0 + src.shape[1])
-		h = y1 - y0
-		w = x1 - x0
-		if h <= 0 or w <= 0:
-			return
-		patch = src[:h, :w]
-		a = patch[:, :, 3:4].astype(np.float32) / 255.0
-		region = dst[y0:y1, x0:x1].astype(np.float32)
-		region[:, :, :3] = patch[:, :, :3].astype(np.float32) * a + region[:, :, :3] * (1.0 - a)
-		region[:, :, 3] = np.maximum(region[:, :, 3], patch[:, :, 3].astype(np.float32))
-		dst[y0:y1, x0:x1] = region.astype(np.uint8)
-
-	_paste(bundle, top_r, 0, (bundle_w - roller_w) // 2)
-	_paste(bundle, parch_r, max(0, th - 5), (bundle_w - rw) // 2)
-	_paste(bundle, bot_r, max(0, th + body_h - 10), (bundle_w - roller_w) // 2)
-
-	## Warm parchment lift — keep paper readable and crisp.
-	rgb = bundle[:, :, :3].astype(np.float32)
-	a = bundle[:, :, 3] > 40
-	rgb[a, 0] = np.clip(rgb[a, 0] * 1.03 + 3, 0, 255)
-	rgb[a, 1] = np.clip(rgb[a, 1] * 1.015 + 1, 0, 255)
-	bundle[:, :, :3] = rgb.astype(np.uint8)
-	bundle = _opaque_force(bundle)
-	if bundle.shape[1] >= bundle.shape[0] * 0.95:
+	mini_path = ROOT / "assets" / "art" / "scroll" / "scroll_mini_unread.png"
+	src = rolled_path if rolled_path.exists() else mini_path
+	if src is None or not src.exists():
+		raise RuntimeError("No rolled scroll donor under assets/art/scroll/")
+	rolled = _strip_black_matte(np.array(Image.open(src).convert("RGBA")))
+	ys, xs = np.where(rolled[:, :, 3] > 40)
+	if len(ys) == 0:
+		raise RuntimeError("Rolled scroll donor empty")
+	crop = rolled[int(ys.min()) : int(ys.max()) + 1, int(xs.min()) : int(xs.max()) + 1]
+	## Horizontal rolled tube → upright cylindrical love note.
+	if crop.shape[1] >= crop.shape[0]:
+		upright_img = Image.fromarray(crop, "RGBA").transpose(Image.Transpose.ROTATE_90)
+	else:
+		upright_img = Image.fromarray(crop, "RGBA")
+	## Deskew slight donor tilt so the roll rises straight from the cavity.
+	upright_img = upright_img.rotate(-4, expand=True, resample=Image.Resampling.BICUBIC)
+	upright = _strip_black_matte(np.array(upright_img))
+	ys2, xs2 = np.where(upright[:, :, 3] > 40)
+	upright = upright[int(ys2.min()) : int(ys2.max()) + 1, int(xs2.min()) : int(xs2.max()) + 1]
+	rw = max(40, int(target_w))
+	## Keep a rolled-cylinder proportion — tall but not a white plank sheet.
+	rh = max(88, min(int(target_h), int(rw * 2.35)))
+	scroll = np.array(
+		Image.fromarray(upright, "RGBA").resize((rw, rh), Image.Resampling.LANCZOS)
+	)
+	## Warm parchment grade — never blown-out white.
+	rgb = scroll[:, :, :3].astype(np.float32)
+	a = scroll[:, :, 3] > 40
+	rgb[a, 0] = np.clip(rgb[a, 0] * 0.96 + 6, 0, 235)
+	rgb[a, 1] = np.clip(rgb[a, 1] * 0.94 + 2, 0, 210)
+	rgb[a, 2] = np.clip(rgb[a, 2] * 0.88, 0, 175)
+	scroll[:, :, :3] = rgb.astype(np.uint8)
+	scroll = _opaque_force(scroll)
+	if scroll.shape[1] >= scroll.shape[0] * 0.92:
 		raise RuntimeError(
-			f"Vertical love note still too wide ({bundle.shape[1]}x{bundle.shape[0]})"
+			f"Rolled love note still too wide ({scroll.shape[1]}x{scroll.shape[0]})"
 		)
-	return bundle
+	return scroll
+
+
+def dampen_cavity_glow(rgba: np.ndarray) -> np.ndarray:
+	"""Pull blown-out yellow/white cavity cores down so rim/wood/scroll stay readable."""
+	out = rgba.copy()
+	a = out[:, :, 3]
+	r = out[:, :, 0].astype(np.float32)
+	g = out[:, :, 1].astype(np.float32)
+	b = out[:, :, 2].astype(np.float32)
+	lum = (r + g + b) / 3.0
+	ys, xs = np.where(a > 40)
+	if len(ys) == 0:
+		return out
+	chest_top, chest_bot = int(ys.min()), int(ys.max())
+	cx = float(np.median(xs))
+	chest_h = max(1, chest_bot - chest_top)
+	yy = np.arange(out.shape[0])[:, None]
+	xx = np.arange(out.shape[1])[None, :]
+	## Cavity band around the open mouth — leave wood/gold trim alone.
+	in_cavity = (
+		(a > 40)
+		& (yy >= chest_top + int(chest_h * 0.12))
+		& (yy <= chest_top + int(chest_h * 0.58))
+		& (np.abs(xx - cx) < 78)
+	)
+	hot = in_cavity & (lum > 160) & (r > 175) & (g > 120)
+	mild = in_cavity & (lum > 130) & (r > 145) & (g > 100) & (~hot)
+	if hot.any():
+		out[:, :, 0] = np.where(hot, np.clip(r * 0.52 + 22, 0, 195), out[:, :, 0]).astype(np.uint8)
+		out[:, :, 1] = np.where(hot, np.clip(g * 0.48 + 14, 0, 135), out[:, :, 1]).astype(np.uint8)
+		out[:, :, 2] = np.where(hot, np.clip(b * 0.38 + 6, 0, 80), out[:, :, 2]).astype(np.uint8)
+	if mild.any():
+		r2 = out[:, :, 0].astype(np.float32)
+		g2 = out[:, :, 1].astype(np.float32)
+		b2 = out[:, :, 2].astype(np.float32)
+		out[:, :, 0] = np.where(mild, np.clip(r2 * 0.74 + 8, 0, 205), out[:, :, 0]).astype(np.uint8)
+		out[:, :, 1] = np.where(mild, np.clip(g2 * 0.70 + 5, 0, 155), out[:, :, 1]).astype(np.uint8)
+		out[:, :, 2] = np.where(mild, np.clip(b2 * 0.62 + 3, 0, 100), out[:, :, 2]).astype(np.uint8)
+	## Soften sparse exterior sparkle dust that reads as jagged lid ghosts.
+	spark = (
+		(a > 10)
+		& (a < 200)
+		& (lum > 140)
+		& (r > 160)
+		& (g > 100)
+		& ((yy < chest_top + int(chest_h * 0.20)) | (np.abs(xx - cx) > 85))
+	)
+	if spark.any():
+		out[:, :, 3] = np.where(spark, (out[:, :, 3].astype(np.float32) * 0.25).astype(np.uint8), out[:, :, 3])
+	return out
 
 
 def build_clean_scroll_layer(open_placed: np.ndarray) -> np.ndarray:
@@ -757,10 +768,9 @@ def build_clean_scroll_layer(open_placed: np.ndarray) -> np.ndarray:
 	chest_h = max(1, chest_bot - chest_top)
 	rim_y = int(chest_top + chest_h * 0.48)
 	body_w = lower_body_width(open_placed) or 180.0
-	## Narrower than the chest opening — believable love-note width/height.
-	## Keep short enough that the final rise stays inside the cavity (not a pillar).
-	target_w = max(44, int(round(body_w * 0.30)))
-	target_h = max(96, int(round(chest_h * 0.52)))
+	## Narrower than the chest opening — upright rolled love-note (not a plank).
+	target_w = max(40, int(round(body_w * 0.28)))
+	target_h = max(100, int(round(chest_h * 0.56)))
 
 	try:
 		scroll = build_vertical_love_note(target_w, target_h)
@@ -772,8 +782,8 @@ def build_clean_scroll_layer(open_placed: np.ndarray) -> np.ndarray:
 
 	rw, rh = scroll.shape[1], scroll.shape[0]
 	dst_x = int(round(cx - rw * 0.5))
-	## Rest pose: top roller + a hint of parchment peek above the front rim.
-	dst_y = int(round(rim_y - rh * 0.22))
+	## Rest pose: most of the rolled body sits behind the rim (tiny peek).
+	dst_y = int(round(rim_y - rh * 0.18))
 	layer = np.zeros_like(open_placed)
 	h, w = layer.shape[:2]
 	src_x0 = src_y0 = 0
@@ -1135,24 +1145,20 @@ def process_scroll_with_rise(_magic_path: Path | None = None) -> list[dict]:
 	for p in out_dir.glob("*.png"):
 		p.unlink()
 
-	## Same clean glowing-sheet opening arc as empty — geometrically compatible
-	## subset only (matches empty_picks). Longer mismatched sets glitch worse.
-	open_picks = [0, 6, 7, 11, 15]
+	## PATH B endpoints only — same two poses as empty (closed + open).
+	open_picks = [0, 15]
 	open_labels = [
 		"closed",
-		"early_crack",
-		"early_open",
-		"half_open",
 		"open_ready",
 	]
 	## Progressive scroll rise: dy>0 lowers (behind rim); dy<0 lifts.
-	## Vertical love-note: peek → 25% → 50% → 60–70% → final reward pose.
+	## Rolled love-note: peek → 25% → 50% → 70% → final reward pose.
 	rise_stages = [
-		(4, "scroll_peek"),  ## tiny crest just above / at the rim
-		(-14, "scroll_partial"),  ## ~25%
-		(-32, "scroll_rising"),  ## ~50%
-		(-48, "scroll_halfway"),  ## ~60–70%
-		(-72, "scroll_fully"),  ## clear reward pose — vertical rise
+		(6, "scroll_peek"),  ## tiny crest just above / at the rim
+		(-16, "scroll_partial"),  ## ~25%
+		(-36, "scroll_rising"),  ## ~50%
+		(-54, "scroll_halfway"),  ## ~70%
+		(-78, "scroll_fully"),  ## clear reward pose — continuous Y rise
 	]
 
 	placed_open: list[tuple[np.ndarray, int, int, str]] = []
@@ -1187,6 +1193,7 @@ def process_scroll_with_rise(_magic_path: Path | None = None) -> list[dict]:
 	open_ready_placed = finalize_locked(
 		norm_open[-1][0], target_cx, target_y, target_visual_cx, target_body_lum
 	)
+	open_ready_placed = dampen_cavity_glow(open_ready_placed)
 	## Clean parchment-only layer — never diff-extract from magical sheet.
 	scroll_layer = build_clean_scroll_layer(open_ready_placed)
 	front_rim = extract_front_rim(open_ready_placed)
@@ -1224,7 +1231,9 @@ def process_scroll_with_rise(_magic_path: Path | None = None) -> list[dict]:
 
 	frames: list[tuple[np.ndarray, int, int | str, str]] = []
 	for placed, crop_h, src, label in norm_open:
-		frames.append((placed, crop_h, src, label))
+		## Dampen open cavity only — closed pose keeps natural lighting.
+		framed = dampen_cavity_glow(placed) if label != "closed" else placed
+		frames.append((framed, crop_h, src, label))
 	for rise_dy, label in rise_stages:
 		synth = compose_scroll_rise(open_ready_placed, scroll_layer, rise_dy)
 		frames.append((synth, 0, f"rise_dy{rise_dy}", label))
@@ -1232,6 +1241,8 @@ def process_scroll_with_rise(_magic_path: Path | None = None) -> list[dict]:
 	meta: list[dict] = []
 	for seq, (placed, crop_h, src, label) in enumerate(frames):
 		locked = finalize_locked(placed, target_cx, target_y, target_visual_cx, target_body_lum)
+		if label != "closed":
+			locked = dampen_cavity_glow(locked)
 		top_hit = int((locked[0, :, 3] > 40).sum() + (locked[1, :, 3] > 40).sum())
 		if top_hit > 0:
 			locked = _shift_layer(locked, 2)
@@ -1267,55 +1278,86 @@ def process_scroll_with_rise(_magic_path: Path | None = None) -> list[dict]:
 
 
 def write_contact_shadow() -> None:
-	"""Soft elliptical contact shadow — densest at the top (under feet), no hover gap."""
-	w, h = 1024, 160
+	"""Soft elliptical contact shadow — densest at the top (under feet), no hover gap.
+
+	Neutral/dark only — warm magical spill is a separate runtime layer.
+	"""
+	w, h = 1024, 140
 	img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
 	# Multi-pass soft ellipse; bias opacity toward the top edge so it kisses the feet.
 	layers = [
-		(0.92, 0.78, 55),
-		(0.78, 0.55, 42),
-		(0.58, 0.34, 34),
-		(0.38, 0.18, 26),
+		(0.88, 0.72, 48),
+		(0.72, 0.48, 38),
+		(0.52, 0.30, 30),
+		(0.34, 0.16, 22),
 	]
 	for rw, rh, a in layers:
 		layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
 		d = ImageDraw.Draw(layer)
-		cx, cy = w * 0.5, h * 0.28
+		cx, cy = w * 0.5, h * 0.22
 		d.ellipse(
 			[cx - w * rw * 0.5, cy - h * rh * 0.5, cx + w * rw * 0.5, cy + h * rh * 0.5],
-			fill=(18, 12, 8, a),
+			fill=(16, 12, 10, a),
 		)
-		layer = layer.filter(ImageFilter.GaussianBlur(14 if rw > 0.7 else 9))
+		layer = layer.filter(ImageFilter.GaussianBlur(12 if rw > 0.7 else 8))
 		img = Image.alpha_composite(img, layer)
 	out = ART / "chest_contact_shadow.png"
 	img.save(out, "PNG", optimize=True)
 	print(f"wrote {out} ({out.stat().st_size} bytes)")
 
 
+def write_warm_spill() -> None:
+	"""Tiny warm magical light spill for sand — NOT the contact shadow."""
+	w, h = 768, 180
+	img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+	for rw, rh, a in [(0.90, 0.70, 28), (0.58, 0.42, 22), (0.32, 0.24, 16)]:
+		layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+		d = ImageDraw.Draw(layer)
+		cx, cy = w * 0.5, h * 0.42
+		d.ellipse(
+			[cx - w * rw * 0.5, cy - h * rh * 0.5, cx + w * rw * 0.5, cy + h * rh * 0.5],
+			fill=(255, 168, 88, a),
+		)
+		layer = layer.filter(ImageFilter.GaussianBlur(18 if rw > 0.7 else 12))
+		img = Image.alpha_composite(img, layer)
+	out = ART / "chest_warm_spill.png"
+	img.save(out, "PNG", optimize=True)
+	print(f"wrote {out} ({out.stat().st_size} bytes)")
+
+
 def main() -> None:
-	## v46: ONLY geometrically compatible opening poses.
-	## Audited all glowing-sheet cells 0–23:
-	##   KEEP: 0 (closed), 6 (early crack), 7 (early open), 11 (half), 15 (late open)
-	##   REJECT closed wobble 1–5 (near-duplicates of 0)
-	##   REJECT 8–10 (redundant mid; slight lid-thickness wobble vs neighbors)
-	##   REJECT 12–14 (next-cell bleed historically corrupted feet; near 11→15)
-	##   REJECT 16–17 (near-duplicates of 15; no new clean lid stage)
-	##   REJECT 18–23 (top-sheared lids)
-	## Additional true fully-open in-betweens with matching body/camera are needed
-	## for a longer fluid arc — do not invent them by warping mismatched cells.
-	empty_picks = [0, 6, 7, 11, 15]
+	## v47 PATH B — source artwork audit (glowing + magical sheets):
+	##   Audited 48 candidate cells (24 glow + 24 magic).
+	##   COMPATIBLE endpoints (glowing sheet, same family, non-sheared):
+	##     KEEP: 0 (closed), 15 (most-open clean pose — lid back, cavity visible)
+	##   INCOMPATIBLE — do not use for lid animation:
+	##     glow 1–5: closed wobble / horizontal AI drift
+	##     glow 6–11: crack row — body scale/perspective ≠ closed; foot jump
+	##     glow 12–14, 16–17: half-open row — bleed / near-dupes / construction change
+	##     glow 18–23: true fully-open row but TOP-SHEARED lids (damaged cells)
+	##     magic 0–23: different body proportions vs glowing closed; 4→5 warp;
+	##                 scroll artifacts in mid/late cells
+	##   Verdict: NOT enough matched lid in-betweens for PATH A.
+	##   Ship PATH B: closed → short magical flare → hard swap to open endpoint.
+	##   Required for a fluid lid arc later: matched mid-lid poses PLUS a clean
+	##   non-sheared fully-open pose with the same camera/body/trim/scale as 0.
+	empty_picks = [0, 15]
 	empty_labels = [
 		"closed",
-		"early_crack",
-		"early_open",
-		"half_open",
 		"fully_open",
 	]
-	print("EMPTY")
+	print("EMPTY (PATH B endpoints)")
 	process(GLOW_SHEET, "empty", empty_picks, "empty", empty_labels)
-	print("SCROLL (shared empty opening + clean parchment rise)")
+	## Dampen open cavity on empty_01 after process.
+	open_path = OUT / "empty" / "empty_01.png"
+	if open_path.exists():
+		open_img = dampen_cavity_glow(np.array(Image.open(open_path).convert("RGBA")))
+		Image.fromarray(open_img, "RGBA").save(open_path)
+		print(f"dampened cavity glow on {open_path.name}")
+	print("SCROLL (PATH B shared endpoints + clean rolled parchment rise)")
 	process_scroll_with_rise(MAGIC_SHEET)
 	write_contact_shadow()
+	write_warm_spill()
 
 
 if __name__ == "__main__":

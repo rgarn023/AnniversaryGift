@@ -6,7 +6,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-APK_NAME="${1:-ChestOfLoveNotes-v46-chest-geometry-grounding-debug.apk}"
+APK_NAME="${1:-ChestOfLoveNotes-v47-chest-clean-transition-debug.apk}"
 OUT="build/${APK_NAME}"
 GODOT="${GODOT:-/home/ubuntu/godot/Godot_v4.7.1-stable_linux.x86_64}"
 export ANDROID_HOME="${ANDROID_HOME:-/home/ubuntu/Android/Sdk}"
