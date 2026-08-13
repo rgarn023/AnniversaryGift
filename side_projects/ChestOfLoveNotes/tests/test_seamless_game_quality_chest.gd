@@ -1,5 +1,5 @@
 extends SceneTree
-## v58: scroll +X bias + buried start; shoreline water mask; no cavity mask.
+## v59: scroll recovery + continuous rectangular water clip; no cavity mask.
 
 var _passed: int = 0
 var _failed: int = 0
@@ -19,7 +19,7 @@ func _assert(cond: bool, label: String) -> void:
 
 
 func _run() -> void:
-	print("=== Chest final scroll + shoreline polish (v58) ===")
+	print("=== Chest scroll + water recovery (v59) ===")
 	var chest := FileAccess.get_file_as_string("res://scripts/chest/treasure_chest.gd")
 	var env_script := FileAccess.get_file_as_string("res://scripts/chest/chest_environment.gd")
 	var main := FileAccess.get_file_as_string("res://scripts/main.gd")
@@ -51,10 +51,10 @@ func _run() -> void:
 	_assert(chest.contains("SCROLL_EMERGE_SEC := 0.55"), "scroll emerge duration ~0.55s")
 	_assert(chest.contains("SCROLL_POST_OPEN_BEAT_SEC := 0.11"), "post-open beat")
 	_assert(chest.contains("REWARD_HOLD_SEC := 0.60"), "reward hold ~0.60s")
-	_assert(chest.contains("SCROLL_FINAL_ABOVE_RIM := 0.85"), "final reveal ~85% content")
-	_assert(chest.contains("SCROLL_START_ABOVE_RIM := -0.16"), "scroll starts buried below lip")
-	_assert(chest.contains("SCROLL_PEEK_ABOVE_RIM := 0.08"), "first peek ~8%")
-	_assert(chest.contains("SCROLL_X_BIAS_CANVAS := 20.0"), "scroll right bias ~+10px runtime")
+	_assert(chest.contains("SCROLL_FINAL_ABOVE_RIM := 0.88"), "final reveal ~88% content")
+	_assert(chest.contains("SCROLL_START_ABOVE_RIM := -0.24"), "scroll starts buried below lip")
+	_assert(chest.contains("SCROLL_PEEK_ABOVE_RIM := 0.05"), "first peek ~5%")
+	_assert(chest.contains("SCROLL_X_BIAS_CANVAS := 28.0"), "scroll right bias ~+14px runtime")
 	_assert(chest.contains("SCROLL_CONTENT_TOP_PAD"), "scroll texture top pad accounted")
 	_assert(chest.contains("SCROLL_CONTENT_BOTTOM_PAD"), "scroll texture bottom pad accounted")
 	_assert(chest.contains("scroll_rise_for_above_rim"), "rise↔above helper")
@@ -124,16 +124,17 @@ func _run() -> void:
 	_assert(env_script.contains("ENV_DEFAULT_BEACH"), "environment id constant")
 	_assert(env_script.contains("CHEST_GROUND_Y := 0.888"), "ground plane nudged down to sand")
 	_assert(env_script.contains("ocean_glisten.png"), "ocean glisten asset wired")
-	_assert(env_script.contains("ocean_water_mask.png"), "shoreline water mask asset wired")
+	_assert(env_script.contains("OCEAN_WATER_MASK_LEGACY"), "legacy shoreline mask const retained")
 	_assert(env_script.contains("OceanGlistenClip"), "water-only glisten clip")
 	_assert(env_script.contains("OceanGlistenB"), "second shimmer glint band")
 	_assert(env_script.contains("OceanGlint_"), "discrete ocean glint streaks")
 	_assert(env_script.contains("GLINT_COUNT := 6"), "six visible glints")
 	_assert(env_script.contains("WATER_TOP_FRAC"), "water top bound")
-	_assert(env_script.contains("WATER_BOTTOM_FRAC"), "water bottom bound")
-	_assert(env_script.contains("CLIP_CHILDREN_ONLY"), "shoreline mask clips children")
-	_assert(env_script.contains("STRETCH_KEEP_ASPECT_COVERED"), "mask matches beach cover")
-	_assert(env_script.contains("OCEAN_WATER_MASK"), "water mask const")
+	_assert(env_script.contains("WATER_BOTTOM_FRAC := 0.560"), "continuous water bottom bound")
+	_assert(env_script.contains("clip_contents = true"), "rectangular water clip_contents")
+	_assert(env_script.contains("_water_clip = Control.new()"), "water clip is plain Control")
+	_assert(not env_script.contains("_water_clip = TextureRect.new()"), "no shoreline TextureRect water host")
+	_assert(not env_script.contains("clip_children = CanvasItem.CLIP_CHILDREN_ONLY"), "no water CLIP_CHILDREN_ONLY")
 	_assert(env_script.contains("apply_environment"), "swappable environment API")
 	_assert(env_script.contains("EnvironmentBaseFill") or env_script.contains("_base_fill"), "opaque beach base fill")
 	_assert(env_script.contains("tod_palette_at"), "time-of-day palette interpolation")
@@ -224,12 +225,12 @@ func _run() -> void:
 		"default beach environment art"
 	)
 
-	_assert(flags.contains("APP_VERSION_CODE := 58"), "versionCode 58")
-	_assert(preset.contains("version/code=58"), "export 58")
-	_assert(preset.contains("0.1.58-final-scroll-shoreline-polish"), "version name")
-	_assert(preset.contains("v58-final-scroll-shoreline-polish-debug.apk"), "APK name")
+	_assert(flags.contains("APP_VERSION_CODE := 59"), "versionCode 59")
+	_assert(preset.contains("version/code=59"), "export 59")
+	_assert(preset.contains("0.1.59-scroll-water-recovery"), "version name")
+	_assert(preset.contains("v59-scroll-water-recovery-debug.apk"), "APK name")
 	_assert(gitignore.contains("*.apk"), "apks ignored by default")
-	_assert(export_sh.contains("v58-final-scroll-shoreline-polish-debug.apk"), "export default")
+	_assert(export_sh.contains("v59-scroll-water-recovery-debug.apk"), "export default")
 	_assert(not env_script.contains("var _top_shade"), "top shade var removed")
 	_assert(not env_script.contains('name = "TopReadabilityShade"'), "top shade node not created")
 	_assert(env_script.contains("get_datetime_dict_from_system"), "local time via system datetime")
@@ -274,9 +275,9 @@ func _run() -> void:
 	_assert(env._water_glisten != null, "ocean glisten layer present")
 	_assert(env._water_glisten_b != null, "second ocean glisten layer present")
 	_assert(env._water_clip != null, "ocean glisten clip present")
-	_assert(env._water_clip is TextureRect, "water clip is shoreline mask TextureRect")
-	_assert((env._water_clip as TextureRect).texture != null, "water mask texture loaded")
-	_assert(env._water_clip.clip_children == CanvasItem.CLIP_CHILDREN_ONLY, "water mask clips children only")
+	_assert(env._water_clip is Control and not (env._water_clip is TextureRect), "water clip is plain Control")
+	_assert(env._water_clip.clip_contents == true, "water clip uses clip_contents")
+	_assert(env._water_clip.clip_children != CanvasItem.CLIP_CHILDREN_ONLY, "no shoreline CLIP_CHILDREN_ONLY")
 	_assert(env._glints.size() == ChestEnvironment.GLINT_COUNT, "discrete glint count")
 	_assert(ChestEnvironment.GLINT_COUNT == 6, "six glints configured")
 	_assert(absf(env.sand_contact_y_frac() - ChestEnvironment.CHEST_GROUND_Y) < 0.001, "ground Y API")
@@ -291,19 +292,21 @@ func _run() -> void:
 	await process_frame
 	var water_top := env.size.y * ChestEnvironment.WATER_TOP_FRAC
 	var water_bot := env.size.y * ChestEnvironment.WATER_BOTTOM_FRAC
-	## Mask host is full-rect (matches beach cover); tint/glisten stay in water band.
-	_assert(env._water_clip.position == Vector2.ZERO, "water mask host at origin")
-	_assert(absf(env._water_clip.size.x - env.size.x) < 1.0 and absf(env._water_clip.size.y - env.size.y) < 1.0, "water mask full rect")
-	_assert(env._ocean_tint.position.y >= water_top - 1.0, "ocean tint starts at water top")
-	_assert(env._ocean_tint.position.y + env._ocean_tint.size.y <= water_bot + 1.0, "ocean tint ends at water bottom")
-	_assert(env._water_glisten.position.y >= water_top - 1.0, "glisten starts at water top")
-	_assert(env._water_glisten.position.y + env._water_glisten.size.y <= water_bot + 2.0, "glisten ends near water bottom")
+	var water_h := water_bot - water_top
+	## Single continuous water strip — children are local to the clip.
+	_assert(absf(env._water_clip.position.y - water_top) < 1.0, "water clip at water top")
+	_assert(absf(env._water_clip.size.x - env.size.x) < 1.0, "water clip full width")
+	_assert(absf(env._water_clip.size.y - water_h) < 1.0, "water clip continuous band height")
+	_assert(env._ocean_tint.position.y <= 1.0, "ocean tint local to water clip")
+	_assert(absf(env._ocean_tint.size.y - water_h) < 1.0, "ocean tint fills water clip")
+	_assert(env._water_glisten.position.y <= 1.0, "glisten local to water clip")
+	_assert(env._water_glisten.size.y <= water_h + 2.0, "glisten height within water clip")
 	_assert(env._sky_clip.size.y <= env.size.y * ChestEnvironment.SKY_BOTTOM_FRAC + 1.0, "stars/sky wash clipped to sky")
 	_assert(env._sky_gradient_view.size.y >= env._sky_clip.size.y - 1.0, "gradient fills sky clip")
 	for g in env._glints:
 		_assert(g.get_parent() == env._water_clip, "glint parented under water clip")
-		_assert(g.position.y >= water_top - 1.0, "glint inside water band top")
-		_assert(g.position.y + g.size.y <= water_bot + 2.0, "glint inside water band bottom")
+		_assert(g.position.y >= -1.0, "glint inside water clip top")
+		_assert(g.position.y + g.size.y <= water_h + 2.0, "glint inside water clip bottom")
 	## Layer order: open-back < scroll < front rim < glow
 	_assert(node._scroll_clip.z_index > node._frame_view.z_index, "scroll above open-back")
 	_assert(node._rim_view.z_index > node._scroll_clip.z_index, "rim above scroll")
@@ -314,10 +317,10 @@ func _run() -> void:
 	_assert(node._scroll_clip.clip_children == CanvasItem.CLIP_CHILDREN_DISABLED, "cavity clip host does not mask-draw")
 	_assert(absf(LoveNotesChest.CAVITY_RIM_CANVAS_Y - 269.0) < 0.01, "cavity rim at lip top")
 	_assert(absf(LoveNotesChest.CAVITY_CENTER_CANVAS_X - 219.0) < 0.01, "geometric cavity center x")
-	_assert(absf(LoveNotesChest.SCROLL_X_BIAS_CANVAS - 20.0) < 0.01, "scroll X bias 20 canvas")
-	_assert(LoveNotesChest.SCROLL_START_ABOVE_RIM < -0.05, "scroll start buried below rim")
-	_assert(LoveNotesChest.SCROLL_CONTENT_TOP_PAD > 0.03, "top pad >3%")
-	_assert(LoveNotesChest.SCROLL_CONTENT_BOTTOM_PAD > 0.05, "bottom pad >5%")
+	_assert(absf(LoveNotesChest.SCROLL_X_BIAS_CANVAS - 28.0) < 0.01, "scroll X bias 28 canvas")
+	_assert(LoveNotesChest.SCROLL_START_ABOVE_RIM < -0.15, "scroll start buried below rim")
+	_assert(LoveNotesChest.SCROLL_CONTENT_TOP_PAD < 0.02, "top pad matches measured art")
+	_assert(LoveNotesChest.SCROLL_CONTENT_BOTTOM_PAD < 0.02, "bottom pad matches measured art")
 
 	## Dynamic sky interpolation (device-local clock; mock hours for validation only).
 	var prev_override := ChestEnvironment.debug_hour_override
