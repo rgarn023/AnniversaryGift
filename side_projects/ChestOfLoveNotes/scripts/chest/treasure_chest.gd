@@ -585,7 +585,9 @@ func _place_scroll_and_rim() -> void:
 	) * draw_w
 	var scroll_left := cavity_cx - sw * 0.5
 	## ScrollCavityClip is a non-drawing host (no StyleBox / ColorRect / texture).
-	## No clip_contents / no cavity mask — front rim alone occludes the lower scroll.
+	## Prior rectangular clip_contents hard-cut the scroll bottom during emerge;
+	## prior CavityMaskHost drew gray cavity pixels — both remain removed.
+	## Front rim alone occludes the lower scroll (no hard cut, no mask fill).
 	if _scroll_clip:
 		_place_rect(_scroll_clip, _anchor_rect)
 	if _scroll_view and _scroll_clip:
