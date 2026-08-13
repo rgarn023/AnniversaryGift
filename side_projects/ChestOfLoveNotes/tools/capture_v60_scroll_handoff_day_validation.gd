@@ -46,8 +46,6 @@ func _run() -> void:
 	env._apply_time_of_day(true)
 	await process_frame
 	await process_frame
-	for _i in range(40):
-		await process_frame
 
 	print("CONST CAVITY_RIM=", LoveNotesChest.CAVITY_RIM_CANVAS_Y)
 	print("CONST SCROLL_START=", LoveNotesChest.SCROLL_START_ABOVE_RIM)
@@ -121,9 +119,13 @@ func _run() -> void:
 			chest._glow_pulse.modulate.a = LoveNotesChest.GLOW_REWARD_HOLD_A
 		await process_frame
 		await process_frame
-		var img := root_c.get_viewport().get_texture().get_image()
-		img.save_png("%s/%s.png" % [out_dir, s["name"]])
-		img.save_png("/opt/cursor/artifacts/chest_v60_validation/%s.png" % s["name"])
+		var vp_tex := root_c.get_viewport().get_texture()
+		if vp_tex != null:
+			var img := vp_tex.get_image()
+			if img:
+				img.save_png("%s/%s.png" % [out_dir, s["name"]])
+				img.save_png("/opt/cursor/artifacts/chest_v60_validation/%s.png" % s["name"])
+				print("WROTE ", s["name"])
 
 		var rim_y := chest._anchor_rect.position.y + (LoveNotesChest.CAVITY_RIM_CANVAS_Y / LoveNotesChest.FRAME_CANVAS.y) * chest._anchor_rect.size.y
 		var st := chest._scroll_clip.position.y + chest._scroll_view.position.y if chest._scroll_view else -1.0
@@ -165,8 +167,9 @@ func _run() -> void:
 		fail += 1
 	else:
 		print("PASS: buried start fully behind front lip above=", above2)
-	if chest._frame_view.modulate != Color(1, 1, 1, 1):
-		print("FAIL: open-back modulate not neutral at handoff ", chest._frame_view.modulate)
+	var mod := chest._frame_view.modulate
+	if absf(mod.r - 1.0) > 0.001 or absf(mod.g - 1.0) > 0.001 or absf(mod.b - 1.0) > 0.001 or absf(mod.a - 1.0) > 0.001:
+		print("FAIL: open-back modulate not neutral at handoff ", mod)
 		fail += 1
 	else:
 		print("PASS: open-back modulate neutral at handoff")

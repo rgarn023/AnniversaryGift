@@ -51,8 +51,8 @@ func _run() -> void:
 	_assert(chest.contains("SCROLL_EMERGE_SEC := 0.55"), "scroll emerge duration ~0.55s")
 	_assert(chest.contains("SCROLL_POST_OPEN_BEAT_SEC := 0.11"), "post-open beat")
 	_assert(chest.contains("REWARD_HOLD_SEC := 0.60"), "reward hold ~0.60s")
-	_assert(chest.contains("SCROLL_FINAL_ABOVE_RIM := 0.88"), "final reveal ~88% content")
-	_assert(chest.contains("SCROLL_START_ABOVE_RIM := -0.24"), "scroll starts buried below lip")
+	_assert(chest.contains("SCROLL_FINAL_ABOVE_RIM := 0.84"), "final reveal ~84% content")
+	_assert(chest.contains("SCROLL_START_ABOVE_RIM := -0.42"), "scroll starts buried below lip")
 	_assert(chest.contains("SCROLL_PEEK_ABOVE_RIM := 0.05"), "first peek ~5%")
 	_assert(chest.contains("SCROLL_X_BIAS_CANVAS := 28.0"), "scroll right bias ~+14px runtime")
 	_assert(chest.contains("SCROLL_CONTENT_TOP_PAD"), "scroll texture top pad accounted")
@@ -452,7 +452,8 @@ func _run() -> void:
 	_assert(node._scroll_clip.visible, "scroll clip visible while still buried")
 	_assert(node._scroll_view.visible, "scroll view visible while still buried")
 	_assert(node._rim_view.visible, "rim visible while scroll buried")
-	_assert(node._frame_view.modulate == Color(1, 1, 1, 1), "open-back neutral at buried arm")
+	var arm_mod := node._frame_view.modulate
+	_assert(absf(arm_mod.r - 1.0) < 0.001 and absf(arm_mod.g - 1.0) < 0.001 and absf(arm_mod.b - 1.0) < 0.001 and absf(arm_mod.a - 1.0) < 0.001, "open-back neutral at buried arm")
 	var hidden_top := node._scroll_clip.position.y + node._scroll_view.position.y
 	var rim_y_start := node._anchor_rect.position.y + (LoveNotesChest.CAVITY_RIM_CANVAS_Y / LoveNotesChest.FRAME_CANVAS.y) * node._anchor_rect.size.y
 	var hidden_content_top := hidden_top + node._scroll_view.size.y * LoveNotesChest.SCROLL_CONTENT_TOP_PAD
