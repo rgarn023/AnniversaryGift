@@ -1,8 +1,8 @@
 # animation_v3 — Baked Scroll-Reveal Specification
 
-**Status:** Step 2 complete — reveal artwork ready for integration.  
+**Status:** Step 3 complete — baked reveal integrated for normal scroll rewards.  
 **Integration allowed:** `true`  
-**Runtime behavior:** still unchanged. Do not wire this package into Godot until Step 3.
+**Runtime behavior:** normal unread path plays `reveal_00`…`reveal_07` after `chest_12` via `_play_baked_scroll_reveal()`.
 
 This document freezes the rules for the **baked chest + scroll reveal** sequence that will replace the current runtime normal-scroll reward path (open_back / front_rim / standalone scroll tween).
 
@@ -218,4 +218,4 @@ assets/chest/animation_v3/
 |------|---------|
 | **1** | Audit + scaffold + spec. No runtime change. No APK. |
 | **2 (this pass)** | Create baked scroll-reveal artwork + validate. No runtime change. No APK. |
-| **3** | Integrate animation_v3 for normal scroll reward only |
+| **3 (this pass)** | Integrate animation_v3 for normal scroll reward only |

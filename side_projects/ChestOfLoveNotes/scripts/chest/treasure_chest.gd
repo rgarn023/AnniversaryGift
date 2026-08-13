@@ -1,18 +1,15 @@
 extends Control
 class_name LoveNotesChest
-## animation_v2 approved 13-frame chest opening (v60 scroll handoff + day fix).
-## Empty + unread share the same smooth multi-frame open (#00→#12).
+## animation_v2 approved 13-frame chest opening + animation_v3 baked scroll reveal
+## (v61). Empty + unread share the same smooth multi-frame open (#00→#12).
 ## No chest crossfade / alpha fade / ghost duplicate — exactly ONE visible chest
-## frame at any instant. Unread then switches cleanly to open-back + scroll +
-## front-rim layering for a continuous Y-tweened horizontal scroll rise.
-## Legacy PATH B / glowing-sheet frames are never used at runtime.
-## v57: remove visible CavityMaskHost (gray chest_cavity_mask.png) AND restore
-## opaque open-back cavity wood (v56 had zeroed cavity alpha → hole / gray band).
-## v59: keep the simple rear → scroll → front-rim stack; bury start fully behind
-## the lip; small additional +X; accurate content-pad rise math. No cavity mask.
-## v60: arm scroll visible WHILE still fully buried behind the front lip; deepen
-## start Y; keep open-back modulate neutral at handoff; layers re-derived from
-## chest_12 for exact composite match; slightly lower final pose.
+## (or baked chest+scroll) frame at any instant.
+## v61 NORMAL SCROLL REWARD: after chest_12, play discrete baked reveal_00…07
+## frames (animation_v3). The open_back + ScrollLayer + front_rim runtime
+## compositor is NO LONGER used for the normal unread reward path.
+## Legacy layered helpers remain on disk / in-code for history / empty tooling
+## but must stay inactive during baked reveal.
+## Empty chest: approved open only → glow → "No new scrolls today."
 ## Chest plant/frames/size remain frozen.
 
 signal tapped
@@ -42,15 +39,19 @@ enum ChestState {
 
 ## Approved production package — never fall back to legacy frames/sheets.
 const ANIM_V2 := "res://assets/chest/animation_v2/"
+const ANIM_V3 := "res://assets/chest/animation_v3/"
 const CHEST_FRAMES_DIR := ANIM_V2 + "chest_frames/"
+const SCROLL_REVEAL_DIR := ANIM_V3 + "scroll_reveal/"
+## Legacy layered assets — retained on disk / preloaded for history, but NOT
+## drawn during the normal animation_v3 baked scroll reward path.
 const OPEN_BACK := ANIM_V2 + "layers/chest_open_back.png"
 const FRONT_RIM := ANIM_V2 + "layers/chest_open_front_rim.png"
 ## Legacy cavity mask asset kept on disk for tooling history only — NOT loaded
 ## at runtime (v57). Drawing that gray TextureRect caused the visible cavity
 ## rectangle on device even with CLIP_CHILDREN_ONLY.
 const CAVITY_MASK_LEGACY := ANIM_V2 + "layers/chest_cavity_mask.png"
-## Horizontal romantic reward scroll — packaged from new_love_scroll_master.png
-## (deskew/crop/resize only). Ribbon + heart remain readable at phone scale.
+## Horizontal romantic reward scroll — source for baked reveal composites only
+## in the normal reward path (standalone ScrollLayer stays hidden).
 const SCROLL_LAYER := ANIM_V2 + "scroll/love_scroll_reward.png"
 ## Prior tiny horizontal tube (132×56) — kept for reference, not used at runtime.
 const SCROLL_LAYER_LEGACY_HORIZONTAL := ANIM_V2 + "scroll/love_scroll_horizontal.png"
@@ -61,7 +62,7 @@ const SCROLL_LAYER_MASTER_SOURCE := ANIM_V2 + "incoming_new_art/new_love_scroll_
 const SOFT_GLOW := "res://assets/art/chest/soft_glow_pulse.png"
 const CONTACT_SHADOW := "res://assets/art/chest/chest_contact_shadow.png"
 const WARM_SPILL := "res://assets/art/chest/chest_warm_spill.png"
-## animation_v2 production canvas (base anchor 256,420).
+## animation_v2 / v3 production canvas (base anchor 256,420).
 const FRAME_CANVAS := Vector2(512, 512)
 ## Absolute plant row in authored frames (matches animation_manifest base_anchor.y).
 const CHEST_FOOT_CANVAS_Y := 420.0
@@ -69,60 +70,66 @@ const CHEST_FOOT_CANVAS_Y := 420.0
 const CHEST_FOOT_Y_FRAC := CHEST_FOOT_CANVAS_Y / 512.0
 ## Full approved opening sequence #00–#12.
 const CHEST_FRAME_COUNT := 13
+## Baked scroll-reveal frames (animation_v3) — exact order, no skips / reverse.
+const REVEAL_FRAME_COUNT := 8
 ## Compat aliases (tests / older callers).
 const EMPTY_FRAME_COUNT := CHEST_FRAME_COUNT
-const SCROLL_FRAME_COUNT := 0
+const SCROLL_FRAME_COUNT := REVEAL_FRAME_COUNT
 ## Smooth premium open — restrained start, accelerate mid, ease into fully open.
 const OPEN_DURATION_SEC := 1.0
 const OPEN_DURATION_RM := 0.42
 const ANTICIPATION_SEC := 0.06
 const SETTLE_SEC := 0.10
 const MAGICAL_SWELL_SEC := 0.10
-## Brief intentional beat after fully open before scroll motion begins.
-const SCROLL_POST_OPEN_BEAT_SEC := 0.11
-## Scroll emerge after open — continuous Y only (horizontal scroll, no rotation).
-## Target ~0.45–0.65s; slightly quicker initial peek then soft settle.
-const SCROLL_EMERGE_SEC := 0.55
-## Intentional hold on the completed reward pose before note handoff.
+## Brief intentional beat after chest_12 before baked reveal begins (0.08–0.12).
+const SCROLL_POST_OPEN_BEAT_SEC := 0.10
+## Legacy layered emerge duration — retained for documentation / inactive path.
+## Production normal reward uses REVEAL_FRAME_DWELLS_SEC instead.
+const SCROLL_EMERGE_SEC := 0.52
+## Per-frame dwell for reveal_00…reveal_06 before advancing (seconds).
+## reveal_07 uses REWARD_HOLD_SEC as the final settle hold.
+## Sum of dwells ≈ 0.52s (within the 0.50–0.60 target).
+const REVEAL_FRAME_DWELLS_SEC := [
+	0.06, ## reveal_00_hidden
+	0.07, ## reveal_01_peek
+	0.07, ## reveal_02_15
+	0.08, ## reveal_03_30
+	0.08, ## reveal_04_50
+	0.08, ## reveal_05_70
+	0.08, ## reveal_06_85
+]
+## Intentional hold on reveal_07_final before note handoff (0.55–0.65).
 const REWARD_HOLD_SEC := 0.60
 ## Tiny settle pulse only — must not read as the chest growing while opening.
 const EMPHASIS_SCALE := 1.002
-## Progress split when sampling combined unread progress (validation / short path).
+## Progress split when sampling combined unread progress (validation path).
+## After this progress, samples map onto baked reveal frames (not layered open).
 const SCROLL_REVEAL_START_PROGRESS := 0.48
-## Compat index marker (legacy baked scroll frames; runtime uses layers).
-const SCROLL_REVEAL_START_INDEX := 2
+## Compat index marker (legacy).
+const SCROLL_REVEAL_START_INDEX := 0
 ## Native romantic horizontal scroll art size (love_scroll_reward.png = 720×305).
 const SCROLL_NATIVE := Vector2(720, 305)
 ## Measured transparent pad in love_scroll_reward.png (opaque rows ≈1..303).
-## Rise math uses CONTENT height so first visible pixels sit at the front lip.
-## v59: corrected from overstated 0.040/0.072 pads that buried the art too deep.
+## Legacy layered rise math only — inactive during baked reveal.
 const SCROLL_CONTENT_TOP_PAD := 0.004
 const SCROLL_CONTENT_BOTTOM_PAD := 0.007
-## Target final width as a fraction of the real cavity opening (inner walls).
-## Sized to the 3/4 cavity (not canvas-centered) so the scroll fills the mouth
-## without spilling past the right inner wall.
+## Legacy layered scroll width fraction — inactive during baked reveal.
 const SCROLL_OPENING_WIDTH_FRAC := 0.92
-## Canvas-space cavity / rim geometry — top of re-derived front lip (y≈269).
-## Front rim is the only foreground occluder — no cavity-mask TextureRect.
-## First pixels appear directly behind the front lip as the scroll rises.
+## Canvas-space cavity / rim geometry — top of front lip (y≈269). Matches
+## animation_v3 lip burial lock used when baking reveal frames.
 const CAVITY_RIM_CANVAS_Y := 269.0
 ## Geometric center of the 3/4-view cavity opening (not the canvas midpoint).
 const CAVITY_CENTER_CANVAS_X := 219.0
-## Runtime scroll path bias to the RIGHT of geometric cavity center.
-## v58 used +20 canvas (~+9.8px @ fit 0.492). v59 nudges +8 more (~+4px).
+## Legacy layered scroll X bias — inactive during baked reveal.
 const SCROLL_X_BIAS_CANVAS := 28.0
 const CAVITY_INNER_LEFT_X := 137.0
 const CAVITY_INNER_RIGHT_X := 301.0
-## Final reward: ~84% of CONTENT height above the front rim (80–90% visible).
-## Slightly below v59 so the parchment does not sit on the rear-lid / hinge band.
+## Legacy layered final/start rise params — inactive during baked reveal.
 const SCROLL_FINAL_ABOVE_RIM := 0.84
-## At rise=0 the CONTENT is buried below the lip (negative = lower / forward in
-## the front pocket). Fully hidden behind the lip BEFORE the tween starts; first
-## visible tip ~5% then 10 → 25 → 50 → 75 → final.
 const SCROLL_START_ABOVE_RIM := -0.42
 const SCROLL_PEEK_ABOVE_RIM := 0.05
-## Soft glow peaks — restrained warm accent; never washes out rim/scroll/wood.
-## v53: slightly softer central glow during emerge/hold for crisp parchment.
+## Soft glow peaks — restrained warm accent; never washes out parchment/wood.
+## Glow/particles may sit ABOVE the baked reveal texture only.
 const GLOW_OPEN_A := 0.012
 const GLOW_SETTLE_A := 0.016
 const GLOW_RETAP_A := 0.028
@@ -162,6 +169,17 @@ const CHEST_FRAME_FILES := [
 	"chest_11_open_92.png",
 	"chest_12_fully_open.png",
 ]
+## Exact approved animation_v3 baked scroll-reveal filenames in order.
+const REVEAL_FRAME_FILES := [
+	"reveal_00_hidden.png",
+	"reveal_01_peek.png",
+	"reveal_02_15.png",
+	"reveal_03_30.png",
+	"reveal_04_50.png",
+	"reveal_05_70.png",
+	"reveal_06_85.png",
+	"reveal_07_final.png",
+]
 
 @export var reduced_motion: bool = false
 
@@ -191,27 +209,34 @@ var _open_amount: float = 0.0
 var _scroll_rise: float = 0.0
 var _show_scroll_on_finish: bool = false
 var _layered_open: bool = false
+## True while ChestFrame is showing an animation_v3 baked reveal texture.
+var _baked_reveal_active: bool = false
 var _anchor_rect: Rect2 = Rect2()
 var _anticipation_y: float = 0.0
 var _emphasis_scale: float = 1.0
 var _particles_armed: bool = false
 var _chest_frames: Array[Texture2D] = []
 var _empty_frames: Array[Texture2D] = [] ## alias of _chest_frames
-var _scroll_frames: Array[Texture2D] = [] ## unused at runtime (compat)
+var _scroll_frames: Array[Texture2D] = [] ## alias of _reveal_frames (compat)
+var _reveal_frames: Array[Texture2D] = []
 var _active_frames: Array[Texture2D] = []
 var _frame_index: int = 0
+var _reveal_frame_index: int = -1
 var _scroll_emerged_emitted: bool = false
 var _scroll_layer_tex: Texture2D = null
 var _rim_layer_tex: Texture2D = null
 var _open_back_tex: Texture2D = null
 var _shadow_tex: Texture2D = null
 var _fit_scale: float = 1.0
+## Programmatic reward texture-order log for tests (chest_12 → reveal_00…07).
+var _reward_sequence_log: Array[String] = []
 
 ## Process-wide preload so the first tap never decompresses textures.
 static var _tex_cache: Dictionary = {}
 static var _chest_cache: Array = []
 static var _empty_cache: Array = [] ## alias
 static var _scroll_cache: Array = []
+static var _reveal_cache: Array = []
 static var _preloaded: bool = false
 static var _sprite_frames_empty: SpriteFrames = null
 static var _sprite_frames_scroll: SpriteFrames = null
@@ -223,7 +248,8 @@ static func preload_assets() -> void:
 		return
 	_chest_cache = _load_chest_sequence()
 	_empty_cache = _chest_cache
-	_scroll_cache = []
+	_reveal_cache = _load_reveal_sequence()
+	_scroll_cache = _reveal_cache
 	_load_cached(SOFT_GLOW)
 	_load_cached(SCROLL_LAYER)
 	_load_cached(SCROLL_LAYER_LEGACY_HORIZONTAL)
@@ -234,7 +260,7 @@ static func preload_assets() -> void:
 	_load_cached(WARM_SPILL)
 	_open_weight_ends = _build_open_weight_ends()
 	_sprite_frames_empty = _build_sprite_frames("empty_open", _chest_cache, 13.0)
-	_sprite_frames_scroll = null
+	_sprite_frames_scroll = _build_sprite_frames("baked_reveal", _reveal_cache, 16.0)
 	_preloaded = true
 
 
@@ -242,6 +268,13 @@ static func _load_chest_sequence() -> Array:
 	var out: Array = []
 	for fname in CHEST_FRAME_FILES:
 		out.append(_load_cached(CHEST_FRAMES_DIR + String(fname)))
+	return out
+
+
+static func _load_reveal_sequence() -> Array:
+	var out: Array = []
+	for fname in REVEAL_FRAME_FILES:
+		out.append(_load_cached(SCROLL_REVEAL_DIR + String(fname)))
 	return out
 
 
@@ -295,9 +328,13 @@ func _ready() -> void:
 	_chest_frames.clear()
 	_empty_frames.clear()
 	_scroll_frames.clear()
+	_reveal_frames.clear()
 	for t in _chest_cache:
 		_chest_frames.append(t as Texture2D)
 	_empty_frames = _chest_frames
+	for t in _reveal_cache:
+		_reveal_frames.append(t as Texture2D)
+	_scroll_frames = _reveal_frames
 	_scroll_layer_tex = _load_cached(SCROLL_LAYER)
 	_rim_layer_tex = _load_cached(FRONT_RIM)
 	_open_back_tex = _load_cached(OPEN_BACK)
@@ -353,7 +390,8 @@ func _build_visuals() -> void:
 	_root_visual.add_child(_warm_spill)
 
 	## Exactly ONE opaque chest sprite — no duplicate underlay / crossfade layers.
-	## Layered reward mode swaps this to open-back (rear/lid/interior only).
+	## Normal scroll reward swaps this through animation_v3 baked reveal frames
+	## (chest+scroll already composited). Legacy open-back swap is inactive.
 	_frame_view = TextureRect.new()
 	_frame_view.name = "ChestFrame"
 	_frame_view.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
@@ -366,9 +404,12 @@ func _build_visuals() -> void:
 	_frame_view.z_index = 3
 	_root_visual.add_child(_frame_view)
 
-	## Order: rear/interior → scroll → front lip → glow → particles → UI.
-	## ScrollCavityClip is a plain Control (no StyleBox / ColorRect / texture) —
-	## it never draws pixels. Front rim is the only intentional occluder.
+	## Order: chest sprite → (legacy scroll/rim inactive for reward) → glow → particles.
+	## ScrollCavityClip / ScrollLayer / ChestFrontRim remain in the tree for
+	## history and empty/legacy helpers, but stay HIDDEN during baked reveal.
+	## Front rim alone occludes only in the inactive layered compositor path.
+	## clip_contents hard-cut the scroll bottom was a historical root-cause —
+	## baked frames eliminate that path for normal rewards.
 	_scroll_clip = Control.new()
 	_scroll_clip.name = "ScrollCavityClip"
 	_scroll_clip.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -380,9 +421,8 @@ func _build_visuals() -> void:
 	_scroll_clip.visible = false
 	_root_visual.add_child(_scroll_clip)
 
-	## Horizontal romantic love-note scroll — Y-rises behind the front rim.
+	## Legacy standalone ScrollLayer — NOT drawn during animation_v3 baked reveal.
 	## Orientation is baked into love_scroll_reward.png (no runtime rotation).
-	## No cavity-mask TextureRect / shader — those drew a gray rectangle on device.
 	_scroll_view = TextureRect.new()
 	_scroll_view.name = "ScrollLayer"
 	_scroll_view.texture = _scroll_layer_tex
@@ -397,8 +437,7 @@ func _build_visuals() -> void:
 	_scroll_view.visible = true
 	_scroll_clip.add_child(_scroll_view)
 
-	## Front-rim occlusion layer derived from approved fully-open frame #12.
-	## Continuous mouth gold lip + front face + side pillars — ABOVE scroll.
+	## Legacy front-rim occlusion — NOT drawn during animation_v3 baked reveal.
 	_rim_view = TextureRect.new()
 	_rim_view.name = "ChestFrontRim"
 	_rim_view.texture = _rim_layer_tex
@@ -411,7 +450,8 @@ func _build_visuals() -> void:
 	_rim_view.visible = false
 	_root_visual.add_child(_rim_view)
 
-	## Soft radial pulse — restrained; sits above the rim so parchment stays readable.
+	## Soft radial pulse — restrained; sits ABOVE the baked reveal texture only.
+	## Smaller/softer so it never washouts parchment contrast.
 	_glow_pulse = TextureRect.new()
 	_glow_pulse.name = "GlowPulse"
 	_glow_pulse.texture = _load_cached(SOFT_GLOW)
@@ -534,8 +574,8 @@ func _layout_frames() -> void:
 			sp_w,
 			sp_h
 		))
-	## Soft radial pulse in the cavity BEHIND the scroll — circular, not a box.
-	## Smaller/softer so it never blowouts parchment contrast.
+	## Soft radial pulse in the cavity — restrained accent ABOVE the chest sprite.
+	## Smaller/softer so it never blowouts parchment contrast on baked reveal.
 	_place_rect(_glow_pulse, Rect2(
 		_anchor_rect.position.x + draw_w * 0.38,
 		_anchor_rect.position.y + draw_h * 0.48,
@@ -717,8 +757,9 @@ func _ease_open_curve(t: float) -> float:
 
 
 func _select_sequence(_emerge_scroll: bool) -> void:
-	## Runtime always displays animation_v2 chest frames on the chest sprite.
-	## Scroll reward uses open-back + scroll + rim layers after fully open.
+	## Runtime always displays animation_v2 chest frames on the chest sprite
+	## during the open. Normal scroll reward then swaps to animation_v3 baked
+	## reveal frames via _play_baked_scroll_reveal / _show_baked_reveal_index.
 	_active_frames = _chest_frames
 
 
@@ -727,16 +768,55 @@ func _show_frame_index(index: int) -> void:
 		return
 	_frame_index = clampi(index, 0, _active_frames.size() - 1)
 	var tex: Texture2D = _active_frames[_frame_index]
-	if _frame_view and tex and not _layered_open:
+	if _frame_view and tex and not _layered_open and not _baked_reveal_active:
 		_frame_view.texture = tex
 		## One opaque chest sprite only — never a second chest overlay.
 		_enforce_chest_opaque()
 
 
+func _ensure_legacy_layers_hidden() -> void:
+	## Normal baked reward path: never draw standalone scroll / rim / cavity.
+	_layered_open = false
+	_set_scroll_layers_visible(false)
+	if _scroll_view:
+		_scroll_view.visible = false
+	if _scroll_clip:
+		_scroll_clip.visible = false
+	if _rim_view:
+		_rim_view.visible = false
+
+
+func _show_baked_reveal_index(index: int) -> void:
+	## Discrete opaque swap onto ONE baked reveal frame — no crossfade / morph.
+	if _reveal_frames.is_empty():
+		return
+	_ensure_legacy_layers_hidden()
+	_baked_reveal_active = true
+	_reveal_frame_index = clampi(index, 0, _reveal_frames.size() - 1)
+	_frame_index = _chest_frames.size() - 1
+	_scroll_rise = float(_reveal_frame_index) / float(maxi(_reveal_frames.size() - 1, 1))
+	var tex: Texture2D = _reveal_frames[_reveal_frame_index]
+	if _frame_view and tex:
+		_frame_view.texture = tex
+		_frame_view.modulate = Color(1, 1, 1, 1)
+	_enforce_chest_opaque()
+	_record_reward_texture(String(REVEAL_FRAME_FILES[_reveal_frame_index]).get_basename())
+
+
+func _record_reward_texture(label: String) -> void:
+	if _reward_sequence_log.is_empty() or _reward_sequence_log[_reward_sequence_log.size() - 1] != label:
+		_reward_sequence_log.append(label)
+
+
+func _clear_baked_reveal() -> void:
+	_baked_reveal_active = false
+	_reveal_frame_index = -1
+
+
 func _enter_layered_open() -> void:
-	## Clean switch from fully-open frame #12 to open-back + rim (no duplicate).
-	## open_back + front_rim are re-derived to pixel-match chest_12 — keep
-	## modulate neutral so the handoff does not darken the rear/interior.
+	## LEGACY / INACTIVE for normal scroll reward (v61+).
+	## Kept for history and optional tooling; production uses baked reveal.
+	_baked_reveal_active = false
 	_layered_open = true
 	if _frame_view and _open_back_tex:
 		_frame_view.texture = _open_back_tex
@@ -748,6 +828,8 @@ func _enter_layered_open() -> void:
 func _exit_layered_open() -> void:
 	_layered_open = false
 	_set_scroll_layers_visible(false)
+	if _baked_reveal_active:
+		return
 	if _active_frames.size() > 0 and _frame_view:
 		_frame_view.texture = _active_frames[clampi(_frame_index, 0, _active_frames.size() - 1)]
 		_frame_view.modulate = Color(1, 1, 1, 1)
@@ -755,9 +837,8 @@ func _exit_layered_open() -> void:
 
 
 func _arm_scroll_hidden_behind_lip() -> void:
-	## CRITICAL order: enter layered open + place at buried Y + set visible=true
-	## WHILE the scroll is still fully hidden behind the front lip. The tween
-	## must start from this already-visible buried pose (no late alpha pop).
+	## LEGACY / INACTIVE for normal scroll reward (v61+).
+	## Production path calls _play_baked_scroll_reveal instead.
 	_enter_layered_open()
 	_scroll_rise = 0.0
 	_place_scroll_and_rim()
@@ -792,18 +873,31 @@ func _weighted_frame_index(eased: float) -> int:
 
 
 func _frame_index_from_progress(amount: float, emerge_scroll: bool) -> int:
-	## Chest pose only — scroll rise is a separate layer after fully open.
-	## Pose weights already encode restrained→accel→decel; do not double-ease.
+	## Chest pose only during open. Combined unread samples hold on #12 while
+	## the reveal index is driven separately onto baked frames.
 	var max_i := _active_frames.size() - 1
 	if max_i <= 0:
 		return 0
 	if emerge_scroll:
-		## Combined unread progress: first portion opens chest, remainder holds open.
 		if amount < SCROLL_REVEAL_START_PROGRESS:
 			var t_open := amount / SCROLL_REVEAL_START_PROGRESS
 			return _weighted_frame_index(t_open)
 		return max_i
 	return _weighted_frame_index(amount)
+
+
+func _reveal_index_from_progress(amount: float) -> int:
+	## Map combined unread progress remainder onto reveal_00…07.
+	var t := 0.0
+	if amount >= SCROLL_REVEAL_START_PROGRESS:
+		t = (amount - SCROLL_REVEAL_START_PROGRESS) / (1.0 - SCROLL_REVEAL_START_PROGRESS)
+	t = clampf(t, 0.0, 1.0)
+	var max_i := maxi(_reveal_frames.size() - 1, 0)
+	if max_i <= 0:
+		return 0
+	if t >= 0.999:
+		return max_i
+	return clampi(int(floor(t * float(max_i + 1))), 0, max_i)
 
 
 func _set_scroll_layers_visible(vis: bool) -> void:
@@ -814,8 +908,7 @@ func _set_scroll_layers_visible(vis: bool) -> void:
 
 
 static func scroll_rise_for_above_rim(above: float) -> float:
-	## Map a desired above-rim height fraction onto the continuous rise parameter.
-	## Accounts for buried START so peek/final probes stay correct.
+	## Legacy helper for inactive layered path / older validation tools.
 	var span := SCROLL_FINAL_ABOVE_RIM - SCROLL_START_ABOVE_RIM
 	if absf(span) < 0.0001:
 		return 0.0
@@ -827,18 +920,16 @@ static func scroll_above_rim_at_rise(rise: float) -> float:
 
 
 func _set_scroll_rise_amount(amount: float) -> void:
+	## LEGACY layered rise — inactive for normal baked reward playback.
 	_scroll_rise = clampf(amount, 0.0, 1.0)
 	if not _layered_open:
 		_enter_layered_open()
 	_place_scroll_and_rim()
-	## Keep layers visible for the whole emerge — never wait until the scroll
-	## has already moved above the lip before turning visible on.
 	_set_scroll_layers_visible(true)
 	if _scroll_view:
 		_scroll_view.visible = true
 		_scroll_view.modulate = Color(1, 1, 1, 1)
 	var above_now := scroll_above_rim_at_rise(_scroll_rise)
-	## Emit once the tip clears the lip — not while still buried in the front pocket.
 	if above_now > 0.01 and not _scroll_emerged_emitted:
 		_scroll_emerged_emitted = true
 		chest_state = ChestState.OPEN_SCROLL_EMERGING
@@ -855,20 +946,30 @@ func _set_frame_progress(raw_amount: float, emerge_scroll: bool) -> void:
 	## Soft visual ease for glow only — frame index uses weighted linear progress.
 	var glow_ease := _ease_open_curve(linear)
 	var idx := _frame_index_from_progress(linear, emerge_scroll)
-	## Layered scroll path: hold open-back once reveal starts — never show #12 + layers.
-	if emerge_scroll and linear >= SCROLL_REVEAL_START_PROGRESS:
-		_frame_index = _active_frames.size() - 1
-		if not _layered_open:
-			_enter_layered_open()
-	else:
-		if _layered_open and not emerge_scroll:
-			_exit_layered_open()
-		_show_frame_index(idx)
 
-	## Progressive warm glow while the lid opens.
+	if emerge_scroll and linear >= SCROLL_REVEAL_START_PROGRESS:
+		## Combined unread validation path: baked reveal frames, never open_back.
+		_frame_index = _active_frames.size() - 1
+		if _layered_open:
+			_exit_layered_open()
+		_show_baked_reveal_index(_reveal_index_from_progress(linear))
+	else:
+		if _layered_open:
+			_exit_layered_open()
+		if _baked_reveal_active:
+			_clear_baked_reveal()
+		_show_frame_index(idx)
+		_ensure_legacy_layers_hidden()
+		_scroll_rise = 0.0
+		_place_scroll_and_rim()
+
+	## Progressive warm glow while the lid opens / reveal plays.
 	if _glow_pulse and not _layered_open:
-		_glow_pulse.modulate.a = lerpf(0.0, GLOW_MID_A, glow_ease)
-	if _warm_spill and not _layered_open:
+		if _baked_reveal_active:
+			_glow_pulse.modulate.a = GLOW_EMERGE_A
+		else:
+			_glow_pulse.modulate.a = lerpf(0.0, GLOW_MID_A, glow_ease)
+	if _warm_spill and not _layered_open and not _baked_reveal_active:
 		## Keep spill softer than the contact shadow so feet stay grounded.
 		_warm_spill.modulate.a = lerpf(0.0, 0.06, glow_ease)
 
@@ -877,27 +978,6 @@ func _set_frame_progress(raw_amount: float, emerge_scroll: bool) -> void:
 		_particles_armed = true
 		_emit_burst()
 		_start_motes()
-
-	## Layered scroll rise for unread combined progress samples.
-	if emerge_scroll:
-		if linear >= SCROLL_REVEAL_START_PROGRESS:
-			var t_scroll := (linear - SCROLL_REVEAL_START_PROGRESS) / (1.0 - SCROLL_REVEAL_START_PROGRESS)
-			## Ease-out so peek→25%→50%→70%→final each read clearly.
-			t_scroll = t_scroll * t_scroll * (3.0 - 2.0 * t_scroll)
-			t_scroll = 1.0 - (1.0 - t_scroll) * (1.0 - t_scroll)
-			_set_scroll_rise_amount(t_scroll)
-		else:
-			_scroll_rise = 0.0
-			if _layered_open:
-				_exit_layered_open()
-			_set_scroll_layers_visible(false)
-			_place_scroll_and_rim()
-	else:
-		_scroll_rise = 0.0
-		if _layered_open:
-			_exit_layered_open()
-		_set_scroll_layers_visible(false)
-		_place_scroll_and_rim()
 
 
 func _apply_open_amount(raw_amount: float) -> void:
@@ -911,6 +991,8 @@ func _reset_pose() -> void:
 	_frame_index = 0
 	_scroll_rise = 0.0
 	_layered_open = false
+	_clear_baked_reveal()
+	_reward_sequence_log.clear()
 	if _root_visual:
 		_root_visual.scale = Vector2.ONE
 		_root_visual.position = Vector2.ZERO
@@ -920,7 +1002,7 @@ func _reset_pose() -> void:
 		_glow_pulse.modulate.a = 0.0
 	if _warm_spill:
 		_warm_spill.modulate.a = 0.0
-	_set_scroll_layers_visible(false)
+	_ensure_legacy_layers_hidden()
 	_layout_frames()
 	_select_sequence(false)
 	_show_frame_index(0)
@@ -988,10 +1070,11 @@ func play_open_empty_pulse() -> void:
 	animating = true
 	_input_locked = true
 	HapticHelper.light_tap()
-	## Hold last approved open frame (or layered back if already layered).
+	## Hold last approved open frame — never arm layered scroll on empty retap.
 	_select_sequence(false)
-	if not _layered_open:
-		_show_frame_index(_chest_frames.size() - 1)
+	_clear_baked_reveal()
+	_ensure_legacy_layers_hidden()
+	_show_frame_index(_chest_frames.size() - 1)
 	var pulse := create_tween()
 	if _glow_pulse:
 		pulse.tween_property(_glow_pulse, "modulate:a", GLOW_RETAP_A, 0.14).set_trans(Tween.TRANS_SINE)
@@ -1027,6 +1110,9 @@ func play_open_animation(short: bool = false, emerge_scroll: bool = false) -> vo
 	_skip = false
 	_particles_armed = false
 	_scroll_emerged_emitted = false
+	_reward_sequence_log.clear()
+	_clear_baked_reveal()
+	_ensure_legacy_layers_hidden()
 	_set_badge_suppressed(true)
 	set_process(false)
 	_show_scroll_on_finish = emerge_scroll
@@ -1123,6 +1209,8 @@ func apply_ready_idle_state() -> void:
 func _open_short() -> void:
 	## Reduced-motion: quick opaque walk of key frames — never a translucent blend.
 	_layout_frames()
+	_clear_baked_reveal()
+	_ensure_legacy_layers_hidden()
 	_show_frame_index(0)
 	_open_amount = 0.0
 	var steps := [0, 3, 6, 9, 12]
@@ -1139,19 +1227,19 @@ func _open_short() -> void:
 	_open_amount = 1.0
 	_enforce_chest_opaque()
 	if _show_scroll_on_finish and not _skip:
+		_record_reward_texture("chest_12_fully_open")
 		await get_tree().create_timer(SCROLL_POST_OPEN_BEAT_SEC * 0.7).timeout
-		await _play_scroll_rise_tween(SCROLL_EMERGE_SEC * 0.70)
+		await _play_baked_scroll_reveal(0.70)
 		await get_tree().create_timer(REWARD_HOLD_SEC * 0.6).timeout
 	else:
 		await get_tree().create_timer(0.06).timeout
 
 
 func _play_scroll_rise_tween(duration: float) -> void:
-	## Continuous Y translation of ONE horizontal scroll — never rotate/scale/swap.
+	## LEGACY layered Y-tween — inactive for normal scroll reward (v61+).
+	## Production uses _play_baked_scroll_reveal. Retained for tooling history.
 	chest_state = ChestState.OPEN_SCROLL_EMERGING
-	## Visible + buried first; tween begins only after that pose is committed.
 	_arm_scroll_hidden_behind_lip()
-	## Restrained glow/spill only — do NOT dim open-back (handoff must match #12).
 	if _glow_pulse:
 		var glow_in := create_tween()
 		glow_in.tween_property(_glow_pulse, "modulate:a", GLOW_EMERGE_A, duration * 0.14).set_trans(Tween.TRANS_SINE)
@@ -1159,15 +1247,45 @@ func _play_scroll_rise_tween(duration: float) -> void:
 		var spill_in := create_tween()
 		spill_in.tween_property(_warm_spill, "modulate:a", 0.018, duration * 0.14).set_trans(Tween.TRANS_SINE)
 	var rise := create_tween()
-	## Smooth in-out Y rise: buried → ~5% peek → final (~84%).
-	## Avoid ease-out-only (that races past the lip before the first readable frame).
-	## Single continuous tween — no bounce / elastic / overshoot / frame swap.
 	rise.tween_method(_set_scroll_rise_amount, 0.00, 1.00, duration).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	await rise.finished
 	_set_scroll_rise_amount(1.0)
 	if _frame_view:
-		## Keep rear/interior neutral through the hold (identical to #12 composite).
 		_frame_view.modulate = Color(1, 1, 1, 1)
+	if _glow_pulse:
+		var glow_hold := create_tween()
+		glow_hold.tween_property(_glow_pulse, "modulate:a", GLOW_REWARD_HOLD_A, 0.12).set_trans(Tween.TRANS_SINE)
+	if not _scroll_emerged_emitted:
+		_scroll_emerged_emitted = true
+		sfx_scroll_emerge.emit()
+		scroll_emerged.emit(get_scroll_global_center())
+
+
+func _play_baked_scroll_reveal(time_scale: float = 1.0) -> void:
+	## Normal scroll reward: discrete animation_v3 reveal_00…07 swaps.
+	## Exactly ONE baked frame visible at any instant — no crossfade / ghosting.
+	## Standalone ScrollLayer / open_back / front_rim stay hidden.
+	chest_state = ChestState.OPEN_SCROLL_EMERGING
+	_ensure_legacy_layers_hidden()
+	if _glow_pulse:
+		_glow_pulse.modulate.a = GLOW_EMERGE_A
+	if _warm_spill:
+		_warm_spill.modulate.a = 0.018
+	var scale := clampf(time_scale, 0.35, 1.0)
+	var count := _reveal_frames.size()
+	if count <= 0:
+		return
+	for i in range(count):
+		if _skip:
+			_show_baked_reveal_index(count - 1)
+			break
+		_show_baked_reveal_index(i)
+		## Advance after dwell on reveal_00…06; reveal_07 settles into hold.
+		if i < count - 1:
+			var dwell := 0.06
+			if i < REVEAL_FRAME_DWELLS_SEC.size():
+				dwell = float(REVEAL_FRAME_DWELLS_SEC[i])
+			await get_tree().create_timer(dwell * scale).timeout
 	if _glow_pulse:
 		var glow_hold := create_tween()
 		glow_hold.tween_property(_glow_pulse, "modulate:a", GLOW_REWARD_HOLD_A, 0.12).set_trans(Tween.TRANS_SINE)
@@ -1184,6 +1302,8 @@ func _open_full() -> void:
 	_emphasis_scale = 1.0
 	_apply_root_transform()
 	_exit_layered_open()
+	_clear_baked_reveal()
+	_ensure_legacy_layers_hidden()
 	_show_frame_index(0)
 	_open_amount = 0.0
 	_enforce_chest_opaque()
@@ -1209,6 +1329,7 @@ func _open_full() -> void:
 	_show_frame_index(_chest_frames.size() - 1)
 	_open_amount = 1.0
 	_enforce_chest_opaque()
+	_record_reward_texture("chest_12_fully_open")
 	sfx_magical_swell.emit()
 	if not _particles_armed:
 		_particles_armed = true
@@ -1233,18 +1354,15 @@ func _open_full() -> void:
 		_apply_finished_state()
 		return
 
-	## Switch to open-back + rim with scroll already visible but fully buried,
-	## brief beat, then Y-rise. Handoff keeps identical plant/size/scale/color
-	## as frame #12 — only the layer split (exact pixel composite).
+	## Full-open beat, then animation_v3 baked reveal (no layered reconstruction).
 	if _show_scroll_on_finish:
-		_arm_scroll_hidden_behind_lip()
 		if _glow_pulse:
 			_glow_pulse.modulate.a = GLOW_EMERGE_A
 		await get_tree().create_timer(SCROLL_POST_OPEN_BEAT_SEC).timeout
 		if _skip:
 			_apply_finished_state()
 			return
-		await _play_scroll_rise_tween(SCROLL_EMERGE_SEC)
+		await _play_baked_scroll_reveal(1.0)
 		if _skip:
 			_apply_finished_state()
 			return
@@ -1266,7 +1384,7 @@ func _open_full() -> void:
 
 	if _show_scroll_on_finish and not _skip:
 		chest_state = ChestState.OPEN_WAITING_FOR_SCROLL
-		## Intentional reward hold so the completed scroll reads before note transition.
+		## Intentional hold on reveal_07 so the completed scroll reads before transition.
 		await get_tree().create_timer(REWARD_HOLD_SEC).timeout
 	else:
 		await get_tree().create_timer(0.06).timeout
@@ -1276,7 +1394,12 @@ func _open_full() -> void:
 
 
 func get_scroll_global_center() -> Vector2:
-	## Approximate the raised scroll center from the clipped cavity.
+	## Approximate scroll center from the baked frame cavity / host plant.
+	if _baked_reveal_active and _anchor_rect.size != Vector2.ZERO:
+		return global_position + _anchor_rect.position + Vector2(
+			_anchor_rect.size.x * 0.48,
+			_anchor_rect.size.y * 0.48
+		)
 	if _scroll_view and _scroll_view.is_visible_in_tree() and _scroll_clip and _scroll_clip.visible:
 		return _scroll_view.global_position + Vector2(
 			_scroll_view.size.x * 0.5,
@@ -1297,9 +1420,10 @@ func get_scroll_global_center() -> Vector2:
 
 func hide_rolled_scroll() -> void:
 	_scroll_rise = 0.0
+	_clear_baked_reveal()
 	if _layered_open:
 		_exit_layered_open()
-	_set_scroll_layers_visible(false)
+	_ensure_legacy_layers_hidden()
 	_place_scroll_and_rim()
 
 
@@ -1308,14 +1432,18 @@ func _apply_finished_state() -> void:
 	_frame_index = _chest_frames.size() - 1
 	_open_amount = 1.0
 	if _show_scroll_on_finish:
-		_enter_layered_open()
-		_set_scroll_rise_amount(1.0)
-		_set_scroll_layers_visible(true)
-		if _frame_view:
+		## End on reveal_07_final — never reconstruct open_back + rim + ScrollLayer.
+		_ensure_legacy_layers_hidden()
+		if _reveal_frames.size() > 0:
+			_show_baked_reveal_index(_reveal_frames.size() - 1)
+		elif _frame_view and _chest_frames.size() > 0:
+			_clear_baked_reveal()
+			_frame_view.texture = _chest_frames[_chest_frames.size() - 1]
 			_frame_view.modulate = Color(1, 1, 1, 1)
 	else:
 		_layered_open = false
-		_set_scroll_layers_visible(false)
+		_clear_baked_reveal()
+		_ensure_legacy_layers_hidden()
 		if _frame_view and _chest_frames.size() > 0:
 			_frame_view.texture = _chest_frames[_chest_frames.size() - 1]
 			_frame_view.modulate = Color(1, 1, 1, 1)

@@ -1,12 +1,12 @@
 {
   "package": "animation_v3",
-  "pass": "step2_baked_scroll_reveal_assets",
-  "status": "reveal artwork ready for integration",
+  "pass": "step3_baked_scroll_reveal_integration",
+  "status": "integrated into Godot normal scroll reward path",
   "integration_allowed": true,
-  "godot_integration": false,
-  "runtime_behavior_changed": false,
+  "godot_integration": true,
+  "runtime_behavior_changed": true,
   "apk_built": false,
-  "version_incremented": false,
+  "version_incremented": true,
   "created_utc": "2026-08-13",
   "branch": "cursor/mobile-production-polish-caa0",
   "purpose": "Prepare project for a future baked scroll-reveal sequence that keeps the approved chest_12 fully-open pixels immutable while only scroll position changes.",
@@ -484,5 +484,26 @@
     "motion": "Y_only"
   },
   "ready_for_step3_integration": true,
-  "build_tool": "tools/build_baked_scroll_reveal.py"
+  "build_tool": "tools/build_baked_scroll_reveal.py",
+  "step3_utc": "2026-08-13",
+  "runtime_method": "_play_baked_scroll_reveal",
+  "runtime_script": "scripts/chest/treasure_chest.gd",
+  "version": {
+    "versionCode": 61,
+    "versionName": "0.1.61-baked-scroll-reveal"
+  },
+  "timing_implemented": {
+    "scroll_post_open_beat_sec": 0.1,
+    "reveal_frame_dwells_sec": [
+      0.06,
+      0.07,
+      0.07,
+      0.08,
+      0.08,
+      0.08,
+      0.08
+    ],
+    "total_reveal_before_hold_sec": 0.52,
+    "final_hold_sec": 0.6
+  }
 }
