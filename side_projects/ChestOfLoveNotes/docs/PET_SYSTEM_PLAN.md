@@ -1,15 +1,16 @@
 # Pet System Plan — Chest of Love Notes
 
 First free pet: **Parrot** (`id: parrot`).  
-Phase 1A is **architecture only** — no visible pet, no pet UI, no purchases, no gifting.
+Phases through **1B-2A** keep the production app visually identical to the known-good pre-pet baseline.
 
 Baseline protected by: `docs/KNOWN_GOOD_PRE_PET_BASELINE.md`  
 Safe-area notes: `docs/PET_SAFE_AREA.md`  
-Parrot art/behavior pending: `assets/pets/parrot/PARROT_SPEC.md`
+Parrot art contract: `assets/pets/parrot/PARROT_SPEC.md`  
+Animation manifest: `assets/pets/parrot/parrot_animation_manifest.json`
 
 ---
 
-## PHASE 1A — Architecture / scaffolding (this phase)
+## PHASE 1A — Architecture / scaffolding — **COMPLETE**
 
 **Goal:** Clean foundation with zero user-visible change.
 
@@ -18,51 +19,59 @@ Delivered:
 - `PetDefinition` + scalable catalog (`config/pets/catalog.json`)
 - `PetManager` — catalog, owned IDs, active pet ID, local persistence
 - `PetState` enum — IDLE / ROAM / CHEST_INTERACTION / TAP_REACTION
-- `PetActor` scene + script (structural only; **not** mounted on production CHEST)
+- `PetActor` scene + script (structural; later mounted invisibly)
 - Default: parrot **FREE**, `default_unlocked`, considered owned
 - Asset folder tree under `assets/pets/parrot/` (no artwork)
 - Docs for plan, safe area, parrot spec
-
-Explicitly **not** in 1A:
-
-- Visible parrot on CHEST
-- Placeholder/debug sprites in production UI
-- Pet button / Collection / Shop / selector
-- Google Play Billing
-- PET_GIFT reward type wiring
-- Changes to approved chest/scroll/beach/backend/UI systems
 
 ---
 
 ## PHASE 1B — Free parrot runtime on CHEST
 
-**Goal:** Parrot appears on the CHEST reward screen only.
-
-### PHASE 1B-1 — Invisible runtime integration (this sub-phase)
+### PHASE 1B-1 — Invisible runtime integration — **COMPLETE**
 
 **Goal:** Mount pet runtime on CHEST with **zero visible pixels**.
 
-Expected:
+Delivered:
 
 - `PetRuntimeConfig.PET_RUNTIME_ENABLED = true`
 - `PetRuntimeConfig.PET_VISUALS_ENABLED = false`
 - CHEST → `ChestEnvironment` → `PetRuntimeRoot` → `PetActor`
 - IDLE / ROAM / CHEST_INTERACTION / TAP_REACTION state machine (logic only)
 - Safe-area roam clamps; chest exclusion; reward pause/resume
-- Still no artwork, Pet Collection UI, purchases, or gifting
+- Duplicate-spawn protection; persistence; no artwork / Pet UI / billing
 
-### PHASE 1B-2 — Parrot art + visible runtime (next)
+### PHASE 1B-2A — Asset contract + visual loader preparation — **THIS PHASE**
+
+**Goal:** Lock the exact production art/animation contract and runtime loader **without** enabling visuals.
+
+Delivered / expected:
+
+- `parrot_animation_manifest.json` (canvas, anchors, frame counts, fps, filenames)
+- Updated `PARROT_SPEC.md` with size / facing / flip / shadow contract
+- `PetAnimationLoader` — non-fatal missing-art path; `artwork_ready = false`
+- `PetActor` visual tree (`PetVisual` → `AnimatedSprite2D`) kept fully hidden
+- State → animation mapping + `flip_h` facing hooks (no playback yet)
+- `tools/validate_parrot_assets.py` → `AWAITING_ARTWORK` when empty
+- `tools/build_parrot_contact_sheets.py` ready for later frames
+- Still: `PET_VISUALS_ENABLED = false`, no placeholder graphics, no APK / version bump
+
+### PHASE 1B-2B — Actual parrot artwork + validation — **NEXT**
 
 Expected:
 
-- Spawn selected/owned parrot via `PetManager` into the CHEST stage
-- IDLE + ROAM within documented safe area
-- Occasional CHEST_INTERACTION
-- TAP_REACTION then return to normal
-- Respect UI exclusion zones; never obscure reward presentation
-- Still no Pet Collection UI, no purchases, no gifting
+- Author PNG frames per manifest filenames / canvas / anchors
+- Run `validate_parrot_assets.py` → `ARTWORK_READY`
+- Optional contact sheets via `build_parrot_contact_sheets.py`
+- Still do **not** enable `PET_VISUALS_ENABLED` until 1B-2C
 
-Art integration required before visual ship (see `PARROT_SPEC.md`).
+### PHASE 1B-2C — Enable visible runtime + Galaxy test
+
+Expected:
+
+- Flip `PET_VISUALS_ENABLED` only after artwork passes validation
+- Spawn/show parrot on CHEST; Galaxy visual QA
+- Still no Pet Collection UI, purchases, or gifting
 
 ---
 
@@ -85,7 +94,7 @@ Expected:
 
 Expected:
 
-- Future reward type: `PET_GIFT` (not implemented in 1A)
+- Future reward type: `PET_GIFT` (not implemented yet)
 - Delivery animation distinct from scroll reveal (do not break scroll path)
 - Pairing / My Person flows extended carefully; disconnect semantics unchanged
 
@@ -98,12 +107,12 @@ Expected:
 Expected:
 
 - BillingClient / SKUs / receipts / entitlements
-- Paid catalog entries (none in 1A)
+- Paid catalog entries (none yet)
 - Free parrot remains free and must not depend on billing
 
 ---
 
-## Architecture sketch (1A)
+## Architecture sketch (through 1B-2A)
 
 ```
 PetManager
@@ -111,10 +120,14 @@ PetManager
   ├─ owned_pet_ids
   ├─ active_pet_id
   ├─ load/save user://coln_pets.cfg
-  └─ spawn/despawn hooks (unused on CHEST until 1B)
+  └─ spawn → PetRuntimeRoot → PetActor (invisible)
 
-PetActor (future instance)
-  └─ PetState: IDLE → ROAM → CHEST_INTERACTION → TAP_REACTION
+PetActor
+  ├─ state machine: IDLE / ROAM / CHEST_INTERACTION / TAP_REACTION
+  ├─ PetAnimationLoader (manifest; artwork_ready=false until 1B-2B)
+  └─ PetVisual (hidden)
+       ├─ PetShadow (reserved)
+       └─ AnimatedSprite2D (no frames until art exists)
 ```
 
 Persistence is local for the free test pet. Do not add backend dependence for parrot ownership in early phases.

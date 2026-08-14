@@ -4,3 +4,16 @@
 
 [node name="PetActor" type="Node2D"]
 script = ExtResource("1_pet_actor")
+
+[node name="PetVisual" type="Node2D" parent="."]
+visible = false
+modulate = Color(1, 1, 1, 0)
+
+[node name="PetShadow" type="Node2D" parent="PetVisual"]
+visible = false
+modulate = Color(1, 1, 1, 0)
+
+[node name="AnimatedSprite2D" type="AnimatedSprite2D" parent="PetVisual"]
+visible = false
+modulate = Color(1, 1, 1, 0)
+centered = true

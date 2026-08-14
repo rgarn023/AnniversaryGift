@@ -5,7 +5,8 @@ class_name PetRuntimeConfig
 
 ## Runtime state machine + spawn on CHEST (logic only).
 const PET_RUNTIME_ENABLED := true
-## Artwork / sprites / drawn placeholders. Must stay false until Phase 1B-2.
+## Artwork / sprites / drawn placeholders. Must stay false until Phase 1B-2C
+## (after 1B-2B artwork validation). Phase 1B-2A prepares the loader only.
 const PET_VISUALS_ENABLED := false
 
 ## Design-space reference (matches project.godot logical size).

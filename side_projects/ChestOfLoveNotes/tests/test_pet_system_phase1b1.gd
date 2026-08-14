@@ -262,7 +262,19 @@ func _test_visual_invisibility() -> void:
 	var actor := _make_actor(1)
 	_assert(actor.visible == false, "actor visible false")
 	_assert(actor.modulate.a == 0.0, "actor alpha 0")
-	_assert(actor.get_child_count() == 0, "no sprite/placeholder children")
+	## Phase 1B-2A may add a hidden PetVisual tree — never a drawn placeholder.
+	var visual := actor.get_node_or_null("PetVisual") as CanvasItem
+	if visual != null:
+		_assert(visual.visible == false, "PetVisual hidden")
+		_assert(visual.modulate.a == 0.0, "PetVisual alpha 0")
+		var spr := visual.get_node_or_null("AnimatedSprite2D") as AnimatedSprite2D
+		if spr != null:
+			_assert(spr.visible == false, "AnimatedSprite2D hidden")
+			_assert(spr.sprite_frames == null or not actor.is_artwork_ready(), "no playable placeholder frames")
+	for c in actor.get_children():
+		if c is CanvasItem:
+			_assert((c as CanvasItem).visible == false, "no visible canvas child")
+			_assert((c as CanvasItem).modulate.a == 0.0, "canvas child alpha 0")
 	## Confirm no art files in parrot animation folders.
 	for folder in ["idle", "move", "chest_interaction", "tap_reaction", "source"]:
 		var path := "res://assets/pets/parrot/%s" % folder

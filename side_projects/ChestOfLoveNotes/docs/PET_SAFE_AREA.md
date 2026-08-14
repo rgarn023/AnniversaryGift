@@ -83,4 +83,5 @@ Shoreline/ocean exclusion: `y < WATER_BOTTOM_FRAC` is out of bounds.
 
 Phase 1B-1 implements these constraints in `PetSafeArea` / `PetActor` using
 viewport-derived fractions (not a single fragile fixed coordinate set).
+Phase 1B-2A adds the parrot art contract + hidden visual loader;  
 `PET_VISUALS_ENABLED` remains false — roam is validated programmatically only.

@@ -8,59 +8,145 @@
 | Default unlocked | Yes — available to all users |
 | Role | First test / flagship free pet |
 | Billing | **None** — never tied to Google Play Billing |
-| Artwork | **None currently** — art integration pending |
+| Artwork | **None currently** — Phase 1B-2A contract ready; art in 1B-2B |
+| Manifest | `assets/pets/parrot/parrot_animation_manifest.json` |
+| Visuals enabled | **false** (`PetRuntimeConfig.PET_VISUALS_ENABLED`) |
 
-Do **not** invent a final visual design here. Animation art will be provided later.
-
----
-
-## Scale / scene considerations (pending art)
-
-- CHEST design space is ~390×844; chest host is 252×326
-- Parrot should read as a companion on the sand, not compete with the chest as the hero
-- Prefer a modest horizontal footprint so roam beside the chest stays clear of UI
-- Exact pixel scale TBD when sprites arrive; integrate under `assets/pets/parrot/`
+Do **not** invent final colors or decorative costume details here. Artwork will be approved separately in Phase 1B-2B.
 
 ---
 
-## Required future animation groups
+## Visual style contract (production direction)
 
-| Group | Folder | Intent (Phase 1B+) |
-| --- | --- | --- |
-| Idle | `idle/` | Stand/perch naturally; occasional subtle idle motion |
-| Move / roam | `move/` | Hop/walk across approved sand safe areas |
-| Chest interaction | `chest_interaction/` | Approach chest; rub/nuzzle or perch beside |
-| Tap reaction | `tap_reaction/` | Brief reaction on tap, then return to normal |
-| Source | `source/` | Raw/source art for tooling (not runtime) |
+Fit the existing magical beach / chest environment:
 
-No sprites exist in these folders yet (`.gitkeep` only).
+- Cute stylized parrot (not realistic)
+- Polished mobile-game look
+- Warm / friendly companion presence
+- Clear silhouette at phone size
+- Readable facial features without over-detail
+- Companion-sized — not a giant mascot competing with the chest
+- Transparent PNG frames only — no baked beach, UI, chest, or text
+
+Final palette is **not** locked in this document unless already decided elsewhere.
 
 ---
 
-## Intended Phase 1 behavior (document only — not implemented visually in 1A)
+## Production frame canvas / anchors
 
-### IDLE
+Derived from runtime chest geometry (design space **390×844**):
 
-- Stands/perches naturally on sand
-- Occasional subtle idle motion
+| Field | Value |
+| --- | --- |
+| Frame canvas | **128×128** |
+| Ground / foot anchor | **(64, 116)** |
+| Frame center | **(64, 64)** |
+| Baseline Y | **116** |
+| Max ground-contact drift between frames | **±2 px** |
+| Max hop lift *inside* frame (move) | **≤16 px** |
+| Visible target bounds (soft) | x 28–100, y 20–116 |
+| Approx solid body size in frame | ~72×88 px |
+| Default facing | **RIGHT** (author once) |
+| Left / right strategy | Runtime `AnimatedSprite2D.flip_h` for LEFT |
+| Recommended runtime scale | **0.72** (× viewport scale_factor) |
 
-### ROAM
+### Size vs chest
 
-- Moves around approved safe sand areas (`docs/PET_SAFE_AREA.md`)
-- Does not cover important UI
-- Does not wander into ocean
-- Does not obscure chest reward presentation
+| Reference | Design px |
+| --- | --- |
+| Chest host | 252×326 |
+| Chest runtime draw square | ≈252×252 |
+| Chest opaque silhouette height (alpha bbox × fit) | ≈140 |
+| **Proposed visible parrot height** | **≈64** |
+| Parrot / chest-draw-height ratio | **≈0.254 (25.4%)** |
+| On reference 390×844 viewport | ≈64 logical px tall |
 
-### CHEST_INTERACTION
+Hop motion animates the body **inside** the frame. The frame ground anchor (and thus `PetActor.position`) stays stable so state changes do not visually jump.
 
-- Occasionally approaches the chest
-- May rub/nuzzle against or perch beside the chest
-- Must not alter chest position, frames, or timing
+---
 
-### TAP_REACTION
+## File / alpha requirements
 
-- Reacts briefly when tapped
-- Returns to normal state behavior
+Every production frame must be:
+
+- PNG
+- RGBA
+- Transparent background
+- No baked beach / sand plate
+- No baked shadow (runtime soft ellipse later)
+- No UI, chest, or text
+- Not JPEG
+
+---
+
+## Shadow strategy
+
+**Runtime-generated soft ellipse** under the pet (restrained, similar in spirit to chest contact shadow).
+
+- Small / subtle / underneath
+- May scale slightly during hop
+- **Not rendered in Phase 1B-2A**
+- No authored shadow sheet required
+
+---
+
+## Animation groups (exact contract)
+
+| Runtime state | Animation | Folder | Filenames | Frames | FPS | Loop |
+| --- | --- | --- | --- | --- | --- | --- |
+| IDLE | `idle` | `idle/` | `parrot_idle_00.png` … `parrot_idle_04.png` | **5** | **5** | yes |
+| ROAM | `move` | `move/` | `parrot_move_00.png` … `parrot_move_06.png` | **7** | **10** | yes |
+| CHEST_INTERACTION | `chest_interaction` | `chest_interaction/` | `parrot_chest_00.png` … `parrot_chest_07.png` | **8** | **10** | no |
+| TAP_REACTION | `tap_reaction` | `tap_reaction/` | `parrot_tap_00.png` … `parrot_tap_04.png` | **5** | **10** | no |
+
+Source / tooling only: `source/` (not loaded at runtime).
+
+### Transition rules
+
+- **IDLE** — loops
+- **MOVE** — loops while roaming
+- **CHEST_INTERACTION** — play once at interaction point, then return to idle
+- **TAP_REACTION** — play once, then return to idle / prior allowed state
+
+Playback is prepared in `PetAnimationLoader` / `PetActor` but **does not run** while `artwork_ready == false` or `PET_VISUALS_ENABLED == false`.
+
+---
+
+## Asset directory contract
+
+```
+assets/pets/parrot/
+  parrot_animation_manifest.json
+  PARROT_SPEC.md
+  idle/parrot_idle_XX.png
+  move/parrot_move_XX.png
+  chest_interaction/parrot_chest_XX.png
+  tap_reaction/parrot_tap_XX.png
+  source/   # raw / contact sheets (not runtime)
+```
+
+Folders currently contain `.gitkeep` only — **no fake PNGs**.
+
+---
+
+## Runtime (Phase 1B-2A)
+
+```
+PetActor
+├── PetVisual          (hidden)
+│   ├── PetShadow      (reserved; not drawn)
+│   └── AnimatedSprite2D  (no frames until art exists)
+```
+
+| Flag / field | Value |
+| --- | --- |
+| `PET_RUNTIME_ENABLED` | `true` |
+| `PET_VISUALS_ENABLED` | `false` |
+| `artwork_ready` | `false` until all contract frames exist |
+| Missing art | Non-fatal; no placeholders; no error spam |
+
+Validation: `tools/validate_parrot_assets.py` → `AWAITING_ARTWORK` when empty.  
+Contact sheets (later): `tools/build_parrot_contact_sheets.py`.
 
 ---
 
@@ -73,4 +159,4 @@ Defined in `config/pets/catalog.json`:
 - `enabled`: `true`
 - `asset_root`: `res://assets/pets/parrot/`
 
-Phase 1A persists ownership locally via `PetManager`; parrot is owned by default. The production CHEST screen does **not** spawn the actor until Phase 1B.
+Parrot remains owned by default via `PetManager`. No Pet Collection UI yet.
