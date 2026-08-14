@@ -91,6 +91,10 @@ echo "OK: packed size matches staged source (${PACKED_SIZE} bytes)"
 
 echo "== Copy persistent artifacts =="
 mkdir -p /opt/cursor/artifacts
-cp -f "$OUT" /opt/cursor/artifacts/
-ls -lh "$OUT" /opt/cursor/artifacts/"$(basename "$OUT")"
+if cp -f "$OUT" /opt/cursor/artifacts/; then
+  ls -lh "$OUT" /opt/cursor/artifacts/"$(basename "$OUT")"
+else
+  echo "WARNING: could not copy APK to /opt/cursor/artifacts (export still OK)" >&2
+  ls -lh "$OUT"
+fi
 echo "EXPORT_OK $OUT"
