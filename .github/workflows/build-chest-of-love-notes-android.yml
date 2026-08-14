@@ -1,0 +1,223 @@
+name: Build Chest of Love Notes Android
+
+"on":
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chest-of-love-notes-android-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GODOT_VERSION: "4.7.1-stable"
+  GODOT_TEMPLATE_DIR: "4.7.1.stable"
+  ANDROID_BUILD_TOOLS: "34.0.0"
+  ANDROID_PLATFORM: "android-34"
+  ANDROID_NDK: "27.2.12479018"
+  BUNDLETOOL_VERSION: "1.17.2"
+  PROJECT_DIR: side_projects/ChestOfLoveNotes
+
+jobs:
+  build-android:
+    name: Build v72 APK + AAB
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Cache Godot binary + export templates
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/godot
+            ~/.local/share/godot/export_templates/${{ env.GODOT_TEMPLATE_DIR }}
+          key: godot-${{ env.GODOT_VERSION }}-linux-android-templates-v1
+
+      - name: Cache Android SDK
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/android-sdk
+          key: android-sdk-${{ env.ANDROID_PLATFORM }}-${{ env.ANDROID_BUILD_TOOLS }}-${{ env.ANDROID_NDK }}-v1
+
+      - name: Install Godot ${{ env.GODOT_VERSION }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          GODOT_DIR="${RUNNER_TEMP}/godot"
+          mkdir -p "$GODOT_DIR" "${RUNNER_TEMP}/downloads"
+          BIN="$GODOT_DIR/Godot_v4.7.1-stable_linux.x86_64"
+          if [[ ! -x "$BIN" ]]; then
+            curl -fsSL --retry 5 -o "${RUNNER_TEMP}/downloads/godot.zip" \
+              "https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}/Godot_v4.7.1-stable_linux.x86_64.zip"
+            unzip -o "${RUNNER_TEMP}/downloads/godot.zip" -d "$GODOT_DIR"
+            chmod +x "$BIN"
+          fi
+          "$BIN" --version
+          echo "GODOT=$BIN" >> "$GITHUB_ENV"
+
+      - name: Install Godot export templates
+        shell: bash
+        run: |
+          set -euo pipefail
+          TDIR="$HOME/.local/share/godot/export_templates/${GODOT_TEMPLATE_DIR}"
+          mkdir -p "$TDIR" "${RUNNER_TEMP}/downloads"
+          NEED=0
+          for f in android_release.apk android_debug.apk android_source.zip; do
+            [[ -f "$TDIR/$f" ]] || NEED=1
+          done
+          if [[ "$NEED" -eq 1 ]]; then
+            curl -fsSL --retry 5 -o "${RUNNER_TEMP}/downloads/export_templates.tpz" \
+              "https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}/Godot_v4.7.1-stable_export_templates.tpz"
+            rm -rf "${RUNNER_TEMP}/templates_extract"
+            mkdir -p "${RUNNER_TEMP}/templates_extract"
+            unzip -qo "${RUNNER_TEMP}/downloads/export_templates.tpz" -d "${RUNNER_TEMP}/templates_extract"
+            cp -a "${RUNNER_TEMP}/templates_extract/templates/." "$TDIR/"
+          fi
+          test -f "$TDIR/android_source.zip"
+          test -f "$TDIR/android_release.apk"
+          ls -lh "$TDIR"/android_*
+
+      - name: Set up Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          export ANDROID_HOME="${RUNNER_TEMP}/android-sdk"
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
+          mkdir -p "$ANDROID_HOME/cmdline-tools" "${RUNNER_TEMP}/downloads"
+
+          if [[ ! -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]]; then
+            curl -fsSL --retry 5 -o "${RUNNER_TEMP}/downloads/cmdline-tools.zip" \
+              "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
+            rm -rf "${RUNNER_TEMP}/cmdline-tools-unpack"
+            mkdir -p "${RUNNER_TEMP}/cmdline-tools-unpack"
+            unzip -qo "${RUNNER_TEMP}/downloads/cmdline-tools.zip" -d "${RUNNER_TEMP}/cmdline-tools-unpack"
+            rm -rf "$ANDROID_HOME/cmdline-tools/latest"
+            mkdir -p "$ANDROID_HOME/cmdline-tools"
+            # Zip contains a top-level "cmdline-tools" directory.
+            mv "${RUNNER_TEMP}/cmdline-tools-unpack/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"
+          fi
+
+          echo "sdk.dir=$ANDROID_HOME" > /tmp/android-local.properties
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" --licenses >/tmp/sdk-licenses.log || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" \
+            "platform-tools" \
+            "platforms;${ANDROID_PLATFORM}" \
+            "build-tools;${ANDROID_BUILD_TOOLS}" \
+            "ndk;${ANDROID_NDK}"
+
+          test -x "$ANDROID_HOME/build-tools/${ANDROID_BUILD_TOOLS}/aapt"
+          test -x "$ANDROID_HOME/build-tools/${ANDROID_BUILD_TOOLS}/apksigner"
+
+          {
+            echo "ANDROID_HOME=$ANDROID_HOME"
+            echo "ANDROID_SDK_ROOT=$ANDROID_HOME"
+          } >> "$GITHUB_ENV"
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/build-tools/${ANDROID_BUILD_TOOLS}" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+
+      - name: Install bundletool
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 5 -o "${RUNNER_TEMP}/bundletool.jar" \
+            "https://github.com/google/bundletool/releases/download/${BUNDLETOOL_VERSION}/bundletool-all-${BUNDLETOOL_VERSION}.jar"
+          java -jar "${RUNNER_TEMP}/bundletool.jar" version || java -jar "${RUNNER_TEMP}/bundletool.jar" help >/dev/null
+          echo "BUNDLETOOL_JAR=${RUNNER_TEMP}/bundletool.jar" >> "$GITHUB_ENV"
+
+      - name: Verify project pins before build
+        shell: bash
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -euo pipefail
+          test -f android/signing/chest_test_debug.keystore
+          test "$(tr -d '[:space:]' < android/signing/LAST_RELEASED_VERSION_CODE)" = "72"
+          test "$(tr -d '[:space:]' < android/signing/EXPECTED_PACKAGE_ID)" = "com.charoitegames.chestoflovenotes"
+          test "$(tr -d '[:space:]' < android/signing/EXPECTED_TEST_CERT_SHA256)" = "5fbad9830b2a9827d2d1f7f8a38dafea0ae772793a99c4f4952a6b1d424f863b"
+          grep -Fq 'assets/branding/154659_cursor_under4mb.gif' export_presets.cfg
+          grep -Eq '^version/code=72$' export_presets.cfg
+          grep -Eq '^version/name="0.1.72-apk-signing-pipeline-fix"$' export_presets.cfg
+          grep -Eq '^gradle_build/export_format=0$' export_presets.cfg
+          grep -Eq '^architectures/arm64-v8a=true$' export_presets.cfg
+          grep -Eq '^architectures/armeabi-v7a=false$' export_presets.cfg
+          echo "Pre-build pins OK"
+
+      - name: Require Supabase public config secrets
+        shell: bash
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${SUPABASE_URL:-}" || -z "${SUPABASE_ANON_KEY:-}" ]]; then
+            cat <<'EOF' >&2
+          ERROR: Missing required GitHub Actions repository secrets for backend packaging:
+            - SUPABASE_URL
+            - SUPABASE_ANON_KEY
+
+          Add them under: Repository → Settings → Secrets and variables → Actions
+          Do not commit these values. The workflow uses only the public URL + anon/publishable key.
+          EOF
+            exit 1
+          fi
+          echo "Supabase public config secrets are present (values not printed)."
+
+      - name: Build signed v72 APK + AAB
+        shell: bash
+        working-directory: ${{ env.PROJECT_DIR }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          CI_DIST_DIR: ${{ runner.temp }}/chest-v72-dist
+        run: |
+          set -euo pipefail
+          chmod +x tools/ci_export_android_v72_artifacts.sh
+          mkdir -p "$CI_DIST_DIR"
+          tools/ci_export_android_v72_artifacts.sh
+
+      - name: Confirm tracked sources unchanged
+        shell: bash
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -euo pipefail
+          test "$(tr -d '[:space:]' < android/signing/LAST_RELEASED_VERSION_CODE)" = "72"
+          grep -Eq '^gradle_build/export_format=0$' export_presets.cfg
+          grep -Eq '^architectures/armeabi-v7a=false$' export_presets.cfg
+          grep -Eq '^architectures/arm64-v8a=true$' export_presets.cfg
+          grep -Fq 'assets/branding/154659_cursor_under4mb.gif' export_presets.cfg
+          # No dirty tracked export/signing pins after CI temp edits.
+          git diff --exit-code -- export_presets.cfg android/signing/LAST_RELEASED_VERSION_CODE
+
+      - name: Upload APK artifact
+        if: success()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ChestOfLoveNotes-v72-APK
+          path: |
+            ${{ runner.temp }}/chest-v72-dist/ChestOfLoveNotes-v72-arm64-release.apk
+            ${{ runner.temp }}/chest-v72-dist/ChestOfLoveNotes-v72-SHA256.txt
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+      - name: Upload AAB artifact
+        if: success()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ChestOfLoveNotes-v72-AAB
+          path: |
+            ${{ runner.temp }}/chest-v72-dist/ChestOfLoveNotes-v72.aab
+            ${{ runner.temp }}/chest-v72-dist/ChestOfLoveNotes-v72-SHA256.txt
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
