@@ -8,11 +8,27 @@
 | Default unlocked | Yes — available to all users |
 | Role | First test / flagship free pet |
 | Billing | **None** — never tied to Google Play Billing |
-| Artwork | **None currently** — Phase 1B-2A contract ready; art in 1B-2B |
+| Artwork | **LOCKED master** — Phase 1B-2B ingest; animation frames not authored yet |
 | Manifest | `assets/pets/parrot/parrot_animation_manifest.json` |
 | Visuals enabled | **false** (`PetRuntimeConfig.PET_VISUALS_ENABLED`) |
 
-Do **not** invent final colors or decorative costume details here. Artwork will be approved separately in Phase 1B-2B.
+---
+
+## Approved production master (LOCKED)
+
+| Field | Value |
+| --- | --- |
+| `approved_master_path` | `assets/pets/parrot/source/parrot_master.png` |
+| `approved_master_sha256` | `89e28ad50111f8c6ebf1e5abbea29934b3df9bd79060e38bc8c5e3e3d382e0e2` |
+| `approved_master_status` | **LOCKED** |
+| Canvas | 128×128 PNG RGBA |
+| Facing | RIGHT |
+| Measured visible bbox (alpha>0) | L=24 T=28 R=99 B=115 |
+| Measured visible size | 76×88 px |
+| Bottom baseline (last opaque row) | **115** (spec ground anchor remains **116**; 1 px harmless) |
+| Design | Red / yellow / blue stylized macaw |
+
+This exact parrot design is **LOCKED**. Do not redraw, regenerate, recolor, or change proportions. Future IDLE / MOVE / CHEST_INTERACTION / TAP_REACTION frames must preserve this design (verified against the SHA-256 above). Animation frame PNGs are **not** created yet.
 
 ---
 
@@ -28,7 +44,7 @@ Fit the existing magical beach / chest environment:
 - Companion-sized — not a giant mascot competing with the chest
 - Transparent PNG frames only — no baked beach, UI, chest, or text
 
-Final palette is **not** locked in this document unless already decided elsewhere.
+Final palette / silhouette is locked to the approved master above.
 
 ---
 
@@ -125,7 +141,8 @@ assets/pets/parrot/
   source/   # raw / contact sheets (not runtime)
 ```
 
-Folders currently contain `.gitkeep` only — **no fake PNGs**.
+Animation folders currently contain `.gitkeep` only — **no fake PNGs**.  
+`source/parrot_master.png` is the LOCKED production master (ingest only; not loaded at runtime).
 
 ---
 

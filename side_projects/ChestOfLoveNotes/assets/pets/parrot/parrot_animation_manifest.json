@@ -1,10 +1,28 @@
 {
   "version": 1,
   "pet_id": "parrot",
-  "phase": "1B-2A",
+  "phase": "1B-2B",
   "visuals_enabled": false,
   "artwork_ready": false,
-  "status": "awaiting_artwork",
+  "status": "awaiting_animation_frames",
+  "approved_master_path": "assets/pets/parrot/source/parrot_master.png",
+  "approved_master_sha256": "89e28ad50111f8c6ebf1e5abbea29934b3df9bd79060e38bc8c5e3e3d382e0e2",
+  "approved_master_status": "LOCKED",
+  "approved_master_measured": {
+    "canvas": [128, 128],
+    "mode": "RGBA",
+    "facing": "right",
+    "bbox_alpha_gt0": {
+      "left": 24,
+      "top": 28,
+      "right": 99,
+      "bottom": 115
+    },
+    "visible_width_px": 76,
+    "visible_height_px": 88,
+    "bottom_baseline": 115,
+    "notes": "Bottom baseline is 1px above authored ground_anchor_y=116 — harmless; do not alter master."
+  },
   "frame_canvas_width": 128,
   "frame_canvas_height": 128,
   "ground_anchor_x": 64,
