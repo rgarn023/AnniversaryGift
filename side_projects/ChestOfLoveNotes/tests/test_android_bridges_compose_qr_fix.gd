@@ -88,12 +88,20 @@ func _run() -> void:
 	_assert(scan_kt.contains("DecoratedBarcodeView"), "live camera preview")
 	_assert(qr_kt.contains("startActivityForResult"), "starts scanner activity")
 
-	## DEBUG DIAGNOSTICS
-	_assert(main.contains("Android Diagnostics"), "Android Diagnostics panel")
+	## DEBUG DIAGNOSTICS — helpers kept, but NOT on normal Profile UI.
+	_assert(main.contains("Android Diagnostics"), "Android Diagnostics panel helper kept")
 	_assert(main.contains("Refresh Diagnostics"), "Refresh Diagnostics button")
 	_assert(main.contains("_build_android_diagnostics_panel"), "diagnostics builder")
 	_assert(perm.contains("android_diagnostics_snapshot"), "diagnostics snapshot helper")
-	_assert(main.contains("OS.is_debug_build()") and main.contains("_build_android_diagnostics_panel"), "diagnostics debug-gated")
+	_assert(main.contains("_build_profile_pets_section"), "Profile pets section")
+	_assert(main.contains("Android Diagnostics intentionally omitted"), "diagnostics omitted from Profile")
+	## Profile must not call the diagnostics panel builder.
+	var profile_fn_start := main.find("func _show_profile()")
+	var profile_fn_end := main.find("func _show_diagnostics()")
+	_assert(profile_fn_start >= 0 and profile_fn_end > profile_fn_start, "profile/diagnostics funcs present")
+	var profile_body := main.substr(profile_fn_start, profile_fn_end - profile_fn_start)
+	_assert(not profile_body.contains("_build_android_diagnostics_panel"), "Profile does not show Android Diagnostics")
+	_assert(profile_body.contains("_build_profile_pets_section"), "Profile shows Pets section")
 
 	## PAIRING FROZEN
 	_assert(not main.contains("reconcile_my_person_pairing"), "no pairing reconcile")

@@ -857,9 +857,12 @@ func _mount_pet_runtime(chest_env: Node) -> void:
 	## No pet inventory UI / shop / billing — parrot appears as the free active pet.
 	if state == null or state.pets == null:
 		return
-	if not state.pets.should_spawn_on_chest():
-		return
 	if chest_env == null or not is_instance_valid(chest_env):
+		return
+	## Pets Off (or inactive): ensure no leftover PetActor on CHEST.
+	if not state.pets.should_spawn_on_chest():
+		if state.pets.count_actors_under(chest_env) > 0:
+			state.pets.despawn_active_pet()
 		return
 	## Let chest anchors resolve before deriving exclusion geometry.
 	await get_tree().process_frame
@@ -3828,6 +3831,9 @@ func _show_profile() -> void:
 		)
 		col.add_child(_settings_row("Keep Me Signed In", keep_toggle))
 
+	## Pets — Off / Parrot (owned, free). No shop / billing / collection.
+	col.add_child(_build_profile_pets_section())
+
 	var perm_sec := Label.new()
 	perm_sec.text = ProductStrings.PERMISSIONS_SECTION
 	MobileUi.apply_label(perm_sec, MobileUi.SIZE_SECTION, MobileUi.COLOR_TITLE)
@@ -3840,9 +3846,8 @@ func _show_profile() -> void:
 		_show_permissions_manage_sheet()
 	, Vector2(0, MobileUi.TOUCH_SECONDARY_H)))
 
-	## DEBUG-only Android bridge diagnostics for physical Galaxy testing (never in production).
-	if OS.is_debug_build():
-		col.add_child(_build_android_diagnostics_panel())
+	## Android Diagnostics intentionally omitted from normal Profile UI.
+	## Internal helpers remain available via Online Diagnostics (7 silent taps).
 
 	## Online Diagnostics is not shown in normal Profile UI (7 silent taps above).
 	col.add_child(_make_button("Sign Out", func() -> void:
@@ -4137,8 +4142,66 @@ func _android_diagnostics_public_token_available() -> bool:
 	return not code.is_empty() and not QrHelper.payload_contains_raw_uuid(code)
 
 
+func _build_profile_pets_section() -> VBoxContainer:
+	## Profile Pets: single-choice Off / Parrot. Reuses settings card styling.
+	var wrap := VBoxContainer.new()
+	wrap.add_theme_constant_override("separation", MobileUi.GAP_CARDS)
+	var sec := Label.new()
+	sec.text = "PETS"
+	MobileUi.apply_label(sec, MobileUi.SIZE_SECTION, MobileUi.COLOR_TITLE)
+	wrap.add_child(sec)
+
+	var pets := state.pets if state != null else null
+	if pets == null:
+		var missing := Label.new()
+		missing.text = "Pets unavailable"
+		MobileUi.apply_label(missing, MobileUi.SIZE_HELPER, MobileUi.COLOR_SECONDARY, true)
+		wrap.add_child(missing)
+		return wrap
+
+	var selection := pets.get_profile_pet_selection()
+	var group := ButtonGroup.new()
+	group.allow_unpress = false
+
+	var make_choice := func(label_text: String, choice_id: String) -> PanelContainer:
+		var card := _make_card()
+		var row := HBoxContainer.new()
+		row.custom_minimum_size.y = MobileUi.font_touch(MobileUi.ROW_H)
+		row.add_theme_constant_override("separation", 12)
+		card.add_child(row)
+		var btn := CheckBox.new()
+		btn.text = label_text
+		btn.button_group = group
+		btn.toggle_mode = true
+		btn.focus_mode = Control.FOCUS_NONE
+		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		btn.button_pressed = (selection == choice_id)
+		btn.add_theme_font_size_override("font_size", MobileUi.font(MobileUi.SIZE_BODY))
+		btn.add_theme_color_override("font_color", MobileUi.COLOR_BODY)
+		btn.add_theme_color_override("font_pressed_color", MobileUi.COLOR_BODY)
+		btn.add_theme_color_override("font_hover_color", MobileUi.COLOR_BODY)
+		btn.toggled.connect(func(on: bool) -> void:
+			if not on:
+				return
+			if pets.select_profile_pet(choice_id):
+				var label := "Off" if choice_id == "off" else "Parrot"
+				_show_toast("Pet: %s" % label)
+			else:
+				_show_toast("Could not update pet selection.")
+				_show_profile()
+		)
+		row.add_child(btn)
+		return card
+
+	wrap.add_child(make_choice.call("Off", "off"))
+	## Parrot is owned + FREE — only current selectable pet.
+	if pets.is_owned(PetCatalog.PET_PARROT) or pets.catalog.has_pet(PetCatalog.PET_PARROT):
+		wrap.add_child(make_choice.call("Parrot", PetCatalog.PET_PARROT))
+	return wrap
+
+
 func _build_android_diagnostics_panel() -> VBoxContainer:
-	## DEBUG-build only. Live Android bridge/permission values for Galaxy testing.
+	## DEBUG-build only helper (not shown on normal Profile). Kept for internal Galaxy testing.
 	var wrap := VBoxContainer.new()
 	wrap.add_theme_constant_override("separation", 8)
 	var sec := Label.new()

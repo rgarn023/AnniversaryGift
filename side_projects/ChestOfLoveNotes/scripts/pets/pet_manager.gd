@@ -2,12 +2,15 @@ extends RefCounted
 class_name PetManager
 ## Owns pet catalog + local ownership/active-pet persistence + CHEST spawn.
 ## Phase 1B-2C: free parrot visuals enabled when PET_VISUALS_ENABLED + artwork_ready.
+## Profile Pets: pet_enabled toggles CHEST spawn without clearing ownership/active_pet.
 
 const PERSIST_PATH := "user://coln_pets.cfg"
 const SECTION_OWNED := "owned"
 const SECTION_ACTIVE := "active"
+const SECTION_SETTINGS := "settings"
 const KEY_IDS := "ids"
 const KEY_ID := "id"
+const KEY_ENABLED := "pet_enabled"
 
 ## Backward-compatible alias — prefer PetRuntimeConfig.PET_RUNTIME_ENABLED.
 const CHEST_SPAWN_ENABLED := PetRuntimeConfig.PET_RUNTIME_ENABLED
@@ -15,6 +18,8 @@ const CHEST_SPAWN_ENABLED := PetRuntimeConfig.PET_RUNTIME_ENABLED
 var catalog: PetCatalog = PetCatalog.new()
 var owned_pet_ids: Array[String] = []
 var active_pet_id: String = ""
+## When false, no PetActor on CHEST. Ownership + active_pet_id are preserved.
+var pet_enabled: bool = true
 var _actor: Node = null
 var _runtime_root: Node = null
 
@@ -48,6 +53,8 @@ func _load_or_seed_persistence() -> void:
 	active_pet_id = str(cfg.get_value(SECTION_ACTIVE, KEY_ID, "")).strip_edges()
 	if active_pet_id.is_empty() or not is_owned(active_pet_id) or not catalog.has_pet(active_pet_id):
 		active_pet_id = _default_active_id()
+	## Default true when key missing (older saves / first boot with parrot).
+	pet_enabled = bool(cfg.get_value(SECTION_SETTINGS, KEY_ENABLED, true))
 	save()
 
 
@@ -56,6 +63,7 @@ func _seed_defaults() -> void:
 	for id in catalog.default_unlocked_ids():
 		_add_owned(id)
 	active_pet_id = _default_active_id()
+	pet_enabled = true
 
 
 func _default_active_id() -> String:
@@ -85,6 +93,7 @@ func save() -> void:
 		packed.append(id)
 	cfg.set_value(SECTION_OWNED, KEY_IDS, packed)
 	cfg.set_value(SECTION_ACTIVE, KEY_ID, active_pet_id)
+	cfg.set_value(SECTION_SETTINGS, KEY_ENABLED, pet_enabled)
 	cfg.save(PERSIST_PATH)
 
 
@@ -117,6 +126,45 @@ func set_active_pet(pet_id: String) -> bool:
 	return true
 
 
+func set_pet_enabled(enabled: bool) -> void:
+	## Turning off must NOT clear ownership or active_pet_id.
+	pet_enabled = enabled
+	save()
+
+
+func select_profile_pet(choice: String) -> bool:
+	## Profile single-choice: "off" or an owned pet id (currently "parrot").
+	var c := choice.strip_edges().to_lower()
+	if c.is_empty() or c == "off":
+		pet_enabled = false
+		## Preserve active_pet (default parrot) so re-enable restores selection.
+		if active_pet_id.is_empty() or not is_owned(active_pet_id) or not catalog.has_pet(active_pet_id):
+			active_pet_id = _default_active_id()
+		save()
+		return true
+	if not is_owned(c):
+		return false
+	if not catalog.has_pet(c):
+		return false
+	active_pet_id = c
+	pet_enabled = true
+	save()
+	return true
+
+
+func get_profile_pet_selection() -> String:
+	## UI selection key: "off" or active owned pet id.
+	if not pet_enabled:
+		return "off"
+	if active_pet_id.is_empty() or not is_owned(active_pet_id) or not catalog.has_pet(active_pet_id):
+		## Invalid while enabled — fall back for UI without crashing.
+		var fallback := _default_active_id()
+		if fallback.is_empty():
+			return "off"
+		return fallback
+	return active_pet_id
+
+
 func get_active_definition() -> PetDefinition:
 	if active_pet_id.is_empty():
 		return null
@@ -133,6 +181,8 @@ func get_active_definition() -> PetDefinition:
 
 func should_spawn_on_chest() -> bool:
 	if not PetRuntimeConfig.PET_RUNTIME_ENABLED:
+		return false
+	if not pet_enabled:
 		return false
 	if active_pet_id.is_empty():
 		return false

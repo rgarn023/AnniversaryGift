@@ -64,7 +64,8 @@ func configure_runtime(vp_size: Vector2, chest_local_rect: Rect2, seed: int = -1
 		rng.randomize()
 	safe_area.configure(vp_size, chest_local_rect)
 	_arrival_epsilon = 3.0 * safe_area.scale_factor()
-	position = safe_area.default_spawn_position(rng)
+	## Spawn must never start inside / overlapping the expanded chest obstacle.
+	position = safe_area.ensure_safe_position(safe_area.default_spawn_position(rng), rng)
 	target_position = position
 	_configured = true
 	_ensure_visual_nodes()
@@ -408,6 +409,9 @@ func pause_for_reward() -> void:
 func resume_after_reward() -> void:
 	paused = false
 	reward_hide_requested = false
+	## Stale pre-reward position may now overlap chest — correct before showing.
+	position = safe_area.ensure_safe_position(position, rng)
+	target_position = position
 	_apply_visual_gate()
 	set_process(PetRuntimeConfig.PET_RUNTIME_ENABLED)
 	_begin_idle()
@@ -434,6 +438,9 @@ func get_debug_snapshot() -> Dictionary:
 	var anim_debug := {}
 	if animation_loader != null:
 		anim_debug = animation_loader.to_debug_dict()
+	var path_crosses := false
+	if safe_area != null:
+		path_crosses = safe_area.segment_intersects_chest_exclusion(position, target_position)
 	return {
 		"actor_exists": true,
 		"pet_id": pet_id,
@@ -441,6 +448,7 @@ func get_debug_snapshot() -> Dictionary:
 		"state_id": state,
 		"position": position,
 		"target_position": target_position,
+		"segment_intersects_chest": path_crosses,
 		"facing": facing_string(),
 		"paused": paused,
 		"reward_hide_requested": reward_hide_requested,
@@ -479,7 +487,11 @@ func force_state_for_test(next_state: int) -> void:
 
 
 func force_roam_to_for_test(point: Vector2) -> void:
-	target_position = safe_area.clamp_to_roam(point)
+	## Test helper: clamp destination; reject chest-crossing by snapping to same-side safe point.
+	var dest := safe_area.clamp_to_roam(point)
+	if not safe_area.is_roam_path_clear(position, dest):
+		dest = safe_area.random_roam_target(rng, position)
+	target_position = dest
 	transition_to(PetState.Kind.ROAM)
 
 
@@ -526,12 +538,44 @@ func _tick_idle(delta: float) -> void:
 
 func _begin_roam() -> void:
 	_chest_anim_playing = false
-	target_position = safe_area.random_roam_target(rng)
+	## Path-aware: never accept a straight segment that crosses the chest body.
+	target_position = safe_area.random_roam_target(rng, position)
 	transition_to(PetState.Kind.ROAM)
 
 
 func _begin_chest_interaction() -> void:
-	target_position = safe_area.random_chest_interaction_target(rng)
+	## Prefer an interaction point whose approach segment does not cross the chest body.
+	var pts := safe_area.chest_interaction_points()
+	var chosen := Vector2.ZERO
+	var found := false
+	for p in pts:
+		if safe_area.is_in_chest_exclusion(p):
+			continue
+		## Allow approach along a clear segment; if already near, skip segment check.
+		if position.distance_to(p) <= _arrival_epsilon * 2.0 or not safe_area.segment_intersects_chest_exclusion(position, p):
+			chosen = p
+			found = true
+			break
+	if not found and not pts.is_empty():
+		## Pick nearest side — teleport-step via ensure won't cross mid-body.
+		var best := pts[0]
+		var best_d := position.distance_squared_to(best)
+		for i in range(1, pts.size()):
+			var d := position.distance_squared_to(pts[i])
+			if d < best_d:
+				best = pts[i]
+				best_d = d
+		## If straight path crosses, reposition to same-side sand first (no tunnel).
+		if safe_area.segment_intersects_chest_exclusion(position, best):
+			var ex := safe_area.chest_exclusion_rect()
+			var mid := ex.get_center().x
+			var side_x := ex.position.x - 8.0 if best.x < mid else ex.end.x + 8.0
+			position = safe_area.ensure_safe_position(Vector2(side_x, best.y), rng)
+		chosen = best
+		found = true
+	if not found:
+		chosen = safe_area.random_chest_interaction_target(rng)
+	target_position = chosen
 	_hold_timer = 0.0
 	_chest_anim_playing = false
 	transition_to(PetState.Kind.CHEST_INTERACTION)
@@ -541,23 +585,38 @@ func _tick_move_toward(delta: float, return_idle_on_arrive: bool) -> bool:
 	var to_target := target_position - position
 	var dist := to_target.length()
 	if dist <= _arrival_epsilon:
+		## Arrival must still respect chest body (interaction points are outside).
+		if safe_area.is_in_chest_exclusion(target_position):
+			position = safe_area.ensure_safe_position(position, rng)
+			target_position = position
+			_begin_idle()
+			return true
 		position = target_position
 		if return_idle_on_arrive:
 			_begin_idle()
 		return true
 	var step := safe_area.move_speed() * delta
+	var dir := to_target / maxf(dist, 0.0001)
+	var candidate: Vector2
 	if step >= dist:
-		_update_facing(to_target.x)
-		position = target_position
-		if return_idle_on_arrive:
-			_begin_idle()
+		candidate = target_position
+	else:
+		candidate = position + dir * step
+	## Per-frame + high-delta tunneling protection against the expanded chest obstacle.
+	if safe_area.candidate_step_blocked(position, candidate):
+		position = safe_area.ensure_safe_position(position, rng)
+		target_position = position
+		_begin_idle()
 		return true
-	var dir := to_target / dist
 	_update_facing(dir.x)
-	position += dir * step
+	position = candidate
 	## Soft clamp — never drift into ocean/UI during movement.
 	if safe_area.is_in_ocean(position) or safe_area.is_in_ui_exclusion(position):
 		position = safe_area.clamp_to_roam(position)
+	if step >= dist:
+		if return_idle_on_arrive:
+			_begin_idle()
+		return true
 	return false
 
 

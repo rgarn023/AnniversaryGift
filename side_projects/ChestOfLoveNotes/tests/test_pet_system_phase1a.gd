@@ -152,5 +152,5 @@ func _test_regression_untouched() -> void:
 	_assert(main.contains("YOUR CHEST"), "YOUR CHEST hierarchy intact")
 	_assert(main.contains("ChestEnvironment.CHEST_GROUND_Y"), "main chest plant intact")
 	_assert(main.contains("disconnect_my_person") or FileAccess.get_file_as_string("res://scripts/network/friend_service.gd").contains("disconnect_my_person"), "disconnect path present")
-	_assert(flags.contains("APP_VERSION_CODE := 63"), "versionCode 63")
-	_assert(flags.contains("0.1.63-parrot-visible-fix"), "versionName 62")
+	_assert(flags.contains("APP_VERSION_CODE := 64"), "versionCode 63")
+	_assert(flags.contains("0.1.64-profile-pet-chest-avoidance"), "versionName 62")

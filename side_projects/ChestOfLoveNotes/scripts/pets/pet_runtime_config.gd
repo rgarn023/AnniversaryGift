@@ -25,7 +25,12 @@ const TAP_REACTION_HOLD_SEC := 0.85
 
 ## Geometry margins (design-space px; scaled with viewport).
 const EDGE_MARGIN_PX := 12.0
+## Base padding around the raw chest host rect before pet-body Minkowski expand.
 const CHEST_EXCLUSION_MARGIN_PX := 12.0
+## Extra pad so sprite body (not just feet anchor) stays clear of the chest shell.
+const PET_CHEST_BODY_PAD_PX := 10.0
+## Matches parrot recommended_runtime_scale (art contract).
+const PET_RUNTIME_VISUAL_SCALE := 0.72
 
 ## Environment fractions (docs/PET_SAFE_AREA.md / ChestEnvironment).
 const WATER_BOTTOM_FRAC := 0.560
