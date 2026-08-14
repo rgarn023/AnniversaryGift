@@ -8,6 +8,13 @@ const PET_RUNTIME_ENABLED := true
 ## Phase 1B-2C: artwork validated → visible free parrot on CHEST.
 const PET_VISUALS_ENABLED := true
 
+## Flight behavior (TAKEOFF / FLY / LAND). Keep false until flight art is approved.
+const PET_FLIGHT_ENABLED := false
+## Flight sprite groups ready? Always false until takeoff/fly/land PNGs exist + approved.
+const PET_FLIGHT_VISUALS_READY := false
+## Test-only: allow state/path logic without enabling production flight or visuals.
+static var PET_FLIGHT_TEST_MODE := false
+
 ## Design-space reference (matches project.godot logical size).
 const DESIGN_WIDTH := 390.0
 const DESIGN_HEIGHT := 844.0
@@ -24,13 +31,26 @@ const CHEST_INTERACTION_HOLD_SEC := 1.2
 const TAP_REACTION_HOLD_SEC := 0.85
 
 ## Geometry margins (design-space px; scaled with viewport).
+## Legacy base inset — roam X now uses visual body extents + SCREEN_EDGE_PAD_PX.
 const EDGE_MARGIN_PX := 12.0
-## Base padding around the raw chest host rect before pet-body Minkowski expand.
+## Extra pad beyond the visible parrot body at screen L/R edges.
+const SCREEN_EDGE_PAD_PX := 8.0
+## Visible body extents from ground_anchor (64,116) inside 128 canvas (bbox 24..99).
+const PET_VISUAL_EXTENT_LEFT_PX := 40.0
+const PET_VISUAL_EXTENT_RIGHT_PX := 35.0
+## Base padding around the solid chest obstacle before pet-body Minkowski expand.
 const CHEST_EXCLUSION_MARGIN_PX := 12.0
 ## Extra pad so sprite body (not just feet anchor) stays clear of the chest shell.
 const PET_CHEST_BODY_PAD_PX := 10.0
 ## Matches parrot recommended_runtime_scale (art contract).
 const PET_RUNTIME_VISUAL_SCALE := 0.72
+## Solid chest body vs full transparent host — leaves seaward sand as a transit band.
+const CHEST_SOLID_WIDTH_FRAC := 0.82
+const CHEST_SOLID_HEIGHT_PX := 150.0
+## Body expand factors (<1) so side pockets + upper transit remain walkable
+## after visual screen-edge padding is applied to roam X.
+const CHEST_EXCLUSION_HORIZONTAL_BODY_FACTOR := 0.42
+const CHEST_EXCLUSION_VERTICAL_BODY_FACTOR := 0.28
 
 ## Environment fractions (docs/PET_SAFE_AREA.md / ChestEnvironment).
 const WATER_BOTTOM_FRAC := 0.560
@@ -42,8 +62,25 @@ const UI_TOP_EXCLUDE_FRAC := 0.16
 ## Bottom nav (~80 touch units) — pets stay above.
 const UI_BOTTOM_NAV_FRAC := 0.095
 
-## Probability weight when leaving IDLE (roam vs chest interaction).
+## Flight zone (normalized viewport fractions). Sky/ocean/open OK; UI/title/nav excluded.
+const FLIGHT_Y_MIN_FRAC := 0.18
+const FLIGHT_Y_MAX_FRAC := 0.52
+const FLIGHT_X_PAD_FRAC := 0.06
+## Eventual idle→takeoff chance when PET_FLIGHT_ENABLED (not used while disabled).
+const FLIGHT_IDLE_CHANCE := 0.15
+const FLIGHT_TAKEOFF_DURATION_SEC := 0.55
+const FLIGHT_CRUISE_DURATION_SEC := 2.4
+const FLIGHT_LAND_DURATION_SEC := 0.65
+
+## Probability weight when leaving IDLE (roam vs chest interaction). Ground only.
 const IDLE_TO_ROAM_WEIGHT := 0.72
+
+## Roam target distribution (full-width beach, no left bias).
+const ROAM_MIN_TRAVEL_PX := 48.0
+const ROAM_CROSS_SIDE_CHANCE := 0.38
+const ROAM_SHORT_CHANCE := 0.28
+const ROAM_MEDIUM_CHANCE := 0.42
+## Remainder ≈ long / cross-screen.
 
 ## Tap hitbox — derived from master visible bbox (76×88), not full 128×128 canvas.
 ## Pad keeps Galaxy fingertip usable without stealing nearby chest taps.
@@ -70,3 +107,17 @@ static func tap_hitbox_size_canvas() -> Vector2:
 		TAP_HITBOX_BODY_W_PX + TAP_HITBOX_PAD_PX * 2.0,
 		TAP_HITBOX_BODY_H_PX + TAP_HITBOX_PAD_PX * 2.0
 	)
+
+
+static func flight_behavior_allowed() -> bool:
+	## Production flight OR explicit test harness.
+	return PET_FLIGHT_ENABLED or PET_FLIGHT_TEST_MODE
+
+
+static func flight_visuals_allowed() -> bool:
+	## Never fake-fly with ground move art in production.
+	return PET_FLIGHT_VISUALS_READY and flight_behavior_allowed()
+
+
+static func set_flight_test_mode(enabled: bool) -> void:
+	PET_FLIGHT_TEST_MODE = enabled

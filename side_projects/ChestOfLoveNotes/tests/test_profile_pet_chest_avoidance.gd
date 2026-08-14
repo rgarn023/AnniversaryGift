@@ -68,11 +68,11 @@ func _make_actor(seed: int = 42, vp: Vector2 = Vector2(390, 844)) -> PetActor:
 
 
 func _test_version() -> void:
-	_assert(BuildFlags.APP_VERSION_CODE == 67, "versionCode 67")
-	_assert(BuildFlags.APP_VERSION_NAME == "0.1.67-profile-pet-persistence-fix", "versionName 67")
+	_assert(BuildFlags.APP_VERSION_CODE == 68, "versionCode 68")
+	_assert(BuildFlags.APP_VERSION_NAME == "0.1.68-parrot-roam-routing-flight-prep", "versionName 68")
 	var preset := FileAccess.get_file_as_string("res://export_presets.cfg")
-	_assert(preset.contains("version/code=67"), "export versionCode 67")
-	_assert(preset.contains("0.1.67-profile-pet-persistence-fix"), "export versionName 67")
+	_assert(preset.contains("version/code=68"), "export versionCode 68")
+	_assert(preset.contains("0.1.68-parrot-roam-routing-flight-prep"), "export versionName 68")
 
 
 func _test_profile_pet_persistence() -> void:
@@ -177,19 +177,26 @@ func _test_spawn_counts() -> void:
 func _test_chest_exclusion_geometry() -> void:
 	var area := _make_area()
 	var raw := area.chest_runtime_rect()
+	var solid := area.chest_solid_rect()
 	var ex := area.chest_exclusion_rect()
 	_assert(raw.size.x > 0.0 and raw.size.y > 0.0, "runtime chest rect non-empty")
-	_assert(ex.size.x > raw.size.x, "exclusion wider than chest")
-	_assert(ex.size.y > raw.size.y, "exclusion taller than chest")
+	_assert(solid.size.x > 0.0 and solid.size.y > 0.0, "solid chest rect non-empty")
+	_assert(ex.size.x > solid.size.x, "exclusion wider than solid")
+	_assert(ex.size.y > solid.size.y, "exclusion taller than solid")
+	## Seaward transit: exclusion must not cover full sand band.
+	_assert(ex.position.y > area.sand_y_min(), "exclusion leaves upper transit corridor")
 	var body := area.pet_effective_collision_size()
 	_assert(body.x > 20.0 and body.y > 20.0, "pet collision size accounts for body")
-	## Expansion ≈ margin + half body on each side.
-	var grow_x := (ex.size.x - raw.size.x) * 0.5
-	_assert(grow_x >= area.chest_exclusion_margin + area.pet_body_half.x - 0.5, "Minkowski X expand")
+	## Expansion ≈ margin + scaled body half on each side of solid.
+	var grow_x := (ex.size.x - solid.size.x) * 0.5
+	var expect_x := area.chest_exclusion_margin + area.pet_body_half.x * PetRuntimeConfig.CHEST_EXCLUSION_HORIZONTAL_BODY_FACTOR
+	_assert(grow_x >= expect_x - 0.5, "Minkowski X expand (scaled body factor)")
 	var dbg := area.to_debug_dict()
 	_assert(dbg.has("chest_runtime_rect"), "debug runtime rect")
+	_assert(dbg.has("chest_solid_rect"), "debug solid rect")
 	_assert(dbg.has("chest_exclusion"), "debug exclusion")
 	_assert(dbg.has("pet_effective_collision_size"), "debug pet size")
+	_assert(dbg.has("transit_y"), "debug transit_y")
 
 
 func _test_target_and_segment_rejection() -> void:
@@ -220,17 +227,21 @@ func _test_target_and_segment_rejection() -> void:
 		_assert(area.segment_intersects_chest_exclusion(dl, dr), "diagonal crossing detected")
 		_assert(not area.is_roam_path_clear(dl, dr), "diagonal path rejected")
 
-	## random_roam_target with from_pos never returns a crossing path.
+	## random_roam_target with from_pos never returns a target without a safe planned path.
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 12345
 	for i in range(80):
 		var t := area.random_roam_target(rng, left)
 		_assert(area.is_valid_roam_point(t), "roam target valid i=%d" % i)
-		_assert(area.is_roam_path_clear(left, t), "roam path clear from left i=%d" % i)
+		var plan := area.plan_ground_path(left, t)
+		_assert(bool(plan.get("ok", false)), "roam plan ok from left i=%d" % i)
+		_assert(area.path_segments_safe(left, plan.get("waypoints", [])), "roam segments safe from left i=%d" % i)
 	for i in range(80):
 		var t2 := area.random_roam_target(rng, right)
 		_assert(area.is_valid_roam_point(t2), "roam target valid from right i=%d" % i)
-		_assert(area.is_roam_path_clear(right, t2), "roam path clear from right i=%d" % i)
+		var plan2 := area.plan_ground_path(right, t2)
+		_assert(bool(plan2.get("ok", false)), "roam plan ok from right i=%d" % i)
+		_assert(area.path_segments_safe(right, plan2.get("waypoints", [])), "roam segments safe from right i=%d" % i)
 
 
 func _test_movement_step_and_tunneling() -> void:
@@ -327,12 +338,13 @@ func _test_randomized_path_simulation() -> void:
 	for i in range(120):
 		actor._begin_roam()
 		var start := actor.position
-		var dest := actor.target_position
 		samples += 1
-		if actor.safe_area.segment_intersects_chest_exclusion(start, dest):
-			crossed += 1
+		## Planned path segments (not necessarily the straight start→final dest) must be safe.
+		if not actor._path_waypoints.is_empty():
+			if not actor.safe_area.path_segments_safe(start, actor._path_waypoints):
+				crossed += 1
 		## Simulate several frames along accepted path.
-		for _f in range(30):
+		for _f in range(40):
 			if actor.state != PetState.Kind.ROAM:
 				break
 			var before := actor.position
@@ -341,11 +353,10 @@ func _test_randomized_path_simulation() -> void:
 				crossed += 1
 			if actor.safe_area.segment_intersects_chest_exclusion(before, actor.position) \
 				and before.distance_to(actor.position) > 0.5:
-				## Moving along a previously clear path should not suddenly cross.
 				crossed += 1
 		## Force idle so next roam starts fresh.
 		if actor.state == PetState.Kind.ROAM:
-			actor.position = actor.target_position
+			actor.position = actor.safe_area.ensure_safe_position(actor.position, actor.rng)
 			actor._begin_idle()
 	_assert(crossed == 0, "no ROAM path/step crosses chest (%d samples)" % samples)
 	actor.queue_free()

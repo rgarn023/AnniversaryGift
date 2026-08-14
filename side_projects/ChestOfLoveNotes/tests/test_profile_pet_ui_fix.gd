@@ -34,13 +34,13 @@ func _run() -> void:
 
 
 func _test_version() -> void:
-	_assert(BuildFlags.APP_VERSION_CODE == 67, "versionCode 67")
-	_assert(BuildFlags.APP_VERSION_NAME == "0.1.67-profile-pet-persistence-fix", "versionName 67")
+	_assert(BuildFlags.APP_VERSION_CODE == 68, "versionCode 68")
+	_assert(BuildFlags.APP_VERSION_NAME == "0.1.68-parrot-roam-routing-flight-prep", "versionName 68")
 	var preset := FileAccess.get_file_as_string("res://export_presets.cfg")
-	_assert(preset.contains("version/code=67"), "export versionCode 67")
-	_assert(preset.contains("0.1.67-profile-pet-persistence-fix"), "export versionName 67")
+	_assert(preset.contains("version/code=68"), "export versionCode 68")
+	_assert(preset.contains("0.1.68-parrot-roam-routing-flight-prep"), "export versionName 68")
 	var proj := FileAccess.get_file_as_string("res://project.godot")
-	_assert(proj.contains("0.1.67-profile-pet-persistence-fix"), "project.godot version")
+	_assert(proj.contains("0.1.68-parrot-roam-routing-flight-prep"), "project.godot version")
 
 
 func _test_profile_source_path() -> void:

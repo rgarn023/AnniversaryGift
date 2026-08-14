@@ -1,13 +1,16 @@
 extends RefCounted
 class_name PetState
-## Future runtime states for pet actors (Phase 1B+).
-## Phase 1A: enum + helpers only — no visual behavior.
+## Runtime states for pet actors (Phase 1B+).
+## TAKEOFF / FLY / LAND are architecturally ready; production gated by PET_FLIGHT_ENABLED.
 
 enum Kind {
 	IDLE,
 	ROAM,
 	CHEST_INTERACTION,
 	TAP_REACTION,
+	TAKEOFF,
+	FLY,
+	LAND,
 }
 
 
@@ -21,6 +24,12 @@ static func to_string_id(kind: Kind) -> String:
 			return "chest_interaction"
 		Kind.TAP_REACTION:
 			return "tap_reaction"
+		Kind.TAKEOFF:
+			return "takeoff"
+		Kind.FLY:
+			return "fly"
+		Kind.LAND:
+			return "land"
 	return "idle"
 
 
@@ -32,5 +41,19 @@ static func from_string_id(id: String) -> Kind:
 			return Kind.CHEST_INTERACTION
 		"tap_reaction":
 			return Kind.TAP_REACTION
+		"takeoff":
+			return Kind.TAKEOFF
+		"fly":
+			return Kind.FLY
+		"land":
+			return Kind.LAND
 		_:
 			return Kind.IDLE
+
+
+static func is_flight_state(kind: Kind) -> bool:
+	return kind == Kind.TAKEOFF or kind == Kind.FLY or kind == Kind.LAND
+
+
+static func is_ground_state(kind: Kind) -> bool:
+	return not is_flight_state(kind)

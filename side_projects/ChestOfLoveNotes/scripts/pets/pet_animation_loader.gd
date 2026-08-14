@@ -12,7 +12,15 @@ const STATE_TO_ANIM := {
 	"chest_interaction": "chest_interaction",
 	"tap_reaction": "tap_reaction",
 	"roam": "move",
+	"takeoff": "takeoff",
+	"fly": "fly",
+	"land": "land",
 }
+
+## Ground package animations required for overall artwork_ready.
+const GROUND_ANIM_NAMES := ["idle", "move", "chest_interaction", "tap_reaction"]
+## Flight package — awaiting artwork; must NOT block ground visuals.
+const FLIGHT_ANIM_NAMES := ["takeoff", "fly", "land"]
 
 var manifest_path: String = PARROT_MANIFEST_PATH
 var pet_id: String = ""
@@ -29,10 +37,14 @@ var default_facing: String = "right"
 var recommended_runtime_scale: float = 0.72
 var missing_files: Array[String] = []
 var present_files: Array[String] = []
+var flight_artwork_ready: bool = false
+var flight_missing_files: Array[String] = []
+var flight_present_files: Array[String] = []
 
 
 func reset() -> void:
 	artwork_ready = false
+	flight_artwork_ready = false
 	visuals_enabled_flag = false
 	load_status = "uninitialized"
 	load_detail = ""
@@ -41,6 +53,8 @@ func reset() -> void:
 	sprite_frames = null
 	missing_files.clear()
 	present_files.clear()
+	flight_missing_files.clear()
+	flight_present_files.clear()
 	pet_id = ""
 
 
@@ -86,20 +100,22 @@ func load_manifest(path: String) -> bool:
 			if name.is_empty():
 				continue
 			animations[name] = anim
-	## Probe files — never fatal if missing.
+	## Probe files — never fatal if missing. Flight groups do not block ground ready.
 	_probe_animation_files()
-	if missing_files.is_empty() and not animations.is_empty() and present_files.size() > 0:
+	if missing_files.is_empty() and present_files.size() > 0:
 		artwork_ready = true
 		load_status = "artwork_ready"
-		load_detail = "All expected frames present (%d files)" % present_files.size()
+		load_detail = "Ground package ready (%d files); flight_ready=%s" % [
+			present_files.size(), str(flight_artwork_ready)
+		]
 		_build_sprite_frames_if_ready()
 	else:
 		artwork_ready = false
 		load_status = "awaiting_artwork"
 		if missing_files.is_empty() and present_files.is_empty():
-			load_detail = "AWAITING_ARTWORK — no frames found (expected)"
+			load_detail = "AWAITING_ARTWORK — no ground frames found (expected)"
 		else:
-			load_detail = "AWAITING_ARTWORK — missing %d frame(s); present %d" % [
+			load_detail = "AWAITING_ARTWORK — missing %d ground frame(s); present %d" % [
 				missing_files.size(), present_files.size()
 			]
 		## Do not attach empty/broken SpriteFrames.
@@ -120,11 +136,20 @@ func _frame_resource_exists(path: String) -> bool:
 func _probe_animation_files() -> void:
 	missing_files.clear()
 	present_files.clear()
+	flight_missing_files.clear()
+	flight_present_files.clear()
+	flight_artwork_ready = false
 	var root := str(manifest.get("asset_root", "res://assets/pets/parrot/"))
 	if not root.ends_with("/"):
 		root += "/"
 	for name in animations.keys():
 		var anim: Dictionary = animations[name]
+		var status := str(anim.get("status", "")).strip_edges().to_lower()
+		var is_flight := FLIGHT_ANIM_NAMES.has(name) or status == "awaiting_artwork"
+		## Ground package readiness only requires GROUND_ANIM_NAMES (or non-flight ready).
+		var counts_for_ground := GROUND_ANIM_NAMES.has(name)
+		if is_flight and not counts_for_ground:
+			counts_for_ground = false
 		var folder := str(anim.get("folder", name)).strip_edges()
 		var count := int(anim.get("expected_frame_count", 0))
 		var pattern := str(anim.get("filename_pattern", ""))
@@ -132,9 +157,28 @@ func _probe_animation_files() -> void:
 			var fname := _format_frame_name(pattern, i, name, folder)
 			var path := root + folder + "/" + fname
 			if _frame_resource_exists(path):
-				present_files.append(path)
+				if counts_for_ground:
+					present_files.append(path)
+				if is_flight:
+					flight_present_files.append(path)
 			else:
-				missing_files.append(path)
+				if counts_for_ground:
+					missing_files.append(path)
+				if is_flight:
+					flight_missing_files.append(path)
+	## Flight ready only when all flight frames present AND status isn't awaiting.
+	if FLIGHT_ANIM_NAMES.size() > 0:
+		var all_flight_listed := true
+		for fn in FLIGHT_ANIM_NAMES:
+			if not animations.has(fn):
+				all_flight_listed = false
+				break
+		flight_artwork_ready = (
+			all_flight_listed
+			and flight_missing_files.is_empty()
+			and flight_present_files.size() > 0
+			and bool(manifest.get("flight_artwork_ready", false))
+		)
 
 
 func _format_frame_name(pattern: String, index: int, anim_name: String, folder: String) -> String:
@@ -162,13 +206,21 @@ func _format_frame_name(pattern: String, index: int, anim_name: String, folder: 
 
 
 func _build_sprite_frames_if_ready() -> void:
-	## Only called when every expected file exists. Still gated by PET_VISUALS_ENABLED at play time.
+	## Build frames for ground package; include flight only when flight_artwork_ready.
 	var frames := SpriteFrames.new()
 	var root := str(manifest.get("asset_root", "res://assets/pets/parrot/"))
 	if not root.ends_with("/"):
 		root += "/"
 	for name in animations.keys():
 		var anim: Dictionary = animations[name]
+		var is_flight := FLIGHT_ANIM_NAMES.has(name)
+		if is_flight and not flight_artwork_ready:
+			continue
+		if not is_flight and not GROUND_ANIM_NAMES.has(name):
+			## Unknown future groups: only include if all frames present.
+			var st := str(anim.get("status", "")).to_lower()
+			if st == "awaiting_artwork":
+				continue
 		var folder := str(anim.get("folder", name)).strip_edges()
 		var count := int(anim.get("expected_frame_count", 0))
 		var pattern := str(anim.get("filename_pattern", ""))
@@ -196,8 +248,14 @@ func _build_sprite_frames_if_ready() -> void:
 
 func animation_name_for_visual_state(visual_state: String) -> String:
 	var key := visual_state.strip_edges().to_lower()
+	## Never request missing flight art — fall back to idle (no fake ground-move flight).
+	if FLIGHT_ANIM_NAMES.has(key) and not flight_artwork_ready:
+		return "idle"
 	if STATE_TO_ANIM.has(key):
-		return str(STATE_TO_ANIM[key])
+		var mapped := str(STATE_TO_ANIM[key])
+		if FLIGHT_ANIM_NAMES.has(mapped) and not flight_artwork_ready:
+			return "idle"
+		return mapped
 	if animations.has(key):
 		return key
 	return "idle"
@@ -219,6 +277,7 @@ func to_debug_dict() -> Dictionary:
 		"manifest_path": manifest_path,
 		"pet_id": pet_id,
 		"artwork_ready": artwork_ready,
+		"flight_artwork_ready": flight_artwork_ready,
 		"visuals_enabled_flag": visuals_enabled_flag,
 		"load_status": load_status,
 		"load_detail": load_detail,
@@ -229,6 +288,10 @@ func to_debug_dict() -> Dictionary:
 		"animation_count": animations.size(),
 		"missing_file_count": missing_files.size(),
 		"present_file_count": present_files.size(),
+		"flight_missing_file_count": flight_missing_files.size(),
+		"flight_present_file_count": flight_present_files.size(),
 		"has_sprite_frames": sprite_frames != null,
 		"pet_visuals_enabled_runtime": PetRuntimeConfig.PET_VISUALS_ENABLED,
+		"pet_flight_enabled": PetRuntimeConfig.PET_FLIGHT_ENABLED,
+		"pet_flight_visuals_ready": PetRuntimeConfig.PET_FLIGHT_VISUALS_READY,
 	}

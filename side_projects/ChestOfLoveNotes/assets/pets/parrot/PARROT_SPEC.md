@@ -164,8 +164,27 @@ Every production frame must be:
 | ROAM | `move` | `move/` | `parrot_move_00.png` … `parrot_move_06.png` | **7** | **10** | yes |
 | CHEST_INTERACTION | `chest_interaction` | `chest_interaction/` | `parrot_chest_00.png` … `parrot_chest_07.png` | **8** | **10** | no |
 | TAP_REACTION | `tap_reaction` | `tap_reaction/` | `parrot_tap_00.png` … `parrot_tap_04.png` | **5** | **10** | no |
+| TAKEOFF (future) | `takeoff` | `takeoff/` | `parrot_takeoff_00.png` … | **5–7** (contract **6**) | **10** | no |
+| FLY (future) | `fly` | `fly/` | `parrot_fly_00.png` … | **6–8** (contract **7**) | **12** | yes |
+| LAND (future) | `land` | `land/` | `parrot_land_00.png` … | **5–7** (contract **6**) | **10** | no |
 
 Source / tooling only: `source/` (not loaded at runtime).
+
+### Flight art readiness
+
+| Flag / field | Value |
+| --- | --- |
+| `PET_FLIGHT_ENABLED` | **false** |
+| `PET_FLIGHT_VISUALS_READY` | **false** |
+| Manifest `flight_artwork_ready` | **false** |
+| Manifest takeoff/fly/land `status` | **awaiting_artwork** |
+| Folders | `takeoff/`, `fly/`, `land/` (`.gitkeep` only — **no fabricated PNGs**) |
+
+Intended future loop (when art is approved):
+
+`IDLE / ROAM` → occasional `TAKEOFF` (~10–20% of eligible idle decisions) → `FLY` through safe flight zone (sky/ocean/open; avoid title/nav/UI) → `LAND` on safe sand → `IDLE`.
+
+Do **not** reuse ground `move` frames as fake flight. Ground package (idle/move/chest/tap) remains approved and unchanged.
 
 ### Transition rules
 
@@ -173,8 +192,9 @@ Source / tooling only: `source/` (not loaded at runtime).
 - **MOVE** — loops while roaming
 - **CHEST_INTERACTION** — play once at interaction point, then return to idle
 - **TAP_REACTION** — play once, then return to idle / prior allowed state
+- **TAKEOFF / FLY / LAND** — architecture ready; production gated off until flight art approved
 
-Playback is prepared in `PetAnimationLoader` / `PetActor` but **does not run** while `artwork_ready == false` or `PET_VISUALS_ENABLED == false`.
+Playback is prepared in `PetAnimationLoader` / `PetActor` but **does not run** while `artwork_ready == false` or `PET_VISUALS_ENABLED == false`. Flight anims are skipped entirely while `flight_artwork_ready == false`.
 
 ---
 
@@ -188,6 +208,9 @@ assets/pets/parrot/
   move/parrot_move_XX.png
   chest_interaction/parrot_chest_XX.png
   tap_reaction/parrot_tap_XX.png
+  takeoff/   # awaiting artwork (.gitkeep)
+  fly/       # awaiting artwork (.gitkeep)
+  land/      # awaiting artwork (.gitkeep)
   source/   # raw / contact sheets (not runtime)
 ```
 
