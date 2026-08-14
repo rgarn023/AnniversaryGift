@@ -68,11 +68,11 @@ func _make_actor(seed: int = 42, vp: Vector2 = Vector2(390, 844)) -> PetActor:
 
 
 func _test_version() -> void:
-	_assert(BuildFlags.APP_VERSION_CODE == 64, "versionCode 64")
-	_assert(BuildFlags.APP_VERSION_NAME == "0.1.64-profile-pet-chest-avoidance", "versionName 64")
+	_assert(BuildFlags.APP_VERSION_CODE == 65, "versionCode 65")
+	_assert(BuildFlags.APP_VERSION_NAME == "0.1.65-profile-pet-ui-fix", "versionName 65")
 	var preset := FileAccess.get_file_as_string("res://export_presets.cfg")
-	_assert(preset.contains("version/code=64"), "export versionCode 64")
-	_assert(preset.contains("0.1.64-profile-pet-chest-avoidance"), "export versionName 64")
+	_assert(preset.contains("version/code=65"), "export versionCode 65")
+	_assert(preset.contains("0.1.65-profile-pet-ui-fix"), "export versionName 65")
 
 
 func _test_profile_pet_persistence() -> void:
@@ -132,9 +132,9 @@ func _test_profile_pet_persistence() -> void:
 func _test_profile_ui_wiring() -> void:
 	var main := FileAccess.get_file_as_string("res://scripts/main.gd")
 	_assert(main.contains("_build_profile_pets_section"), "pets section builder")
-	_assert(main.contains("PETS"), "PETS section label")
+	_assert(main.contains('sec.text = "Pets"'), "Pets section label")
 	_assert(main.contains("select_profile_pet"), "select API wired")
-	_assert(main.contains("Android Diagnostics intentionally omitted"), "diagnostics removed note")
+	_assert(main.contains("never mounted from"), "diagnostics removed note")
 	var profile_fn_start := main.find("func _show_profile()")
 	var profile_fn_end := main.find("func _show_diagnostics()")
 	_assert(profile_fn_start >= 0 and profile_fn_end > profile_fn_start, "profile funcs")

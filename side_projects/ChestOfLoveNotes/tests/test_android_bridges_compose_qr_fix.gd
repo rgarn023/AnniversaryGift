@@ -32,6 +32,7 @@ func _run() -> void:
 	var map := FileAccess.get_file_as_string("res://scripts/ui/map_location_picker.gd")
 	var flags := FileAccess.get_file_as_string("res://scripts/build_flags.gd")
 	var preset := FileAccess.get_file_as_string("res://export_presets.cfg")
+	var export_sh := FileAccess.get_file_as_string("res://tools/export_android_apk.sh")
 	var gitignore := FileAccess.get_file_as_string("res://.gitignore")
 	var getf := FileAccess.get_file_as_string("res://supabase/functions/get-friends/index.ts")
 
@@ -94,7 +95,7 @@ func _run() -> void:
 	_assert(main.contains("_build_android_diagnostics_panel"), "diagnostics builder")
 	_assert(perm.contains("android_diagnostics_snapshot"), "diagnostics snapshot helper")
 	_assert(main.contains("_build_profile_pets_section"), "Profile pets section")
-	_assert(main.contains("Android Diagnostics intentionally omitted"), "diagnostics omitted from Profile")
+	_assert(main.contains("never mounted from"), "diagnostics omitted from Profile")
 	## Profile must not call the diagnostics panel builder.
 	var profile_fn_start := main.find("func _show_profile()")
 	var profile_fn_end := main.find("func _show_diagnostics()")
@@ -112,9 +113,9 @@ func _run() -> void:
 	_assert(map.contains("_gesture_layer"), "map gesture layer unchanged")
 
 	## VERSION / APK
-	_assert(flags.contains("APP_VERSION_CODE := 30"), "versionCode 30")
-	_assert(preset.contains("version/code=30"), "export 30")
-	_assert(preset.contains("backend-location-qr-splash-fix-debug.apk"), "APK name")
+	_assert(flags.contains("APP_VERSION_CODE := 65"), "versionCode 65")
+	_assert(preset.contains("version/code=65"), "export 65")
+	_assert(preset.contains("v65-profile-pet-ui-fix-debug.apk") or export_sh.contains("v65-profile-pet-ui-fix-debug.apk"), "APK name")
 	_assert(gitignore.contains("ChestOfLoveNotes-backend-location-qr-splash-fix-debug.apk"), "gitignore allow")
 	_assert(BuildFlags.APP_VERSION_CODE >= 30, "BuildFlags >= 29")
 

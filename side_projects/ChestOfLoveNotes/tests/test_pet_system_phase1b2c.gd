@@ -61,8 +61,8 @@ func _test_flags_and_version() -> void:
 		PetRuntimeConfig.reward_policy_default() == PetRuntimeConfig.RewardPetPolicy.HIDE_TEMPORARILY,
 		"reward policy HIDE_TEMPORARILY"
 	)
-	_assert(BuildFlags.APP_VERSION_CODE == 64, "versionCode 64")
-	_assert(BuildFlags.APP_VERSION_NAME == "0.1.64-profile-pet-chest-avoidance", "versionName 64")
+	_assert(BuildFlags.APP_VERSION_CODE == 65, "versionCode 65")
+	_assert(BuildFlags.APP_VERSION_NAME == "0.1.65-profile-pet-ui-fix", "versionName 65")
 	_assert(is_equal_approx(PetRuntimeConfig.MOVE_SPEED_PX_PER_SEC, 72.0), "move speed 72")
 	var hit := PetRuntimeConfig.tap_hitbox_size_canvas()
 	_assert(is_equal_approx(hit.x, 96.0) and is_equal_approx(hit.y, 108.0), "tap hitbox canvas 96x108")

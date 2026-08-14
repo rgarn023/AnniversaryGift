@@ -225,8 +225,8 @@ func _run() -> void:
 	_assert(FileAccess.file_exists("res://assets/art/background/environments/default_beach.png"), "default beach environment art")
 
 	_assert(flags.contains("APP_VERSION_CODE := 64"), "versionCode 63")
-	_assert(preset.contains("version/code=64"), "export 63")
-	_assert(preset.contains("0.1.64-profile-pet-chest-avoidance"), "version name")
+	_assert(preset.contains("version/code=65"), "export 65")
+	_assert(preset.contains("0.1.65-profile-pet-ui-fix"), "version name")
 	_assert(preset.contains("v63-parrot-visible-fix-debug.apk"), "APK name")
 	_assert(gitignore.contains("*.apk"), "apks ignored by default")
 	_assert(export_sh.contains("ChestOfLoveNotes") and export_sh.contains("debug.apk"), "export script present")

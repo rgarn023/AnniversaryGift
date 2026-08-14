@@ -3794,6 +3794,10 @@ func _show_profile() -> void:
 	var access := "Active" if state.membership.is_member or state.is_demo() else "—"
 	col.add_child(_settings_row("Private Access", _settings_value_label(access)))
 
+	## Pets — always on normal Profile (not debug / feature-flag gated).
+	## Placed above Preferences so Off/Parrot are visible without hunting below Permissions.
+	col.add_child(_build_profile_pets_section())
+
 	var prefs := Label.new()
 	prefs.text = "PREFERENCES"
 	MobileUi.apply_label(prefs, MobileUi.SIZE_SECTION, MobileUi.COLOR_TITLE)
@@ -3831,9 +3835,6 @@ func _show_profile() -> void:
 		)
 		col.add_child(_settings_row("Keep Me Signed In", keep_toggle))
 
-	## Pets — Off / Parrot (owned, free). No shop / billing / collection.
-	col.add_child(_build_profile_pets_section())
-
 	var perm_sec := Label.new()
 	perm_sec.text = ProductStrings.PERMISSIONS_SECTION
 	MobileUi.apply_label(perm_sec, MobileUi.SIZE_SECTION, MobileUi.COLOR_TITLE)
@@ -3846,10 +3847,9 @@ func _show_profile() -> void:
 		_show_permissions_manage_sheet()
 	, Vector2(0, MobileUi.TOUCH_SECONDARY_H)))
 
-	## Android Diagnostics intentionally omitted from normal Profile UI.
-	## Internal helpers remain available via Online Diagnostics (7 silent taps).
+	## Production Profile never mounts the debug Android bridge panel.
+	## Online Diagnostics (7 silent taps on the spacer above) remains debug-only.
 
-	## Online Diagnostics is not shown in normal Profile UI (7 silent taps above).
 	col.add_child(_make_button("Sign Out", func() -> void:
 		_clear_reveal_timers()
 		_clear_compose_draft()
@@ -4143,17 +4143,21 @@ func _android_diagnostics_public_token_available() -> bool:
 
 
 func _build_profile_pets_section() -> VBoxContainer:
-	## Profile Pets: single-choice Off / Parrot. Reuses settings card styling.
+	## Profile Pets: single-choice Off / Parrot using Profile button styling.
+	## Avoid CheckBox — default Android checkbox icons are easy to miss on dark theme.
 	var wrap := VBoxContainer.new()
-	wrap.add_theme_constant_override("separation", MobileUi.GAP_CARDS)
+	wrap.name = "ProfilePetsSection"
+	wrap.add_theme_constant_override("separation", MobileUi.GAP_RELATED)
 	var sec := Label.new()
-	sec.text = "PETS"
+	sec.name = "ProfilePetsTitle"
+	sec.text = "Pets"
 	MobileUi.apply_label(sec, MobileUi.SIZE_SECTION, MobileUi.COLOR_TITLE)
 	wrap.add_child(sec)
 
 	var pets := state.pets if state != null else null
 	if pets == null:
 		var missing := Label.new()
+		missing.name = "ProfilePetsUnavailable"
 		missing.text = "Pets unavailable"
 		MobileUi.apply_label(missing, MobileUi.SIZE_HELPER, MobileUi.COLOR_SECONDARY, true)
 		wrap.add_child(missing)
@@ -4162,49 +4166,77 @@ func _build_profile_pets_section() -> VBoxContainer:
 	var selection := pets.get_profile_pet_selection()
 	var group := ButtonGroup.new()
 	group.allow_unpress = false
+	var choice_buttons: Dictionary = {} ## choice_id -> Button
 
-	var make_choice := func(label_text: String, choice_id: String) -> PanelContainer:
-		var card := _make_card()
-		var row := HBoxContainer.new()
-		row.custom_minimum_size.y = MobileUi.font_touch(MobileUi.ROW_H)
-		row.add_theme_constant_override("separation", 12)
-		card.add_child(row)
-		var btn := CheckBox.new()
-		btn.text = label_text
-		btn.button_group = group
+	var apply_choice_visual := func(btn: Button, choice_id: String, selected: bool) -> void:
+		var mark := "●" if selected else "○"
+		var check := "  ✓" if selected else ""
+		if choice_id == "off":
+			btn.text = "%s  Off%s" % [mark, check]
+		else:
+			btn.text = "%s  Parrot%s" % [mark, check]
+		var normal := MobileUi.button_style()
+		var pressed := MobileUi.button_style()
+		if selected:
+			normal.bg_color = Color(0.34, 0.18, 0.30, 1.0)
+			normal.border_color = MobileUi.COLOR_NAV_SELECTED
+			normal.set_border_width_all(3)
+			pressed.bg_color = Color(0.40, 0.22, 0.34, 1.0)
+			pressed.border_color = MobileUi.COLOR_NAV_SELECTED
+			pressed.set_border_width_all(3)
+			btn.add_theme_color_override("font_color", MobileUi.COLOR_NAV_SELECTED)
+		else:
+			btn.add_theme_color_override("font_color", MobileUi.COLOR_BODY)
+		btn.add_theme_stylebox_override("normal", normal)
+		btn.add_theme_stylebox_override("hover", pressed)
+		btn.add_theme_stylebox_override("pressed", pressed)
+
+	var refresh_all_visuals := func() -> void:
+		var cur := pets.get_profile_pet_selection()
+		for id in choice_buttons.keys():
+			apply_choice_visual.call(choice_buttons[id], str(id), str(id) == cur)
+
+	var make_choice := func(choice_id: String, node_name: String) -> Button:
+		var btn := Button.new()
+		btn.name = node_name
 		btn.toggle_mode = true
+		btn.button_group = group
 		btn.focus_mode = Control.FOCUS_NONE
 		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		btn.button_pressed = (selection == choice_id)
-		btn.add_theme_font_size_override("font_size", MobileUi.font(MobileUi.SIZE_BODY))
-		btn.add_theme_color_override("font_color", MobileUi.COLOR_BODY)
-		btn.add_theme_color_override("font_pressed_color", MobileUi.COLOR_BODY)
-		btn.add_theme_color_override("font_hover_color", MobileUi.COLOR_BODY)
+		btn.custom_minimum_size = Vector2(0, MobileUi.font_touch(MobileUi.TOUCH_SECONDARY_H))
+		btn.add_theme_font_size_override("font_size", MobileUi.font(MobileUi.SIZE_BUTTON))
+		btn.set_meta("pet_choice_id", choice_id)
+		var selected := selection == choice_id
+		btn.button_pressed = selected
+		apply_choice_visual.call(btn, choice_id, selected)
 		btn.toggled.connect(func(on: bool) -> void:
 			if not on:
 				return
 			if pets.select_profile_pet(choice_id):
+				refresh_all_visuals.call()
 				var label := "Off" if choice_id == "off" else "Parrot"
 				_show_toast("Pet: %s" % label)
 			else:
 				_show_toast("Could not update pet selection.")
 				_show_profile()
 		)
-		row.add_child(btn)
-		return card
+		choice_buttons[choice_id] = btn
+		return btn
 
-	wrap.add_child(make_choice.call("Off", "off"))
-	## Parrot is owned + FREE — only current selectable pet.
-	if pets.is_owned(PetCatalog.PET_PARROT) or pets.catalog.has_pet(PetCatalog.PET_PARROT):
-		wrap.add_child(make_choice.call("Parrot", PetCatalog.PET_PARROT))
+	wrap.add_child(make_choice.call("off", "ProfilePetChoiceOff"))
+	## Parrot is owned + FREE — always offered on Profile (catalog default unlock).
+	wrap.add_child(make_choice.call(PetCatalog.PET_PARROT, "ProfilePetChoiceParrot"))
 	return wrap
 
 
 func _build_android_diagnostics_panel() -> VBoxContainer:
-	## DEBUG-build only helper (not shown on normal Profile). Kept for internal Galaxy testing.
+	## INTERNAL / DEBUG ONLY — never mounted from `_show_profile`.
+	## Kept for Online Diagnostics / Galaxy bridge testing. Not a production Profile section.
 	var wrap := VBoxContainer.new()
+	wrap.name = "AndroidDiagnosticsPanelInternal"
 	wrap.add_theme_constant_override("separation", 8)
 	var sec := Label.new()
+	## Title kept for internal tooling string-search; never shown on normal Profile tab.
 	sec.text = "Android Diagnostics"
 	MobileUi.apply_label(sec, MobileUi.SIZE_SECTION, MobileUi.COLOR_TITLE)
 	wrap.add_child(sec)
@@ -4753,7 +4785,7 @@ func _on_app_resumed() -> void:
 		_rebuild_permissions_manage_content()
 	## Consume notification deep links from warm resume / new intent.
 	await _consume_notification_deeplink()
-	## Profile permission rows + Android Diagnostics need a rebuild after Settings return.
+	## Profile permission rows need a rebuild after Settings return.
 	if _current_screen == "profile" and not _perm_manage_live:
 		_show_profile()
 		_resume_inflight = false

@@ -322,7 +322,7 @@ func _test_regression_locked_systems() -> void:
 	_assert(disconnect_fn.contains("record_my_person_pair_end"), "pair end recording intact")
 	_assert(mig.contains("my_person_pair_ends"), "pair ends table intact")
 	_assert(flags.contains("APP_VERSION_CODE := 64"), "versionCode 63")
-	_assert(flags.contains("0.1.64-profile-pet-chest-avoidance"), "versionName 63")
+	_assert(flags.contains("0.1.65-profile-pet-ui-fix"), "versionName 65")
 	var catalog := FileAccess.get_file_as_string("res://config/pets/catalog.json")
 	_assert(catalog.contains("\"unlock_type\": \"FREE\""), "parrot remains FREE")
 	_assert(catalog.contains("\"default_unlocked\": true"), "parrot default unlocked")
