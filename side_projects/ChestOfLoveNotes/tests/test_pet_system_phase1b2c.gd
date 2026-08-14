@@ -269,7 +269,7 @@ func _test_regressions_locked() -> void:
 	_assert(chest.contains("CHEST_FRAME_COUNT := 13"), "chest open intact")
 	_assert(chest.contains("REVEAL_FRAME_COUNT := 8"), "baked reveal intact")
 	_assert(env.contains("CHEST_GROUND_Y := 0.888"), "ground intact")
-	_assert(flags.contains("APP_VERSION_CODE := 64"), "version 64")
+	_assert(flags.contains("APP_VERSION_CODE := 65"), "version 64")
 	_assert(main.contains("pause_for_chest_reward"), "reward pause wired")
 	_assert(main.contains("resume_after_chest_reward"), "reward resume wired")
 	_assert(not main.contains("BillingClient"), "no billing in main")
