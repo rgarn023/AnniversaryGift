@@ -38,6 +38,21 @@ Explicitly **not** in 1A:
 
 **Goal:** Parrot appears on the CHEST reward screen only.
 
+### PHASE 1B-1 — Invisible runtime integration (this sub-phase)
+
+**Goal:** Mount pet runtime on CHEST with **zero visible pixels**.
+
+Expected:
+
+- `PetRuntimeConfig.PET_RUNTIME_ENABLED = true`
+- `PetRuntimeConfig.PET_VISUALS_ENABLED = false`
+- CHEST → `ChestEnvironment` → `PetRuntimeRoot` → `PetActor`
+- IDLE / ROAM / CHEST_INTERACTION / TAP_REACTION state machine (logic only)
+- Safe-area roam clamps; chest exclusion; reward pause/resume
+- Still no artwork, Pet Collection UI, purchases, or gifting
+
+### PHASE 1B-2 — Parrot art + visible runtime (next)
+
 Expected:
 
 - Spawn selected/owned parrot via `PetManager` into the CHEST stage

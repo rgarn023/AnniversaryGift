@@ -280,6 +280,9 @@ func _clear_screen() -> void:
 	_auth_busy = false
 	_chest_action_busy = false
 	_friend_action_busy = false
+	## Drop pet actor refs before freeing the CHEST tree (no duplicate/orphan timers).
+	if state != null and state.pets != null:
+		state.pets.notify_chest_screen_cleared()
 	for c in _screen_host.get_children():
 		c.queue_free()
 	## Leaving any screen restores default chrome; Chest re-hides for beach.
@@ -849,6 +852,42 @@ func _set_chest_environment_active(active: bool) -> void:
 		_chrome_bg.visible = not active
 
 
+func _mount_invisible_pet_runtime(chest_env: Node) -> void:
+	## Smallest CHEST integration: ChestEnvironment → PetRuntimeRoot → PetActor.
+	## No pet UI, no artwork, no placeholders.
+	if state == null or state.pets == null:
+		return
+	if not state.pets.should_spawn_on_chest():
+		return
+	if chest_env == null or not is_instance_valid(chest_env):
+		return
+	## Let chest anchors resolve before deriving exclusion geometry.
+	await get_tree().process_frame
+	if _current_screen != "main_chest":
+		return
+	if chest_env == null or not is_instance_valid(chest_env):
+		return
+	var root := state.pets.ensure_pet_runtime_root(chest_env)
+	if root == null:
+		return
+	## Re-entry must never stack actors.
+	if state.pets.count_actors_under(chest_env) > 0:
+		state.pets.despawn_active_pet()
+	var actor := state.pets.spawn_active_pet(root)
+	if actor == null:
+		return
+	var vp := get_viewport().get_visible_rect().size
+	if vp.x <= 1.0 or vp.y <= 1.0:
+		vp = Vector2(390, 844)
+	var chest_local := Rect2()
+	if _chest != null and is_instance_valid(_chest) and root is Node2D:
+		var grect: Rect2 = _chest.get_global_rect()
+		var tl: Vector2 = (root as Node2D).to_local(grect.position)
+		var br: Vector2 = (root as Node2D).to_local(grect.position + grect.size)
+		chest_local = Rect2(tl, br - tl)
+	state.pets.configure_spawned_actor(vp, chest_local)
+
+
 func _show_main_chest() -> void:
 	if not _guard_private_chest():
 		return
@@ -965,6 +1004,10 @@ func _show_main_chest() -> void:
 	_chest.configure(LoveNotesChest.ChestState.READY, false)
 	_chest.set_unread_badge(int(counts.unread))
 
+	## Phase 1B-1: invisible pet runtime under ChestEnvironment/PetRuntimeRoot.
+	## PET_VISUALS_ENABLED is false — zero user-visible change vs v61.
+	await _mount_invisible_pet_runtime(chest_env)
+
 	if state.is_demo():
 		var demo_row := HBoxContainer.new()
 		demo_row.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -1065,6 +1108,9 @@ func _on_chest_tapped() -> void:
 	_dismiss_toast_if_visible()
 	_chest_action_busy = true
 	_chest.set_interaction_enabled(false)
+	## Pause pet runtime for any chest open / reward presentation.
+	if state != null and state.pets != null:
+		state.pets.pause_for_chest_reward()
 	var has_new := (
 		int(_last_chest_counts.get("unread", 0)) > 0
 		or int(_last_chest_counts.get("requests", 0)) > 0
@@ -1084,6 +1130,8 @@ func _on_chest_tapped() -> void:
 			_empty_chest_hint.modulate.a = 1.0
 		_chest.set_interaction_enabled(true)
 		_chest_action_busy = false
+		if state != null and state.pets != null:
+			state.pets.resume_after_chest_reward()
 		return
 
 	var dim := ColorRect.new()
@@ -1109,6 +1157,8 @@ func _on_chest_tapped() -> void:
 			_empty_chest_hint.modulate.a = 1.0
 		_chest.set_interaction_enabled(true)
 		_chest_action_busy = false
+		if state != null and state.pets != null:
+			state.pets.resume_after_chest_reward()
 		return
 
 	## Intentional handoff after the reward hold — soft fade into YOUR CHEST.
@@ -1120,6 +1170,7 @@ func _on_chest_tapped() -> void:
 		dim.queue_free()
 	_dev_force_chest_scroll = false
 	_chest_action_busy = false
+	## Leaving CHEST → inventory clears the screen and despawns the pet.
 	_show_inventory()
 
 

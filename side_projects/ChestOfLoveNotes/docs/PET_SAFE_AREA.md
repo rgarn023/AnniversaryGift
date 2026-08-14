@@ -65,6 +65,10 @@ Approximate safe sand roam (viewport fractions; refine with art scale later):
 
 Shoreline/ocean exclusion: `y < WATER_BOTTOM_FRAC` is out of bounds.
 
+### Chest-interaction targets (Phase 1B-1)
+
+`PetSafeArea.chest_interaction_points()` places the pet **beside** the inflated chest exclusion (left and right), near ~72% of exclusion height (lower body / sand contact), never over the reward cavity center. Chosen points are clamped to roam X and sand Y.
+
 ---
 
 ## Screen-edge margins
@@ -77,4 +81,6 @@ Shoreline/ocean exclusion: `y < WATER_BOTTOM_FRAC` is out of bounds.
 
 ## Implementation note
 
-Phase 1A stores these constraints as documentation and optional constants on `PetActor` / future movement helpers. Runtime clamping begins in Phase 1B when the parrot is spawned.
+Phase 1B-1 implements these constraints in `PetSafeArea` / `PetActor` using
+viewport-derived fractions (not a single fragile fixed coordinate set).
+`PET_VISUALS_ENABLED` remains false — roam is validated programmatically only.

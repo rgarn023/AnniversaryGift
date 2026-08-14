@@ -1,6 +1,6 @@
 extends SceneTree
 ## Phase 1A pet architecture tests — catalog, ownership, persistence, actor load.
-## Confirms production CHEST does not spawn pets yet (zero visible change).
+## Updated for Phase 1B-1: runtime may spawn invisibly; visuals still off.
 
 var _passed: int = 0
 var _failed: int = 0
@@ -20,11 +20,11 @@ func _assert(cond: bool, label: String) -> void:
 
 
 func _run() -> void:
-	print("=== Pet system Phase 1A scaffold ===")
+	print("=== Pet system Phase 1A scaffold (compat) ===")
 	_test_catalog()
 	_test_manager_defaults_and_persistence()
 	_test_pet_actor_scene()
-	_test_no_chest_spawn_wiring()
+	_test_chest_spawn_wiring_phase1b1()
 	_test_asset_folders_and_docs()
 	_test_regression_untouched()
 	print("=== Results: %d passed, %d failed ===" % [_passed, _failed])
@@ -60,8 +60,14 @@ func _test_manager_defaults_and_persistence() -> void:
 	_assert(mgr.active_pet_id == "parrot", "active pet defaults to parrot")
 	_assert(mgr.get_active_definition() != null, "active definition resolves")
 	_assert(mgr.get_active_definition().is_free(), "active pet is FREE")
-	_assert(not mgr.should_spawn_on_chest(), "CHEST spawn disabled in Phase 1A")
-	_assert(mgr.spawn_active_pet(get_root()) == null, "spawn_active_pet returns null while gated")
+	_assert(mgr.should_spawn_on_chest(), "CHEST spawn enabled for invisible runtime")
+	var host := Node2D.new()
+	get_root().add_child(host)
+	var spawned := mgr.spawn_active_pet(host)
+	_assert(spawned != null, "spawn_active_pet returns actor when runtime enabled")
+	_assert(spawned.visible == false or spawned.modulate.a == 0.0, "spawned actor invisible")
+	mgr.despawn_active_pet()
+	host.queue_free()
 
 	## Persistence round-trip: change active, reload.
 	_assert(mgr.set_active_pet("parrot"), "set_active parrot ok")
@@ -70,12 +76,12 @@ func _test_manager_defaults_and_persistence() -> void:
 	_assert(mgr2.is_owned("parrot"), "persisted ownership reload")
 	_assert(mgr2.active_pet_id == "parrot", "persisted active pet reload")
 
-	## AppState wires PetManager without UI.
+	## AppState wires PetManager without pet UI.
 	var state := AppState.new()
 	state.bootstrap()
 	_assert(state.pets != null, "AppState has pets manager")
 	_assert(state.pets.is_owned("parrot"), "AppState bootstrap owns parrot")
-	_assert(not state.pets.should_spawn_on_chest(), "AppState pets do not spawn on CHEST")
+	_assert(state.pets.should_spawn_on_chest(), "AppState pets may spawn invisibly on CHEST")
 
 
 func _test_pet_actor_scene() -> void:
@@ -85,6 +91,8 @@ func _test_pet_actor_scene() -> void:
 	_assert(ResourceLoader.exists("res://scripts/pets/pet_definition.gd"), "pet_definition.gd exists")
 	_assert(ResourceLoader.exists("res://scripts/pets/pet_catalog.gd"), "pet_catalog.gd exists")
 	_assert(ResourceLoader.exists("res://scripts/pets/pet_manager.gd"), "pet_manager.gd exists")
+	_assert(ResourceLoader.exists("res://scripts/pets/pet_runtime_config.gd"), "pet_runtime_config.gd exists")
+	_assert(ResourceLoader.exists("res://scripts/pets/pet_safe_area.gd"), "pet_safe_area.gd exists")
 	var scene := load("res://scenes/pets/PetActor.tscn") as PackedScene
 	_assert(scene != null, "PetActor PackedScene loads")
 	var actor := scene.instantiate() as PetActor
@@ -103,16 +111,18 @@ func _test_pet_actor_scene() -> void:
 	actor.queue_free()
 
 
-func _test_no_chest_spawn_wiring() -> void:
+func _test_chest_spawn_wiring_phase1b1() -> void:
 	var main := FileAccess.get_file_as_string("res://scripts/main.gd")
-	_assert(not main.contains("spawn_active_pet"), "main does not spawn pets")
-	_assert(not main.contains("PetActor"), "main does not reference PetActor")
+	_assert(main.contains("spawn_active_pet") or main.contains("_mount_invisible_pet_runtime"), "main mounts invisible pet runtime")
 	_assert(not main.contains("Pet Collection"), "no Pet Collection UI string")
 	_assert(not main.contains("Pet Shop"), "no Pet Shop UI string")
 	var mgr_src := FileAccess.get_file_as_string("res://scripts/pets/pet_manager.gd")
-	_assert(mgr_src.contains("CHEST_SPAWN_ENABLED := false"), "spawn gate hard-false")
+	_assert(mgr_src.contains("PET_RUNTIME_ENABLED"), "runtime flag referenced")
 	_assert(not mgr_src.contains("BillingClient"), "no BillingClient")
 	_assert(not mgr_src.contains("sku"), "no purchase SKUs in PetManager")
+	var cfg_src := FileAccess.get_file_as_string("res://scripts/pets/pet_runtime_config.gd")
+	_assert(cfg_src.contains("PET_RUNTIME_ENABLED := true"), "runtime enabled")
+	_assert(cfg_src.contains("PET_VISUALS_ENABLED := false"), "visuals disabled")
 
 
 func _test_asset_folders_and_docs() -> void:
@@ -128,7 +138,7 @@ func _test_asset_folders_and_docs() -> void:
 
 
 func _test_regression_untouched() -> void:
-	## Spot-check locked systems remain present; Phase 1A must not strip them.
+	## Spot-check locked systems remain present; pet work must not strip them.
 	var chest := FileAccess.get_file_as_string("res://scripts/chest/treasure_chest.gd")
 	var env := FileAccess.get_file_as_string("res://scripts/chest/chest_environment.gd")
 	var main := FileAccess.get_file_as_string("res://scripts/main.gd")
