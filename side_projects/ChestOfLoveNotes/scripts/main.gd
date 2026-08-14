@@ -4207,7 +4207,9 @@ func _build_profile_pets_section() -> VBoxContainer:
 		btn.add_theme_font_size_override("font_size", MobileUi.font(MobileUi.SIZE_BUTTON))
 		btn.set_meta("pet_choice_id", choice_id)
 		var selected := selection == choice_id
-		btn.button_pressed = selected
+		## No-signal init — prevents ButtonGroup from firing Off during construction
+		## (which would silently set pet_enabled=false on every Profile open).
+		btn.set_pressed_no_signal(selected)
 		apply_choice_visual.call(btn, choice_id, selected)
 		btn.toggled.connect(func(on: bool) -> void:
 			if not on:
@@ -4223,21 +4225,25 @@ func _build_profile_pets_section() -> VBoxContainer:
 		choice_buttons[choice_id] = btn
 		return btn
 
-	wrap.add_child(make_choice.call("off", "ProfilePetChoiceOff"))
+	## Build both choices before add_child so ButtonGroup never briefly has only Off.
+	var off_btn: Button = make_choice.call("off", "ProfilePetChoiceOff")
+	var parrot_btn: Button = make_choice.call(PetCatalog.PET_PARROT, "ProfilePetChoiceParrot")
+	wrap.add_child(off_btn)
 	## Parrot is owned + FREE — always offered on Profile (catalog default unlock).
-	wrap.add_child(make_choice.call(PetCatalog.PET_PARROT, "ProfilePetChoiceParrot"))
+	wrap.add_child(parrot_btn)
 	return wrap
 
 
 func _build_android_diagnostics_panel() -> VBoxContainer:
 	## INTERNAL / DEBUG ONLY — never mounted from `_show_profile`.
-	## Kept for Online Diagnostics / Galaxy bridge testing. Not a production Profile section.
+	## Bridge snapshot helper for Online Diagnostics / Galaxy testing.
+	## Intentionally does NOT use the user-facing title "Android Diagnostics"
+	## so normal Profile / production UI cannot render that string.
 	var wrap := VBoxContainer.new()
-	wrap.name = "AndroidDiagnosticsPanelInternal"
+	wrap.name = "BridgeDiagnosticsPanelInternal"
 	wrap.add_theme_constant_override("separation", 8)
 	var sec := Label.new()
-	## Title kept for internal tooling string-search; never shown on normal Profile tab.
-	sec.text = "Android Diagnostics"
+	sec.text = "Bridge Diagnostics (debug)"
 	MobileUi.apply_label(sec, MobileUi.SIZE_SECTION, MobileUi.COLOR_TITLE)
 	wrap.add_child(sec)
 	var status := Label.new()

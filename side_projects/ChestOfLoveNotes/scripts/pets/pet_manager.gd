@@ -53,9 +53,24 @@ func _load_or_seed_persistence() -> void:
 	active_pet_id = str(cfg.get_value(SECTION_ACTIVE, KEY_ID, "")).strip_edges()
 	if active_pet_id.is_empty() or not is_owned(active_pet_id) or not catalog.has_pet(active_pet_id):
 		active_pet_id = _default_active_id()
-	## Default true when key missing (older saves / first boot with parrot).
-	pet_enabled = bool(cfg.get_value(SECTION_SETTINGS, KEY_ENABLED, true))
+	## Migration: v63 and earlier had no pet_enabled key. Missing ≠ Off.
+	## Only honor false when the key was explicitly persisted (user chose Off).
+	pet_enabled = _migrate_pet_enabled(cfg)
 	save()
+
+
+func _migrate_pet_enabled(cfg: ConfigFile) -> bool:
+	## Explicit stored false → Off. Explicit true → On.
+	## Missing key (pre-toggle / v63 saves): derive On for a valid owned active pet.
+	if cfg.has_section_key(SECTION_SETTINGS, KEY_ENABLED):
+		return bool(cfg.get_value(SECTION_SETTINGS, KEY_ENABLED))
+	## Key absent — upgrade path from physically verified v63 parrot runtime.
+	if active_pet_id == PetCatalog.PET_PARROT and is_owned(PetCatalog.PET_PARROT):
+		return true
+	if not active_pet_id.is_empty() and is_owned(active_pet_id) and catalog.has_pet(active_pet_id):
+		return true
+	## Fresh / empty active: still default On so free parrot appears after seed.
+	return true
 
 
 func _seed_defaults() -> void:

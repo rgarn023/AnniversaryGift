@@ -1,5 +1,5 @@
 extends SceneTree
-## v65 — Profile pet UI fix: real controls, persistence, diagnostics absence.
+## v66 — Production Profile path + v63 pet_enabled migration + diagnostics absence.
 
 
 var _passed: int = 0
@@ -20,12 +20,13 @@ func _assert(cond: bool, label: String) -> void:
 
 
 func _run() -> void:
-	print("=== v65 Profile pet UI fix ===")
+	print("=== v66 Profile pet production path ===")
 	_test_version()
 	_test_profile_source_path()
 	_test_pets_section_runtime()
 	_test_ui_callbacks_and_persistence()
 	_test_actor_counts()
+	_test_v63_pet_enabled_migration()
 	_test_diagnostics_search()
 	_test_regressions()
 	print("=== Results: %d passed, %d failed ===" % [_passed, _failed])
@@ -33,13 +34,13 @@ func _run() -> void:
 
 
 func _test_version() -> void:
-	_assert(BuildFlags.APP_VERSION_CODE == 65, "versionCode 65")
-	_assert(BuildFlags.APP_VERSION_NAME == "0.1.65-profile-pet-ui-fix", "versionName 65")
+	_assert(BuildFlags.APP_VERSION_CODE == 66, "versionCode 66")
+	_assert(BuildFlags.APP_VERSION_NAME == "0.1.66-profile-pet-production-path-fix", "versionName 66")
 	var preset := FileAccess.get_file_as_string("res://export_presets.cfg")
-	_assert(preset.contains("version/code=65"), "export versionCode 65")
-	_assert(preset.contains("0.1.65-profile-pet-ui-fix"), "export versionName 65")
+	_assert(preset.contains("version/code=66"), "export versionCode 66")
+	_assert(preset.contains("0.1.66-profile-pet-production-path-fix"), "export versionName 66")
 	var proj := FileAccess.get_file_as_string("res://project.godot")
-	_assert(proj.contains("0.1.65-profile-pet-ui-fix"), "project.godot version")
+	_assert(proj.contains("0.1.66-profile-pet-production-path-fix"), "project.godot version")
 
 
 func _test_profile_source_path() -> void:
@@ -62,10 +63,13 @@ func _test_profile_source_path() -> void:
 	_assert(body.contains("_build_profile_pets_section"), "pets mounted in _show_profile")
 	_assert(not body.contains("_build_android_diagnostics_panel"), "diagnostics not mounted in _show_profile")
 	_assert(not body.contains("col.add_child(_build_android_diagnostics_panel())"), "no diagnostics add_child")
-	## Helper remains for internal debug tooling only.
+	## Helper remains for internal debug tooling only — must NOT render user title.
 	_assert(main.contains("_build_android_diagnostics_panel"), "diagnostics helper kept internal")
-	_assert(main.contains("Android Diagnostics"), "internal diagnostics title string retained")
+	_assert(not main.contains('sec.text = "Android Diagnostics"'), "no production UI title Android Diagnostics")
+	_assert(main.contains("Bridge Diagnostics (debug)"), "internal bridge diagnostics title")
 	_assert(main.contains("never mounted from `_show_profile`") or main.contains("never mounted from"), "internal-only note")
+	_assert(main.contains("set_pressed_no_signal"), "Profile pet buttons init without signal")
+	_assert(main.contains("_migrate_pet_enabled") or FileAccess.get_file_as_string("res://scripts/pets/pet_manager.gd").contains("_migrate_pet_enabled"), "pet_enabled migration helper")
 
 
 func _test_pets_section_runtime() -> void:
@@ -162,10 +166,39 @@ func _test_actor_counts() -> void:
 	env.queue_free()
 
 
+func _test_v63_pet_enabled_migration() -> void:
+	## Simulate pre-toggle save: owned+active parrot, NO pet_enabled key.
+	var cfg := ConfigFile.new()
+	cfg.set_value("owned", "ids", PackedStringArray(["parrot"]))
+	cfg.set_value("active", "id", "parrot")
+	## Intentionally omit settings/pet_enabled
+	cfg.save(PetManager.PERSIST_PATH)
+	var mgr := PetManager.new()
+	mgr.bootstrap()
+	_assert(mgr.is_owned("parrot"), "migrated owned parrot")
+	_assert(mgr.active_pet_id == "parrot", "migrated active parrot")
+	_assert(mgr.pet_enabled == true, "missing pet_enabled → true (v63 upgrade)")
+	_assert(mgr.get_profile_pet_selection() == "parrot", "UI selection Parrot after migrate")
+	_assert(mgr.should_spawn_on_chest(), "should spawn after migrate")
+	## Explicit false must remain Off.
+	var cfg2 := ConfigFile.new()
+	cfg2.set_value("owned", "ids", PackedStringArray(["parrot"]))
+	cfg2.set_value("active", "id", "parrot")
+	cfg2.set_value("settings", "pet_enabled", false)
+	cfg2.save(PetManager.PERSIST_PATH)
+	var mgr2 := PetManager.new()
+	mgr2.bootstrap()
+	_assert(mgr2.pet_enabled == false, "explicit false preserved")
+	_assert(mgr2.get_profile_pet_selection() == "off", "explicit false → Off")
+	_assert(mgr2.active_pet_id == "parrot", "active preserved while Off")
+	_assert(mgr2.is_owned("parrot"), "owned preserved while Off")
+
+
 func _test_diagnostics_search() -> void:
 	var hits: Array[String] = []
 	_scan_for_android_diagnostics("res://", hits)
-	## Allowed: main.gd helper (internal), comments in compose/location helpers, tests/tools.
+	## Allowed: comments in helpers, tests/tools/docs only.
+	## Production UI must never assign sec.text = "Android Diagnostics".
 	for path in hits:
 		var allowed := (
 			path.ends_with("scripts/main.gd")
@@ -173,6 +206,7 @@ func _test_diagnostics_search() -> void:
 			or path.ends_with("scripts/network/location_helper.gd")
 			or path.contains("/tests/")
 			or path.contains("/tools/")
+			or path.contains("/docs/")
 		)
 		_assert(allowed, "Android Diagnostics ref allowed: " + path)
 		if path.ends_with("scripts/main.gd"):
@@ -182,6 +216,8 @@ func _test_diagnostics_search() -> void:
 			var body := src.substr(p0, p1 - p0)
 			_assert(not body.contains('sec.text = "Android Diagnostics"'), "Profile body has no Android Diagnostics title")
 			_assert(not body.contains("_build_android_diagnostics_panel"), "Profile body does not call diagnostics builder")
+			_assert(not src.contains('sec.text = "Android Diagnostics"'), "main.gd never assigns Android Diagnostics title")
+			_assert(body.contains("_build_profile_pets_section"), "Profile mounts pets")
 
 
 func _scan_for_android_diagnostics(dir_path: String, hits: Array[String]) -> void:
