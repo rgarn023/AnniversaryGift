@@ -52,16 +52,30 @@ godot --headless --path side_projects/ChestOfLoveNotes -s res://tests/test_demo_
 
 ## Build Android APK
 
-Private online builds require the gitignored client config (URL + publishable key only):
+**Always use the export wrapper.** Do not call `godot --export-debug` directly for private-online APKs.
+
+`config/backend_config.json` is gitignored. Raw Godot export skips staging and produces APKs that show **Backend is not configured** on device (this is what broke v70).
 
 ```bash
 cd side_projects/ChestOfLoveNotes
-python3 tools/prepare_backend_config.py   # uses SUPABASE_URL + SUPABASE_ANON_KEY
-python3 tools/verify_backend_config_for_export.py
-godot --headless --path . --export-debug "Android" build/ChestOfLoveNotes-backend-config-fixed-debug.apk
+# Requires SUPABASE_URL + SUPABASE_ANON_KEY in the environment.
+bash tools/export_android_apk.sh ChestOfLoveNotes-v71-android-backend-config-fix-debug.apk
 ```
 
-If `config/backend_config.json` is missing at export time, the APK packs no backend credentials and shows **Backend is not configured**.
+The wrapper:
+
+1. Writes gitignored `config/backend_config.json` from env (URL + publishable/anon key only)
+2. Hard-fails if that config is missing or still a placeholder
+3. Exports the Android debug APK
+4. Hard-fails if the APK does not pack a live `assets/config/backend_config.json`
+5. Validates the packed bytes against the same runtime load rules as `BackendConfig`
+
+Manual prepare/verify (debugging only; still finish with the wrapper):
+
+```bash
+python3 tools/prepare_backend_config.py
+python3 tools/verify_backend_config_for_export.py
+```
 
 ## Supabase
 

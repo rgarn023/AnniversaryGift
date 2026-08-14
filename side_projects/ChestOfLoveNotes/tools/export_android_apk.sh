@@ -1,14 +1,30 @@
 #!/usr/bin/env bash
-# Export a private-online Android debug APK with canonical Supabase client config packed.
+# MANDATORY Android debug export for Chest of Love Notes.
+#
+# Do NOT call `godot --export-debug` directly for private-online APKs.
+# Raw Godot export skips gitignored config/backend_config.json staging and
+# produces APKs that show "Backend is not configured" on device (v70 failure).
+#
+# This wrapper:
+#   1) stages live config from SUPABASE_URL + SUPABASE_ANON_KEY
+#   2) hard-fails if config is missing/placeholder
+#   3) installs Android plugins
+#   4) exports the APK
+#   5) hard-fails if packed APK lacks live backend_config.json
+#   6) validates exported runtime load rules against the packed bytes
+#
 # Never embeds service-role / DB / FCM secrets — only URL + publishable/anon key.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-APK_NAME="${1:-ChestOfLoveNotes-v67-profile-pet-persistence-fix-debug.apk}"
+APK_NAME="${1:-ChestOfLoveNotes-v71-android-backend-config-fix-debug.apk}"
 OUT="build/${APK_NAME}"
 GODOT="${GODOT:-/home/ubuntu/godot/Godot_v4.7.1-stable_linux.x86_64}"
+if [[ ! -x "$GODOT" && -x /tmp/godot/Godot_v4.7.1-stable_linux.x86_64 ]]; then
+  GODOT="/tmp/godot/Godot_v4.7.1-stable_linux.x86_64"
+fi
 export ANDROID_HOME="${ANDROID_HOME:-/home/ubuntu/Android/Sdk}"
 export ANDROID_SDK_ROOT="$ANDROID_HOME"
 export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-21-openjdk-amd64}"
@@ -17,6 +33,17 @@ export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$PATH"
 echo "== Prepare backend_config.json from env =="
 python3 tools/prepare_backend_config.py
 python3 tools/verify_backend_config_for_export.py
+
+if [[ ! -f config/backend_config.json ]]; then
+  echo "ERROR: config/backend_config.json missing after prepare — aborting export" >&2
+  exit 1
+fi
+SRC_CFG_SIZE=$(wc -c < config/backend_config.json | tr -d ' ')
+if [[ "${SRC_CFG_SIZE}" -lt 80 ]]; then
+  echo "ERROR: staged backend_config.json too small (${SRC_CFG_SIZE})" >&2
+  exit 1
+fi
+echo "OK: staged config/backend_config.json bytes=${SRC_CFG_SIZE}"
 
 echo "== Install Android plugins into gradle template =="
 if [[ ! -d android/build/src ]]; then
@@ -50,30 +77,17 @@ if [[ ! -f "$OUT" ]]; then
   exit 1
 fi
 
-echo "== Post-export: confirm backend_config packed (no secret print) =="
-# Avoid `grep -q` under pipefail (SIGPIPE from early close can false-fail).
-PACK_LIST="$(unzip -Z1 "$OUT")"
-if ! grep -F 'assets/config/backend_config.json' <<<"$PACK_LIST" >/dev/null; then
-  echo "ERROR: backend_config.json missing from APK — would show Backend is not configured on device" >&2
+echo "== Post-export hard gate: packed backend_config must be live =="
+python3 tools/verify_apk_packed_backend_config.py "$OUT"
+python3 tools/validate_exported_backend_runtime.py "$OUT"
+
+# Size parity: packed bytes should match staged source (Godot stores raw JSON).
+PACKED_SIZE=$(unzip -l "$OUT" | awk '/assets\/config\/backend_config\.json$/ {print $1; exit}')
+if [[ "${PACKED_SIZE:-0}" -ne "${SRC_CFG_SIZE}" ]]; then
+  echo "ERROR: packed config size (${PACKED_SIZE}) != staged source (${SRC_CFG_SIZE})" >&2
   exit 1
 fi
-if grep -F 'assets/config/backend_config.example.json' <<<"$PACK_LIST" >/dev/null \
-  && ! grep -F 'assets/config/backend_config.json' <<<"$PACK_LIST" >/dev/null; then
-  echo "ERROR: only example backend config packed" >&2
-  exit 1
-fi
-CFG_SIZE=$(unzip -l "$OUT" | awk '/assets\/config\/backend_config\.json$/ {print $1; exit}')
-if [[ "${CFG_SIZE:-0}" -lt 80 ]]; then
-  echo "ERROR: packed backend_config.json looks too small (${CFG_SIZE})" >&2
-  exit 1
-fi
-# Example is 137 bytes; live config must differ (presence of real URL length).
-EXAMPLE_SIZE=$(unzip -l "$OUT" | awk '/assets\/config\/backend_config\.example\.json$/ {print $1; exit}')
-if [[ -n "${EXAMPLE_SIZE:-}" && "${CFG_SIZE}" -eq "${EXAMPLE_SIZE}" ]]; then
-  echo "ERROR: packed backend_config.json size matches example — likely placeholder" >&2
-  exit 1
-fi
-echo "OK: packed backend_config.json bytes=${CFG_SIZE} (example=${EXAMPLE_SIZE:-n/a})"
+echo "OK: packed size matches staged source (${PACKED_SIZE} bytes)"
 
 echo "== Copy persistent artifacts =="
 mkdir -p /opt/cursor/artifacts
