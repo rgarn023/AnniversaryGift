@@ -8,7 +8,7 @@ config_version=5
 
 config/name="Chest of Love Notes"
 config/description="Send animated scroll love notes to friends with scheduled unlock times."
-config/version="0.1.68-parrot-roam-routing-flight-prep"
+config/version="0.1.69-pet-store-gift-delivery"
 run/main_scene="res://scenes/Main.tscn"
 config/features=PackedStringArray("4.7", "Mobile")
 ## Native/engine splash: black + representative still from approved GIF when present.

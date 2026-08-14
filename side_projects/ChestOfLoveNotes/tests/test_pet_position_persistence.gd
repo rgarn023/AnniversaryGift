@@ -37,6 +37,7 @@ func _fresh_mgr() -> PetManager:
 	wipe.save(PetManager.PERSIST_PATH)
 	var mgr := PetManager.new()
 	mgr.bootstrap()
+	mgr.grant_pet_from_claim("parrot", false)
 	mgr.select_profile_pet("parrot")
 	mgr.position_persist_write_count = 0
 	return mgr

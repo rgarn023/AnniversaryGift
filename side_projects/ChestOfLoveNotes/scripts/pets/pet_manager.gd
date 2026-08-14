@@ -1,17 +1,21 @@
 extends RefCounted
 class_name PetManager
 ## Owns pet catalog + local ownership/active-pet persistence + CHEST spawn.
-## Phase 1B-2C: free parrot visuals enabled when PET_VISUALS_ENABLED + artwork_ready.
-## Profile Pets: pet_enabled toggles CHEST spawn without clearing ownership/active_pet.
+## Ownership starts empty. Parrot is granted only after a completed pet delivery claim.
+## Existing owned Parrot from earlier builds is preserved (migration-safe).
 
 const PERSIST_PATH := "user://coln_pets.cfg"
 const SECTION_OWNED := "owned"
 const SECTION_ACTIVE := "active"
 const SECTION_SETTINGS := "settings"
 const SECTION_POSITION := "position"
+const SECTION_META := "meta"
 const KEY_IDS := "ids"
 const KEY_ID := "id"
 const KEY_ENABLED := "pet_enabled"
+const KEY_SCHEMA := "ownership_schema"
+## Schema 2: stop auto-granting default_unlocked pets on every load.
+const OWNERSHIP_SCHEMA_V2 := 2
 ## Normalized last-safe world position (fraction of usable viewport).
 const KEY_PARROT_X_NORM := "parrot_position_x_norm"
 const KEY_PARROT_Y_NORM := "parrot_position_y_norm"
@@ -23,13 +27,14 @@ var catalog: PetCatalog = PetCatalog.new()
 var owned_pet_ids: Array[String] = []
 var active_pet_id: String = ""
 ## When false, no PetActor on CHEST. Ownership + active_pet_id are preserved.
-var pet_enabled: bool = true
+var pet_enabled: bool = false
 var _actor: Node = null
 var _runtime_root: Node = null
 ## pet_id -> Vector2(x_norm, y_norm). Survives Off / CHEST leave / app restart.
 var _position_norm_by_pet: Dictionary = {}
 ## Counts ConfigFile position writes (tests assert not every frame).
 var position_persist_write_count: int = 0
+var ownership_schema: int = OWNERSHIP_SCHEMA_V2
 
 
 func bootstrap() -> void:
@@ -55,16 +60,17 @@ func _load_or_seed_persistence() -> void:
 	elif typeof(ids_var) == TYPE_STRING:
 		for id in str(ids_var).split(",", false):
 			_add_owned(id.strip_edges())
-	## Ensure catalog default-unlocked pets (parrot) are always owned.
-	for id in catalog.default_unlocked_ids():
-		_add_owned(id)
+	## MIGRATION SAFETY: never re-grant catalog defaults on every startup.
+	## Preserve parrot (or any pet) already present in owned list from earlier builds.
+	## Do NOT call catalog.default_unlocked_ids() to append ownership.
+	ownership_schema = int(cfg.get_value(SECTION_META, KEY_SCHEMA, 1))
 	active_pet_id = str(cfg.get_value(SECTION_ACTIVE, KEY_ID, "")).strip_edges()
 	if active_pet_id.is_empty() or not is_owned(active_pet_id) or not catalog.has_pet(active_pet_id):
 		active_pet_id = _default_active_id()
-	## Migration: v63 and earlier had no pet_enabled key. Missing ≠ Off.
-	## Only honor false when the key was explicitly persisted (user chose Off).
+	## Migration: v63 and earlier had no pet_enabled key. Missing ≠ Off when owned.
 	pet_enabled = _migrate_pet_enabled(cfg)
 	_load_positions(cfg)
+	ownership_schema = OWNERSHIP_SCHEMA_V2
 	save()
 
 
@@ -88,25 +94,23 @@ func _load_positions(cfg: ConfigFile) -> void:
 
 func _migrate_pet_enabled(cfg: ConfigFile) -> bool:
 	## Explicit stored false → Off. Explicit true → On.
-	## Missing key (pre-toggle / v63 saves): derive On for a valid owned active pet.
+	## Missing key: On only when an owned active pet already exists (legacy v63).
 	if cfg.has_section_key(SECTION_SETTINGS, KEY_ENABLED):
 		return bool(cfg.get_value(SECTION_SETTINGS, KEY_ENABLED))
-	## Key absent — upgrade path from physically verified v63 parrot runtime.
 	if active_pet_id == PetCatalog.PET_PARROT and is_owned(PetCatalog.PET_PARROT):
 		return true
 	if not active_pet_id.is_empty() and is_owned(active_pet_id) and catalog.has_pet(active_pet_id):
 		return true
-	## Fresh / empty active: still default On so free parrot appears after seed.
-	return true
+	## Clean / unowned: Off — no PetActor until claim + Profile enable.
+	return false
 
 
 func _seed_defaults() -> void:
+	## Fresh install: empty ownership. Store → send → claim grants pets.
 	owned_pet_ids.clear()
-	for id in catalog.default_unlocked_ids():
-		_add_owned(id)
-	active_pet_id = _default_active_id()
-	pet_enabled = true
-	## Fresh install: no saved position → default spawn on first CHEST entry.
+	active_pet_id = ""
+	pet_enabled = false
+	ownership_schema = OWNERSHIP_SCHEMA_V2
 
 
 func _default_active_id() -> String:
@@ -137,6 +141,7 @@ func save() -> void:
 	cfg.set_value(SECTION_OWNED, KEY_IDS, packed)
 	cfg.set_value(SECTION_ACTIVE, KEY_ID, active_pet_id)
 	cfg.set_value(SECTION_SETTINGS, KEY_ENABLED, pet_enabled)
+	cfg.set_value(SECTION_META, KEY_SCHEMA, ownership_schema)
 	_write_positions_into(cfg)
 	cfg.save(PERSIST_PATH)
 
@@ -245,13 +250,28 @@ func is_owned(pet_id: String) -> bool:
 	return owned_pet_ids.has(pet_id)
 
 
+func has_any_owned() -> bool:
+	return not owned_pet_ids.is_empty()
+
+
 func grant_pet(pet_id: String) -> bool:
-	## Future unlocks / gifts. Free parrot is already seeded.
+	## Legacy grant — keeps enabled state unchanged.
+	return grant_pet_from_claim(pet_id, false)
+
+
+func grant_pet_from_claim(pet_id: String, disable_until_profile: bool = true) -> bool:
+	## Idempotent ownership grant after a completed delivery claim.
 	if not catalog.has_pet(pet_id):
 		return false
+	var already := is_owned(pet_id)
 	_add_owned(pet_id)
-	if active_pet_id.is_empty():
+	if active_pet_id.is_empty() or not is_owned(active_pet_id):
 		active_pet_id = pet_id
+	## First claim: available under Profile, but Off until user enables.
+	if disable_until_profile and not already:
+		pet_enabled = false
+		if active_pet_id.is_empty():
+			active_pet_id = pet_id
 	save()
 	return true
 
@@ -283,7 +303,7 @@ func select_profile_pet(choice: String) -> bool:
 		## Save current safe position BEFORE despawn; never clear ownership/position.
 		persist_active_actor_position()
 		pet_enabled = false
-		## Preserve active_pet (default parrot) so re-enable restores selection.
+		## Preserve active_pet so re-enable restores selection.
 		if active_pet_id.is_empty() or not is_owned(active_pet_id) or not catalog.has_pet(active_pet_id):
 			active_pet_id = _default_active_id()
 		despawn_active_pet()
@@ -301,6 +321,8 @@ func select_profile_pet(choice: String) -> bool:
 
 func get_profile_pet_selection() -> String:
 	## UI selection key: "off" or active owned pet id.
+	if not has_any_owned():
+		return "off"
 	if not pet_enabled:
 		return "off"
 	if active_pet_id.is_empty() or not is_owned(active_pet_id) or not catalog.has_pet(active_pet_id):
@@ -357,6 +379,7 @@ func ensure_pet_runtime_root(chest_environment: Node) -> Node:
 
 func spawn_active_pet(parent: Node, force: bool = false) -> Node:
 	## Spawns at most one actor. Despawns any prior instance first.
+	## HARD RULE: no PetActor unless owned + enabled (unless force for tests).
 	if parent == null:
 		return null
 	if not force and not should_spawn_on_chest():
@@ -448,6 +471,15 @@ func count_actors_under(parent: Node) -> int:
 			n += 1
 		n += count_actors_under(c)
 	return n
+
+
+func clear_ownership_for_tests() -> void:
+	## DEV / test helper — never called from production UI.
+	owned_pet_ids.clear()
+	active_pet_id = ""
+	pet_enabled = false
+	despawn_active_pet()
+	save()
 
 
 func _purge_orphan_actors(parent: Node) -> void:

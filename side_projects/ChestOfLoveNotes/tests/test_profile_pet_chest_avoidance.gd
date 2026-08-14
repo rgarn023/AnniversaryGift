@@ -68,11 +68,11 @@ func _make_actor(seed: int = 42, vp: Vector2 = Vector2(390, 844)) -> PetActor:
 
 
 func _test_version() -> void:
-	_assert(BuildFlags.APP_VERSION_CODE == 68, "versionCode 68")
-	_assert(BuildFlags.APP_VERSION_NAME == "0.1.68-parrot-roam-routing-flight-prep", "versionName 68")
+	_assert(BuildFlags.APP_VERSION_CODE == 69, "versionCode 69")
+	_assert(BuildFlags.APP_VERSION_NAME == "0.1.69-pet-store-gift-delivery", "versionName 69")
 	var preset := FileAccess.get_file_as_string("res://export_presets.cfg")
-	_assert(preset.contains("version/code=68"), "export versionCode 68")
-	_assert(preset.contains("0.1.68-parrot-roam-routing-flight-prep"), "export versionName 68")
+	_assert(preset.contains("version/code=69"), "export versionCode 69")
+	_assert(preset.contains("0.1.69-pet-store-gift-delivery"), "export versionName 69")
 
 
 func _test_profile_pet_persistence() -> void:
@@ -82,8 +82,10 @@ func _test_profile_pet_persistence() -> void:
 
 	var mgr := PetManager.new()
 	mgr.bootstrap()
-	_assert(mgr.is_owned("parrot"), "parrot owned by default")
-	_assert(mgr.pet_enabled == true, "pets enabled by default")
+	mgr.grant_pet_from_claim("parrot", false)
+	mgr.select_profile_pet("parrot")
+	_assert(mgr.is_owned("parrot"), "parrot owned after grant")
+	_assert(mgr.pet_enabled == true, "pets enabled when selected")
 	_assert(mgr.active_pet_id == "parrot", "active parrot")
 	_assert(mgr.get_profile_pet_selection() == "parrot", "UI selection Parrot")
 	_assert(mgr.should_spawn_on_chest(), "spawn when Parrot on")
@@ -157,6 +159,7 @@ func _test_spawn_counts() -> void:
 	get_root().add_child(env)
 	var mgr := PetManager.new()
 	mgr.bootstrap()
+	mgr.grant_pet_from_claim("parrot", false)
 	var root := mgr.ensure_pet_runtime_root(env)
 
 	mgr.select_profile_pet("off")

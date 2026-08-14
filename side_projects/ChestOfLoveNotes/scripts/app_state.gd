@@ -13,8 +13,9 @@ var membership: MembershipService
 var profiles: ProfileService
 var scrolls: ScrollService
 var friends: FriendService
+var pet_gifts: PetGiftService
 var demo: DemoSession = DemoSession.new()
-## Pet catalog + local ownership. Phase 1B-1 spawns invisible runtime on CHEST.
+## Pet catalog + local ownership. Spawn only when owned + enabled.
 var pets: PetManager = PetManager.new()
 var reduced_motion: bool = false
 ## Ephemeral plaintext held only while a scroll viewer is open.
@@ -24,10 +25,12 @@ var cached_chest: Dictionary = {}
 var cached_saved: Dictionary = {}
 var cached_sent: Dictionary = {}
 var cached_friends: Dictionary = {}
+## Pending PET_GIFT deliveries for the current user (chest reward inbox).
+var cached_pending_pet_gifts: Array = []
 ## True after a successful get-friends / disconnect apply — sticky disk must not invent Person.
 var friends_backend_authoritative: bool = false
 ## Soft-refresh timestamps (unix) — avoid refetching on every tab tap.
-var cache_fetched_at: Dictionary = {"chest": 0, "friends": 0, "sent": 0, "profile": 0}
+var cache_fetched_at: Dictionary = {"chest": 0, "friends": 0, "sent": 0, "profile": 0, "pet_gifts": 0}
 const CACHE_SOFT_TTL_SEC := 45
 ## Last-known My Person identity (survives brief profile lookup failures).
 ## NEVER authority to recreate a pairing on the backend.
@@ -71,11 +74,14 @@ func _init() -> void:
 	profiles = ProfileService.new(api, tokens)
 	scrolls = ScrollService.new(api)
 	friends = FriendService.new(api)
+	pet_gifts = PetGiftService.new(api)
 
 
 func bootstrap() -> void:
-	## Local free-pet persistence; CHEST spawn gated by PetRuntimeConfig.
+	## Local pet persistence; CHEST spawn only when owned + enabled.
 	pets.bootstrap()
+	if pet_gifts == null:
+		pet_gifts = PetGiftService.new(api)
 	var is_release := OS.has_feature("release") or not OS.is_debug_build()
 	if config.load_config():
 		mode = Mode.ONLINE
@@ -91,6 +97,8 @@ func bootstrap() -> void:
 		return
 	mode = Mode.LOCAL_DEMO
 	demo.enable()
+	if pet_gifts != null:
+		pet_gifts.clear_local()
 
 
 func is_demo() -> bool:
@@ -122,9 +130,12 @@ func clear_private_caches() -> void:
 	cached_saved.clear()
 	cached_sent.clear()
 	cached_friends.clear()
+	cached_pending_pet_gifts.clear()
 	friends_backend_authoritative = false
 	hidden_sent_ids.clear()
-	cache_fetched_at = {"chest": 0, "friends": 0, "sent": 0, "profile": 0}
+	cache_fetched_at = {"chest": 0, "friends": 0, "sent": 0, "profile": 0, "pet_gifts": 0}
+	if pet_gifts != null:
+		pet_gifts.clear_local()
 	clear_last_person_cache()
 	relationship_debug = {
 		"last_event": "signed_out",
@@ -302,9 +313,47 @@ func mark_cache_fresh(key: String) -> void:
 
 func invalidate_cache(key: String = "") -> void:
 	if key.is_empty():
-		cache_fetched_at = {"chest": 0, "friends": 0, "sent": 0, "profile": 0}
+		cache_fetched_at = {"chest": 0, "friends": 0, "sent": 0, "profile": 0, "pet_gifts": 0}
 	else:
 		cache_fetched_at[key] = 0
+
+
+func current_user_id() -> String:
+	if is_demo() and demo != null:
+		return str(demo.current_user_id)
+	if tokens != null:
+		return str(tokens.user_id)
+	return ""
+
+
+func pending_pet_gift_count() -> int:
+	return cached_pending_pet_gifts.size()
+
+
+func first_pending_pet_gift() -> Dictionary:
+	if cached_pending_pet_gifts.is_empty():
+		return {}
+	var g: Variant = cached_pending_pet_gifts[0]
+	if typeof(g) == TYPE_DICTIONARY:
+		return (g as Dictionary).duplicate(true)
+	return {}
+
+
+func refresh_pending_pet_gifts() -> Dictionary:
+	## Loads recipient inbox. Demo uses local PetGiftService queue.
+	if pet_gifts == null:
+		cached_pending_pet_gifts = []
+		return {"ok": false, "gifts": []}
+	var use_local := is_demo() or not is_online()
+	var result: Dictionary = await pet_gifts.list_pending_pet_gifts(current_user_id(), use_local)
+	var gifts: Array = []
+	if bool(result.get("ok", false)):
+		var raw: Variant = result.get("gifts", [])
+		if typeof(raw) == TYPE_ARRAY:
+			gifts = raw
+	cached_pending_pet_gifts = gifts
+	mark_cache_fresh("pet_gifts")
+	return {"ok": bool(result.get("ok", false)), "gifts": gifts}
 
 
 func load_hidden_sent() -> void:

@@ -24,7 +24,7 @@ var _pending_restore: Dictionary = {}
 var _startup_done: bool = false
 ## FOCUS_IN + RESUMED can both fire; coalesce into one resume pass.
 var _resume_inflight: bool = false
-var _last_chest_counts: Dictionary = {"unread": 0, "locked": 0, "requests": 0}
+var _last_chest_counts: Dictionary = {"unread": 0, "locked": 0, "requests": 0, "pet_gifts": 0}
 var _auth_busy: bool = false
 var _chest_action_busy: bool = false
 var _friend_action_busy: bool = false
@@ -828,9 +828,12 @@ func _guard_private_chest() -> bool:
 
 
 func _counts_from_chest_cache() -> Dictionary:
-	var counts := {"unread": 0, "locked": 0, "requests": 0}
+	var counts := {"unread": 0, "locked": 0, "requests": 0, "pet_gifts": 0}
+	counts.pet_gifts = state.pending_pet_gift_count() if state != null else 0
 	if state.is_demo():
-		return state.demo.counts()
+		var demo_counts: Dictionary = state.demo.counts()
+		demo_counts["pet_gifts"] = counts.pet_gifts
+		return demo_counts
 	if not state.cached_chest.is_empty():
 		var cached: Dictionary = state.cached_chest.get("chest", {}) if typeof(state.cached_chest.get("chest")) == TYPE_DICTIONARY else {}
 		if not cached.is_empty():
@@ -840,7 +843,9 @@ func _counts_from_chest_cache() -> Dictionary:
 			counts.requests = cfr.size()
 			return counts
 	if not _last_chest_counts.is_empty():
-		return _last_chest_counts.duplicate()
+		var merged := _last_chest_counts.duplicate()
+		merged["pet_gifts"] = counts.pet_gifts
+		return merged
 	return counts
 
 
@@ -853,13 +858,13 @@ func _set_chest_environment_active(active: bool) -> void:
 
 
 func _mount_pet_runtime(chest_env: Node) -> void:
-	## CHEST integration: ChestEnvironment → PetRuntimeRoot → PetActor (free parrot).
-	## No pet inventory UI / shop / billing — parrot appears as the free active pet.
+	## CHEST integration: ChestEnvironment → PetRuntimeRoot → PetActor.
+	## HARD RULE: spawn only when owned + pet_enabled. No pre-ownership PetActor.
 	if state == null or state.pets == null:
 		return
 	if chest_env == null or not is_instance_valid(chest_env):
 		return
-	## Pets Off (or inactive): ensure no leftover PetActor on CHEST.
+	## Pets Off / unowned: ensure no leftover PetActor on CHEST.
 	if not state.pets.should_spawn_on_chest():
 		if state.pets.count_actors_under(chest_env) > 0:
 			state.pets.despawn_active_pet()
@@ -1014,9 +1019,10 @@ func _show_main_chest() -> void:
 	_chest.tapped.connect(_on_chest_tapped)
 	chest_area.add_child(_chest)
 	_chest.configure(LoveNotesChest.ChestState.READY, false)
-	_chest.set_unread_badge(int(counts.unread))
+	## Badge: unread scrolls + pending pet gifts (reward waiting).
+	_chest.set_unread_badge(int(counts.unread) + int(counts.get("pet_gifts", 0)))
 
-	## Phase 1B-2C: free parrot runtime under ChestEnvironment/PetRuntimeRoot.
+	## Owned+enabled pet only under ChestEnvironment/PetRuntimeRoot.
 	await _mount_pet_runtime(chest_env)
 
 	if state.is_demo():
@@ -1033,6 +1039,15 @@ func _show_main_chest() -> void:
 	_add_bottom_nav("chest")
 	_finish_nav_transition()
 	_log_nav_paint("main_chest", nav_t0)
+	## Refresh pending pet gifts (demo local or online RPC) for CHEST reward badge.
+	if state != null:
+		await state.refresh_pending_pet_gifts()
+		if _current_screen != "main_chest":
+			return
+		var with_pets := _counts_from_chest_cache()
+		_last_chest_counts = with_pets.duplicate()
+		if _chest != null and is_instance_valid(_chest):
+			_chest.set_unread_badge(int(with_pets.unread) + int(with_pets.get("pet_gifts", 0)))
 	## Async refresh when cache is stale (does not block first paint).
 	if state.is_online() and not state.cache_is_fresh("chest"):
 		var chest_result: Dictionary = await state.scrolls.get_chest()
@@ -1044,7 +1059,7 @@ func _show_main_chest() -> void:
 			var fresh := _counts_from_chest_cache()
 			_last_chest_counts = fresh.duplicate()
 			if _chest != null and is_instance_valid(_chest):
-				_chest.set_unread_badge(int(fresh.unread))
+				_chest.set_unread_badge(int(fresh.unread) + int(fresh.get("pet_gifts", 0)))
 		else:
 			var err := str(chest_result.get("error", "Could not refresh chest."))
 			if not err.is_empty():
@@ -1124,11 +1139,17 @@ func _on_chest_tapped() -> void:
 	## Pause pet runtime for any chest open / reward presentation.
 	if state != null and state.pets != null:
 		state.pets.pause_for_chest_reward()
-	var has_new := (
+	## Ensure pending pet gifts are current before deciding the reward branch.
+	if state != null:
+		await state.refresh_pending_pet_gifts()
+	var pending_gift: Dictionary = state.first_pending_pet_gift() if state != null else {}
+	var has_pet_gift := not pending_gift.is_empty()
+	var has_scroll_reward := (
 		int(_last_chest_counts.get("unread", 0)) > 0
 		or int(_last_chest_counts.get("requests", 0)) > 0
 		or (_dev_force_chest_scroll and OS.is_debug_build())
 	)
+	var has_new := has_pet_gift or has_scroll_reward
 	## Already open empty chest: pulse only — never replay full open.
 	if (
 		(
@@ -1156,10 +1177,16 @@ func _on_chest_tapped() -> void:
 	var dim_tw := create_tween()
 	dim_tw.tween_property(dim, "color:a", 0.45 if not state.reduced_motion else 0.28, 0.28)
 
-	## Always open — scroll emerges only when a new scroll exists.
-	await _chest.play_open_animation(state.reduced_motion, has_new)
+	## PET_GIFT branch: approved chest open WITHOUT baked scroll reveal.
+	if has_pet_gift:
+		await _chest.play_open_animation(state.reduced_motion, false)
+		await _present_pet_gift_delivery(pending_gift, dim)
+		return
 
-	if not has_new:
+	## Always open — scroll emerges only when a new scroll exists.
+	await _chest.play_open_animation(state.reduced_motion, has_scroll_reward)
+
+	if not has_scroll_reward:
 		if is_instance_valid(dim):
 			var undim := create_tween()
 			undim.tween_property(dim, "color:a", 0.0, 0.2)
@@ -4145,8 +4172,7 @@ func _android_diagnostics_public_token_available() -> bool:
 
 
 func _build_profile_pets_section() -> VBoxContainer:
-	## Profile Pets: single-choice Off / Parrot using Profile button styling.
-	## Avoid CheckBox — default Android checkbox icons are easy to miss on dark theme.
+	## Profile Pets: ownership-gated Off / Parrot + Pet Store entry.
 	var wrap := VBoxContainer.new()
 	wrap.name = "ProfilePetsSection"
 	wrap.add_theme_constant_override("separation", MobileUi.GAP_RELATED)
@@ -4163,6 +4189,24 @@ func _build_profile_pets_section() -> VBoxContainer:
 		missing.text = "Pets unavailable"
 		MobileUi.apply_label(missing, MobileUi.SIZE_HELPER, MobileUi.COLOR_SECONDARY, true)
 		wrap.add_child(missing)
+		return wrap
+
+	## Store entry — acquisition path (does not grant ownership by opening).
+	wrap.add_child(_make_button(ProductStrings.PET_STORE, func() -> void:
+		_show_pet_store()
+	, Vector2(0, MobileUi.font_touch(MobileUi.TOUCH_SECONDARY_H))))
+
+	if not pets.has_any_owned():
+		var empty := Label.new()
+		empty.name = "ProfilePetsEmpty"
+		empty.text = ProductStrings.PET_NO_PETS_YET
+		MobileUi.apply_label(empty, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY, true)
+		wrap.add_child(empty)
+		var visit := Label.new()
+		visit.name = "ProfilePetsVisitStoreHint"
+		visit.text = "Get a free Parrot from the Pet Store, send it, then open your chest."
+		MobileUi.apply_label(visit, MobileUi.SIZE_HELPER, MobileUi.COLOR_HELPER, true)
+		wrap.add_child(visit)
 		return wrap
 
 	var selection := pets.get_profile_pet_selection()
@@ -4209,8 +4253,7 @@ func _build_profile_pets_section() -> VBoxContainer:
 		btn.add_theme_font_size_override("font_size", MobileUi.font(MobileUi.SIZE_BUTTON))
 		btn.set_meta("pet_choice_id", choice_id)
 		var selected := selection == choice_id
-		## No-signal init — prevents ButtonGroup from firing Off during construction
-		## (which would silently set pet_enabled=false on every Profile open).
+		## No-signal init — prevents ButtonGroup from firing Off during construction.
 		btn.set_pressed_no_signal(selected)
 		apply_choice_visual.call(btn, choice_id, selected)
 		btn.toggled.connect(func(on: bool) -> void:
@@ -4227,13 +4270,314 @@ func _build_profile_pets_section() -> VBoxContainer:
 		choice_buttons[choice_id] = btn
 		return btn
 
-	## Build both choices before add_child so ButtonGroup never briefly has only Off.
 	var off_btn: Button = make_choice.call("off", "ProfilePetChoiceOff")
-	var parrot_btn: Button = make_choice.call(PetCatalog.PET_PARROT, "ProfilePetChoiceParrot")
 	wrap.add_child(off_btn)
-	## Parrot is owned + FREE — always offered on Profile (catalog default unlock).
-	wrap.add_child(parrot_btn)
+	## Only show Parrot when actually owned (claimed delivery).
+	if pets.is_owned(PetCatalog.PET_PARROT):
+		var parrot_btn: Button = make_choice.call(PetCatalog.PET_PARROT, "ProfilePetChoiceParrot")
+		wrap.add_child(parrot_btn)
 	return wrap
+
+
+func _show_pet_store() -> void:
+	## Profile → Pet Store. Opening does NOT grant ownership.
+	if not _guard_private_chest():
+		return
+	_current_screen = "pet_store"
+	_begin_nav_transition()
+	var root := _make_screen_root(_nav_content_inset())
+	var scroll := _wire_scroll(ScrollContainer.new())
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.clip_contents = true
+	root.add_child(scroll)
+	var col := VBoxContainer.new()
+	col.name = "PetStoreRoot"
+	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	col.add_theme_constant_override("separation", MobileUi.GAP_CARDS)
+	scroll.add_child(col)
+	MobileUi.enable_touch_scroll_on_tree(col)
+	col.add_child(MobileUi.make_page_title(ProductStrings.PET_STORE, _title_font()))
+
+	var intro := Label.new()
+	intro.name = "PetStoreIntro"
+	intro.text = "Send a free companion through your chest. Opening the store does not unlock a pet."
+	MobileUi.apply_label(intro, MobileUi.SIZE_HELPER, MobileUi.COLOR_HELPER, true)
+	col.add_child(intro)
+
+	var pets := state.pets if state != null else null
+	var defs: Array[PetDefinition] = []
+	if pets != null:
+		defs = pets.catalog.store_definitions()
+	for def in defs:
+		col.add_child(_build_pet_store_card(def))
+
+	col.add_child(_make_button("Back", _show_profile, Vector2(0, MobileUi.TOUCH_SECONDARY_H)))
+	if state.membership.is_member or state.is_demo():
+		_add_bottom_nav("profile")
+	_finish_nav_transition()
+
+
+func _build_pet_store_card(def: PetDefinition) -> VBoxContainer:
+	var card := VBoxContainer.new()
+	card.name = "PetStoreCard_%s" % def.id
+	card.add_theme_constant_override("separation", MobileUi.GAP_RELATED)
+	var panel := PanelContainer.new()
+	panel.name = "PetStoreCardPanel"
+	var style := StyleBoxFlat.new()
+	style.bg_color = MobileUi.COLOR_CARD
+	style.border_color = MobileUi.COLOR_CARD_BORDER
+	style.set_border_width_all(1)
+	style.set_corner_radius_all(16)
+	style.content_margin_left = 16
+	style.content_margin_right = 16
+	style.content_margin_top = 14
+	style.content_margin_bottom = 14
+	panel.add_theme_stylebox_override("panel", style)
+	card.add_child(panel)
+	var inner := VBoxContainer.new()
+	inner.add_theme_constant_override("separation", 8)
+	panel.add_child(inner)
+
+	var title_row := HBoxContainer.new()
+	title_row.add_theme_constant_override("separation", 12)
+	inner.add_child(title_row)
+
+	## Approved idle frame as store thumbnail (no new artwork).
+	var thumb := TextureRect.new()
+	thumb.name = "PetStoreThumb"
+	thumb.custom_minimum_size = Vector2(72, 72)
+	thumb.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	thumb.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	var idle0 := "res://assets/pets/parrot/idle/parrot_idle_00.png"
+	if def.id == PetCatalog.PET_PARROT and ResourceLoader.exists(idle0):
+		thumb.texture = load(idle0) as Texture2D
+	title_row.add_child(thumb)
+
+	var text_col := VBoxContainer.new()
+	text_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title_row.add_child(text_col)
+	var name_l := Label.new()
+	name_l.name = "PetStoreName"
+	name_l.text = def.display_name
+	MobileUi.apply_label(name_l, MobileUi.SIZE_MAJOR_HEADING, MobileUi.COLOR_TITLE)
+	text_col.add_child(name_l)
+	var price_l := Label.new()
+	price_l.name = "PetStorePrice"
+	price_l.text = "FREE" if def.is_free() else def.price_type
+	MobileUi.apply_label(price_l, MobileUi.SIZE_SECTION, MobileUi.COLOR_NAV_SELECTED)
+	text_col.add_child(price_l)
+
+	var desc := Label.new()
+	desc.name = "PetStoreDescription"
+	desc.text = def.description if not def.description.is_empty() else "A cheerful companion."
+	MobileUi.apply_label(desc, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY, true)
+	inner.add_child(desc)
+
+	var owned := state != null and state.pets != null and state.pets.is_owned(def.id)
+	if owned:
+		var owned_l := Label.new()
+		owned_l.name = "PetStoreOwnedBadge"
+		owned_l.text = "Owned — you can still send one to your Person."
+		MobileUi.apply_label(owned_l, MobileUi.SIZE_HELPER, MobileUi.COLOR_HELPER, true)
+		inner.add_child(owned_l)
+
+	var action := _make_button(ProductStrings.PET_STORE_GET_FREE, func() -> void:
+		_show_pet_recipient_picker(def.id)
+	, Vector2(0, MobileUi.TOUCH_CTA_H))
+	action.name = "PetStoreGetFree"
+	inner.add_child(action)
+	return card
+
+
+func _show_pet_recipient_picker(pet_id: String) -> void:
+	## After Free acquisition entitlement (immediate for FREE) → choose recipient.
+	if not _guard_private_chest():
+		return
+	_current_screen = "pet_recipient_picker"
+	_begin_nav_transition()
+	var root := _make_screen_root(_nav_content_inset())
+	var col := VBoxContainer.new()
+	col.name = "PetRecipientPickerRoot"
+	col.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	col.add_theme_constant_override("separation", MobileUi.GAP_CARDS)
+	root.add_child(col)
+	col.add_child(MobileUi.make_page_title("Send Parrot", _title_font()))
+
+	var hint := Label.new()
+	hint.name = "PetRecipientHint"
+	hint.text = "Choose who receives this gift. Ownership is granted only after they open their chest."
+	MobileUi.apply_label(hint, MobileUi.SIZE_HELPER, MobileUi.COLOR_HELPER, true)
+	col.add_child(hint)
+
+	var self_btn := _make_button(ProductStrings.PET_SEND_TO_SELF, func() -> void:
+		await _send_pet_gift_to(pet_id, PetGiftService.RECIPIENT_SELF)
+	, Vector2(0, MobileUi.TOUCH_CTA_H))
+	self_btn.name = "PetRecipientMyself"
+	col.add_child(self_btn)
+
+	var person := _person_from_friends_cache()
+	var has_person := not person.is_empty() and not str(person.get("id", "")).is_empty()
+	var person_btn := _make_button(ProductStrings.PET_SEND_TO_PERSON, func() -> void:
+		if not has_person:
+			_show_toast(ProductStrings.PET_CONNECT_PERSON_FIRST)
+			return
+		await _send_pet_gift_to(pet_id, PetGiftService.RECIPIENT_PERSON)
+	, Vector2(0, MobileUi.TOUCH_CTA_H))
+	person_btn.name = "PetRecipientMyPerson"
+	person_btn.disabled = not has_person
+	col.add_child(person_btn)
+	if not has_person:
+		var need := Label.new()
+		need.name = "PetRecipientNeedPerson"
+		need.text = ProductStrings.PET_CONNECT_PERSON_FIRST
+		MobileUi.apply_label(need, MobileUi.SIZE_HELPER, MobileUi.COLOR_DANGER, true)
+		col.add_child(need)
+
+	col.add_child(_make_button("Back", _show_pet_store, Vector2(0, MobileUi.TOUCH_SECONDARY_H)))
+	if state.membership.is_member or state.is_demo():
+		_add_bottom_nav("profile")
+	_finish_nav_transition()
+
+
+func _send_pet_gift_to(pet_id: String, recipient_mode: String) -> void:
+	## Creates a pending delivery — does NOT grant ownership to anyone yet.
+	if state == null or state.pet_gifts == null:
+		_show_toast("Pet gifts unavailable.")
+		return
+	var sender_id := state.current_user_id()
+	if sender_id.is_empty():
+		_show_toast("Sign in to send a pet.")
+		return
+	var recipient_id := sender_id
+	if recipient_mode == PetGiftService.RECIPIENT_PERSON:
+		var person := _person_from_friends_cache()
+		recipient_id = str(person.get("id", "")).strip_edges()
+		if recipient_id.is_empty():
+			_show_toast(ProductStrings.PET_CONNECT_PERSON_FIRST)
+			return
+	var use_local := state.is_demo() or not state.is_online()
+	var result: Dictionary = await state.pet_gifts.send_pet_gift(pet_id, sender_id, recipient_id, use_local)
+	if not bool(result.get("ok", false)):
+		_show_toast(str(result.get("error", "Could not send pet gift.")))
+		return
+	if bool(result.get("duplicate", false)) or str(result.get("code", "")) == "already_pending":
+		_show_toast(ProductStrings.PET_ALREADY_PENDING)
+	elif recipient_mode == PetGiftService.RECIPIENT_SELF:
+		_show_toast(ProductStrings.PET_SENT_SELF)
+	else:
+		_show_toast(ProductStrings.PET_SENT_PERSON)
+	## Refresh inbox if self-send so CHEST badge updates.
+	await state.refresh_pending_pet_gifts()
+	## Sender must NOT gain ownership from sending to My Person.
+	if recipient_mode == PetGiftService.RECIPIENT_PERSON:
+		pass
+	_show_main_chest()
+
+
+func _present_pet_gift_delivery(gift: Dictionary, dim: ColorRect) -> void:
+	## Temporary presentation: approved parrot art + join message (no scroll reveal).
+	## Dedicated chest-emergence animation artwork is still needed for polish.
+	var pet_id := str(gift.get("pet_id", PetCatalog.PET_PARROT))
+	var delivery_id := str(gift.get("delivery_id", gift.get("id", "")))
+	var display := str(gift.get("pet_display_name", "Parrot"))
+	if display.is_empty():
+		display = "Parrot"
+
+	var overlay := Control.new()
+	overlay.name = "PetGiftDeliveryOverlay"
+	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	overlay.z_index = 20
+	_screen_host.add_child(overlay)
+
+	var panel := PanelContainer.new()
+	panel.set_anchors_preset(Control.PRESET_CENTER)
+	panel.custom_minimum_size = Vector2(300, 340)
+	panel.position = Vector2(-150, -180)
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.10, 0.06, 0.16, 0.96)
+	style.border_color = MobileUi.COLOR_NAV_SELECTED
+	style.set_border_width_all(2)
+	style.set_corner_radius_all(18)
+	style.content_margin_left = 18
+	style.content_margin_right = 18
+	style.content_margin_top = 18
+	style.content_margin_bottom = 18
+	panel.add_theme_stylebox_override("panel", style)
+	overlay.add_child(panel)
+
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 12)
+	panel.add_child(col)
+
+	var art := TextureRect.new()
+	art.name = "PetGiftArt"
+	art.custom_minimum_size = Vector2(160, 160)
+	art.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	art.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	var idle0 := "res://assets/pets/parrot/idle/parrot_idle_00.png"
+	if ResourceLoader.exists(idle0):
+		art.texture = load(idle0) as Texture2D
+	art.modulate.a = 0.0
+	col.add_child(art)
+
+	var msg := Label.new()
+	msg.name = "PetGiftMessage"
+	msg.text = ProductStrings.PET_JOINED_FMT % display
+	msg.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	MobileUi.apply_label(msg, MobileUi.SIZE_MAJOR_HEADING, MobileUi.COLOR_TITLE, true)
+	msg.modulate.a = 0.0
+	col.add_child(msg)
+
+	var sub := Label.new()
+	sub.text = "Enable it anytime under Profile → Pets."
+	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	MobileUi.apply_label(sub, MobileUi.SIZE_HELPER, MobileUi.COLOR_HELPER, true)
+	sub.modulate.a = 0.0
+	col.add_child(sub)
+
+	## Claim BEFORE celebrating so ownership is safe; idempotent on retry.
+	var use_local := state.is_demo() or not state.is_online()
+	var claim: Dictionary = await state.pet_gifts.claim_pet_gift(
+		delivery_id,
+		state.current_user_id(),
+		use_local
+	)
+	if bool(claim.get("ok", false)):
+		var claimed_pet := str(claim.get("pet_id", pet_id))
+		state.pets.grant_pet_from_claim(claimed_pet, true)
+		await state.refresh_pending_pet_gifts()
+	else:
+		msg.text = "Could not claim pet gift."
+		MobileUi.apply_label(msg, MobileUi.SIZE_BODY, MobileUi.COLOR_DANGER, true)
+
+	var tw := create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(art, "modulate:a", 1.0, 0.45 if not state.reduced_motion else 0.15)
+	tw.tween_property(msg, "modulate:a", 1.0, 0.45 if not state.reduced_motion else 0.15).set_delay(0.12)
+	tw.tween_property(sub, "modulate:a", 1.0, 0.35 if not state.reduced_motion else 0.1).set_delay(0.2)
+	await tw.finished
+	await get_tree().create_timer(1.35 if not state.reduced_motion else 0.55).timeout
+
+	if is_instance_valid(dim):
+		var fade := create_tween()
+		fade.tween_property(dim, "color:a", 0.0, 0.25)
+		await fade.finished
+		dim.queue_free()
+	if is_instance_valid(overlay):
+		overlay.queue_free()
+	_chest_action_busy = false
+	if _chest != null and is_instance_valid(_chest):
+		_chest.set_interaction_enabled(true)
+	## Stay on CHEST — pet remains Off until Profile enable (by design).
+	if state != null and state.pets != null:
+		state.pets.resume_after_chest_reward()
+	## Refresh badge counts after claim.
+	var counts := _counts_from_chest_cache()
+	_last_chest_counts = counts.duplicate()
+	if _chest != null and is_instance_valid(_chest):
+		_chest.set_unread_badge(int(counts.unread) + int(counts.get("pet_gifts", 0)))
+	_show_toast(ProductStrings.PET_JOINED_FMT % display)
 
 
 func _build_android_diagnostics_panel() -> VBoxContainer:

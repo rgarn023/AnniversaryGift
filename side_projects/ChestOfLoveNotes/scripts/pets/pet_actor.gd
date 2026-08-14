@@ -36,6 +36,9 @@ var _flight_path: PetFlightPath = null
 var _last_safe_ground: Vector2 = Vector2.ZERO
 var _flight_phase_timer: float = 0.0
 var _intended_landing: Vector2 = Vector2.ZERO
+## Light recent-action memory to reduce immediate repetition (categories).
+var _recent_behaviors: Array[String] = []
+const _RECENT_BEHAVIOR_CAP := 4
 
 var _pet_visual: Node2D = null
 var _animated_sprite: AnimatedSprite2D = null
@@ -709,17 +712,74 @@ func _tick_idle(delta: float) -> void:
 	if PetRuntimeConfig.PET_FLIGHT_ENABLED and PetRuntimeConfig.flight_behavior_allowed():
 		if rng.randf() < PetRuntimeConfig.FLIGHT_IDLE_CHANCE:
 			if _begin_takeoff():
+				_remember_behavior("flight")
 				return
-	if rng.randf() < PetRuntimeConfig.IDLE_TO_ROAM_WEIGHT:
-		_begin_roam()
-	else:
-		_begin_chest_interaction()
+	_pick_ground_behavior()
 
 
-func _begin_roam() -> void:
+func _pick_ground_behavior() -> void:
+	## Weighted: short 35% / medium 30% / cross 20% / chest 10% / long idle 5%.
+	## Softly de-weight the most recent category to reduce immediate repeats.
+	var weights := {
+		"short_roam": PetRuntimeConfig.BEHAVIOR_SHORT_ROAM_WEIGHT,
+		"medium_roam": PetRuntimeConfig.BEHAVIOR_MEDIUM_ROAM_WEIGHT,
+		"cross_roam": PetRuntimeConfig.BEHAVIOR_CROSS_ROAM_WEIGHT,
+		"chest": PetRuntimeConfig.BEHAVIOR_CHEST_WEIGHT,
+		"long_idle": PetRuntimeConfig.BEHAVIOR_LONG_IDLE_WEIGHT,
+	}
+	if not _recent_behaviors.is_empty():
+		var last := _recent_behaviors[_recent_behaviors.size() - 1]
+		if weights.has(last):
+			weights[last] = maxf(0.02, float(weights[last]) * 0.35)
+	var total := 0.0
+	for k in weights.keys():
+		total += float(weights[k])
+	var roll := rng.randf() * maxf(total, 0.001)
+	var acc := 0.0
+	var choice := "short_roam"
+	for k in ["short_roam", "medium_roam", "cross_roam", "chest", "long_idle"]:
+		acc += float(weights[k])
+		if roll <= acc:
+			choice = k
+			break
+	_remember_behavior(choice)
+	match choice:
+		"chest":
+			_begin_chest_interaction()
+		"long_idle":
+			_begin_long_idle()
+		"medium_roam":
+			_begin_roam("medium")
+		"cross_roam":
+			_begin_roam("cross")
+		_:
+			_begin_roam("short")
+
+
+func _remember_behavior(kind: String) -> void:
+	_recent_behaviors.append(kind)
+	while _recent_behaviors.size() > _RECENT_BEHAVIOR_CAP:
+		_recent_behaviors.pop_front()
+
+
+func _begin_long_idle() -> void:
+	target_position = position
+	_clear_path()
 	_chest_anim_playing = false
-	## Region-balanced target + waypoint routing around chest (no left trap).
-	var dest := safe_area.random_roam_target(rng, position)
+	_flight_path = null
+	_state_timer = rng.randf_range(
+		PetRuntimeConfig.LONG_IDLE_MIN_SEC,
+		PetRuntimeConfig.LONG_IDLE_MAX_SEC
+	)
+	_last_safe_ground = safe_area.ensure_safe_position(position, rng)
+	transition_to(PetState.Kind.IDLE)
+	_commit_safe_position()
+
+
+func _begin_roam(roam_kind: String = "medium") -> void:
+	_chest_anim_playing = false
+	## Region-balanced target + waypoint routing around chest (LEFT ↔ RIGHT).
+	var dest := safe_area.random_roam_target(rng, position, roam_kind)
 	if not _begin_path_to(dest, PetState.Kind.ROAM):
 		## Safe idle fallback — never walk a blocked straight segment.
 		_begin_idle()

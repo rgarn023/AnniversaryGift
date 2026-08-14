@@ -86,15 +86,21 @@ Expected:
 
 ---
 
-## PHASE 2 — My Person pet gifting + chest delivery
+## PHASE 2 — Pet Store + My Person / Self gift delivery — **IN PROGRESS (v69)**
 
-**Goal:** Gift pets to My Person; receive via chest-style delivery.
+**Goal:** Free Parrot validates the full store → send → chest claim → ownership pipeline.
 
-Expected:
+Delivered / in this pass:
 
-- Future reward type: `PET_GIFT` (not implemented yet)
-- Delivery animation distinct from scroll reveal (do not break scroll path)
-- Pairing / My Person flows extended carefully; disconnect semantics unchanged
+- Catalog: parrot `FREE`, `available_in_store`, **not** `default_unlocked`
+- Pet Store (Profile entry) + Myself / My Person recipient picker
+- Supabase `pet_catalog` / `pet_deliveries` / `user_pet_ownership` + RPCs
+- CHEST `PET_GIFT` reward branch (no baked scroll; claim grants ownership)
+- Profile Pets gated on ownership; Off/On preserves position
+- No PetActor before owned+enabled
+- Docs: `docs/PET_STORE_GIFT_DELIVERY.md`
+
+See also: `docs/PET_STORE_GIFT_DELIVERY.md`
 
 ---
 
@@ -104,28 +110,22 @@ Expected:
 
 Expected:
 
-- BillingClient / SKUs / receipts / entitlements
+- BillingClient / SKUs / receipts / entitlements inserted **before** recipient selection
 - Paid catalog entries (none yet)
 - Free parrot remains free and must not depend on billing
 
 ---
 
-## Architecture sketch (through 1B-2A)
+## Architecture sketch (through store/gift)
 
 ```
-PetManager
-  ├─ catalog (PetDefinition[])
-  ├─ owned_pet_ids
-  ├─ active_pet_id
-  ├─ load/save user://coln_pets.cfg
-  └─ spawn → PetRuntimeRoot → PetActor (invisible)
-
-PetActor
-  ├─ state machine: IDLE / ROAM / CHEST_INTERACTION / TAP_REACTION
-  ├─ PetAnimationLoader (manifest; artwork_ready=false until 1B-2B)
-  └─ PetVisual (hidden)
-       ├─ PetShadow (reserved)
-       └─ AnimatedSprite2D (no frames until art exists)
+Pet Store (FREE entitlement)
+  → recipient (self | My Person)
+  → pet_deliveries (pending)
+  → CHEST PET_GIFT claim
+  → user_pet_ownership + local PetManager
+  → Profile Off/Parrot → PetActor
 ```
 
-Persistence is local for the free test pet. Do not add backend dependence for parrot ownership in early phases.
+Persistence is local for enable/position; cross-user delivery is backend-backed.
+

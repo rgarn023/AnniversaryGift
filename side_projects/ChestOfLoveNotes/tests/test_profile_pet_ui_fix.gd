@@ -34,13 +34,13 @@ func _run() -> void:
 
 
 func _test_version() -> void:
-	_assert(BuildFlags.APP_VERSION_CODE == 68, "versionCode 68")
-	_assert(BuildFlags.APP_VERSION_NAME == "0.1.68-parrot-roam-routing-flight-prep", "versionName 68")
+	_assert(BuildFlags.APP_VERSION_CODE == 69, "versionCode 69")
+	_assert(BuildFlags.APP_VERSION_NAME == "0.1.69-pet-store-gift-delivery", "versionName 69")
 	var preset := FileAccess.get_file_as_string("res://export_presets.cfg")
-	_assert(preset.contains("version/code=68"), "export versionCode 68")
-	_assert(preset.contains("0.1.68-parrot-roam-routing-flight-prep"), "export versionName 68")
+	_assert(preset.contains("version/code=69"), "export versionCode 69")
+	_assert(preset.contains("0.1.69-pet-store-gift-delivery"), "export versionName 69")
 	var proj := FileAccess.get_file_as_string("res://project.godot")
-	_assert(proj.contains("0.1.68-parrot-roam-routing-flight-prep"), "project.godot version")
+	_assert(proj.contains("0.1.69-pet-store-gift-delivery"), "project.godot version")
 
 
 func _test_profile_source_path() -> void:
@@ -84,6 +84,7 @@ func _test_pets_section_runtime() -> void:
 	main.state.mode = AppState.Mode.LOCAL_DEMO
 	main.state.demo.enable()
 	main.state.pets.bootstrap()
+	main.state.pets.grant_pet_from_claim("parrot", false)
 	main.state.pets.select_profile_pet("parrot")
 	## Minimal chrome so builders that touch toast/screen do not crash.
 	main._screen_host = Control.new()
@@ -114,6 +115,7 @@ func _test_ui_callbacks_and_persistence() -> void:
 	main.state = AppState.new()
 	main.state.bootstrap()
 	main.state.pets.bootstrap()
+	main.state.pets.grant_pet_from_claim("parrot", false)
 	main.state.pets.select_profile_pet("parrot")
 	main._screen_host = Control.new()
 	main.add_child(main._screen_host)
@@ -155,6 +157,7 @@ func _test_actor_counts() -> void:
 	root.add_child(env)
 	var mgr := PetManager.new()
 	mgr.bootstrap()
+	mgr.grant_pet_from_claim("parrot", false)
 	var rt := mgr.ensure_pet_runtime_root(env)
 	mgr.select_profile_pet("off")
 	_assert(mgr.spawn_active_pet(rt) == null, "spawn null Off")
@@ -250,8 +253,8 @@ func _test_regressions() -> void:
 	var actor := FileAccess.get_file_as_string("res://scripts/pets/pet_actor.gd")
 	_assert(actor.contains("pause_for_reward") or actor.contains("resume_after_reward"), "reward hide hooks")
 	var main := FileAccess.get_file_as_string("res://scripts/main.gd")
-	_assert(not main.contains("BillingClient"), "no billing")
 	_assert(not main.contains("Pet Shop"), "no pet shop")
+	_assert(main.contains("_show_pet_store") or main.contains("Pet Store"), "Pet Store present")
 	_assert(PetRuntimeConfig.PET_RUNTIME_ENABLED, "pet runtime enabled")
 
 

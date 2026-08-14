@@ -172,10 +172,12 @@ func _test_reward_pause_resume() -> void:
 	actor.set_reward_hide_requested(false)
 	var mgr := PetManager.new()
 	mgr.bootstrap()
+	mgr.grant_pet_from_claim("parrot", false)
+	mgr.select_profile_pet("parrot")
 	var root := Node2D.new()
 	get_root().add_child(root)
 	var spawned := mgr.spawn_active_pet(root)
-	_assert(spawned != null, "manager spawns when runtime enabled")
+	_assert(spawned != null, "manager spawns when owned+enabled")
 	mgr.pause_for_chest_reward()
 	var a := mgr.get_spawned_actor() as PetActor
 	_assert(a != null and a.is_paused(), "manager pause forwards")
@@ -200,8 +202,12 @@ func _test_tap_reaction() -> void:
 
 
 func _test_duplicate_spawn_protection() -> void:
+	var wipe := ConfigFile.new()
+	wipe.save(PetManager.PERSIST_PATH)
 	var mgr := PetManager.new()
 	mgr.bootstrap()
+	mgr.grant_pet_from_claim("parrot", false)
+	mgr.select_profile_pet("parrot")
 	var env := Control.new()
 	env.name = "ChestEnvironment"
 	get_root().add_child(env)
@@ -230,8 +236,12 @@ func _test_duplicate_spawn_protection() -> void:
 
 
 func _test_persistence_and_fallback() -> void:
+	var wipe := ConfigFile.new()
+	wipe.save(PetManager.PERSIST_PATH)
 	var mgr := PetManager.new()
 	mgr.bootstrap()
+	mgr.grant_pet_from_claim("parrot", false)
+	mgr.select_profile_pet("parrot")
 	_assert(mgr.is_owned("parrot"), "parrot owned")
 	_assert(mgr.active_pet_id == "parrot", "active parrot")
 	_assert(mgr.get_active_definition() != null and mgr.get_active_definition().is_free(), "parrot FREE")
@@ -297,7 +307,7 @@ func _test_main_mount_wiring() -> void:
 	_assert(main.contains("resume_after_chest_reward"), "main resumes pet after empty open")
 	_assert(main.contains("notify_chest_screen_cleared"), "main clears pet on leave")
 	_assert(not main.contains("PetCollectionScreen") and not main.contains("open_pet_collection"), "no Pet Collection UI")
-	_assert(not main.contains("Pet Shop"), "no Pet Shop UI")
+	_assert(main.contains("_show_pet_store") or main.contains("Pet Store"), "Pet Store present")
 	## No placeholder draw calls introduced for pets in main.
 	_assert(not main.contains("placeholder parrot"), "no placeholder parrot text")
 
@@ -321,10 +331,10 @@ func _test_regression_locked_systems() -> void:
 	_assert(friends.contains("disconnect_my_person"), "disconnect path present")
 	_assert(disconnect_fn.contains("record_my_person_pair_end"), "pair end recording intact")
 	_assert(mig.contains("my_person_pair_ends"), "pair ends table intact")
-	_assert(flags.contains("APP_VERSION_CODE := 67"), "versionCode 63")
-	_assert(flags.contains("0.1.67-profile-pet-persistence-fix"), "versionName 67")
+	_assert(flags.contains("APP_VERSION_CODE := 69"), "versionCode 69")
+	_assert(flags.contains("0.1.69-pet-store-gift-delivery"), "versionName 69")
 	var catalog := FileAccess.get_file_as_string("res://config/pets/catalog.json")
 	_assert(catalog.contains("\"unlock_type\": \"FREE\""), "parrot remains FREE")
-	_assert(catalog.contains("\"default_unlocked\": true"), "parrot default unlocked")
+	_assert(catalog.contains("\"default_unlocked\": false"), "parrot not auto-unlocked")
 	_assert(not catalog.contains("sku"), "no SKU")
-	_assert(not catalog.contains("price"), "no price")
+	_assert(catalog.contains("\"price_type\": \"FREE\""), "price_type FREE")

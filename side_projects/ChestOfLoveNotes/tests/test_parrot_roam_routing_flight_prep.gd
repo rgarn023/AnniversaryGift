@@ -93,13 +93,13 @@ func _simulate_path(actor: PetActor, max_frames: int = 400) -> bool:
 
 
 func _test_version() -> void:
-	_assert(BuildFlags.APP_VERSION_CODE == 68, "versionCode 68")
-	_assert(BuildFlags.APP_VERSION_NAME == "0.1.68-parrot-roam-routing-flight-prep", "versionName 68")
+	_assert(BuildFlags.APP_VERSION_CODE == 69, "versionCode 69")
+	_assert(BuildFlags.APP_VERSION_NAME == "0.1.69-pet-store-gift-delivery", "versionName 69")
 	var preset := FileAccess.get_file_as_string("res://export_presets.cfg")
-	_assert(preset.contains("version/code=68"), "export versionCode 68")
-	_assert(preset.contains("0.1.68-parrot-roam-routing-flight-prep"), "export versionName 68")
+	_assert(preset.contains("version/code=69"), "export versionCode 69")
+	_assert(preset.contains("0.1.69-pet-store-gift-delivery"), "export versionName 69")
 	var proj := FileAccess.get_file_as_string("res://project.godot")
-	_assert(proj.contains("0.1.68-parrot-roam-routing-flight-prep"), "project.godot version")
+	_assert(proj.contains("0.1.69-pet-store-gift-delivery"), "project.godot version")
 
 
 func _test_flight_flags() -> void:
@@ -466,6 +466,7 @@ func _test_regressions() -> void:
 	wipe.save(PetManager.PERSIST_PATH)
 	var mgr := PetManager.new()
 	mgr.bootstrap()
+	mgr.grant_pet_from_claim("parrot", false)
 	_assert(mgr.select_profile_pet("off"), "profile off works")
 	_assert(mgr.get_profile_pet_selection() == "off", "selection off")
 	_assert(mgr.select_profile_pet("parrot"), "profile parrot works")

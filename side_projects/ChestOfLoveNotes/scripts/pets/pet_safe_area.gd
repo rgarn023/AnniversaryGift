@@ -424,9 +424,14 @@ func plan_ground_path(from_pos: Vector2, to_pos: Vector2) -> Dictionary:
 	return best
 
 
-func random_roam_target(rng: RandomNumberGenerator, from_pos: Variant = null) -> Vector2:
+func random_roam_target(
+	rng: RandomNumberGenerator,
+	from_pos: Variant = null,
+	roam_kind: String = ""
+) -> Vector2:
 	## Region-balanced sampling. Saved/current position does NOT bias regions.
 	## Cross-chest targets are accepted when a safe waypoint path exists.
+	## roam_kind: "short" | "medium" | "cross" | "" (weighted mix).
 	var origin: Variant = from_pos
 	var origin_v := Vector2.ZERO
 	var has_origin := origin != null and typeof(origin) == TYPE_VECTOR2
@@ -439,8 +444,12 @@ func random_roam_target(rng: RandomNumberGenerator, from_pos: Variant = null) ->
 		RoamRegion.CENTER_RIGHT,
 		RoamRegion.RIGHT,
 	]
-	## Occasionally force opposite half for cross-screen roam.
-	var force_opposite := has_origin and rng.randf() < PetRuntimeConfig.ROAM_CROSS_SIDE_CHANCE
+	var kind := roam_kind.strip_edges().to_lower()
+	var force_opposite := false
+	if kind == "cross":
+		force_opposite = has_origin
+	elif kind.is_empty():
+		force_opposite = has_origin and rng.randf() < PetRuntimeConfig.ROAM_CROSS_SIDE_CHANCE
 	if force_opposite:
 		var mid := viewport_size.x * 0.5
 		if origin_v.x <= mid:
@@ -448,7 +457,7 @@ func random_roam_target(rng: RandomNumberGenerator, from_pos: Variant = null) ->
 		else:
 			regions = [RoamRegion.LEFT, RoamRegion.CENTER_LEFT, RoamRegion.CENTER_RIGHT, RoamRegion.RIGHT]
 	else:
-		## Shuffle for balance (Fisher–Yates).
+		## Shuffle for balance (Fisher–Yates). Prefer visiting every half over time.
 		for i in range(regions.size() - 1, 0, -1):
 			var j := rng.randi_range(0, i)
 			var tmp: int = regions[i]
@@ -456,12 +465,23 @@ func random_roam_target(rng: RandomNumberGenerator, from_pos: Variant = null) ->
 			regions[j] = tmp
 
 	var min_travel := PetRuntimeConfig.ROAM_MIN_TRAVEL_PX * scale_factor()
-	var roll := rng.randf()
-	var prefer_short := roll < PetRuntimeConfig.ROAM_SHORT_CHANCE
-	var prefer_medium := (not prefer_short) and roll < (PetRuntimeConfig.ROAM_SHORT_CHANCE + PetRuntimeConfig.ROAM_MEDIUM_CHANCE)
+	var prefer_short := kind == "short"
+	var prefer_medium := kind == "medium"
+	var prefer_cross := kind == "cross"
+	if kind.is_empty():
+		var roll := rng.randf()
+		prefer_short = roll < PetRuntimeConfig.ROAM_SHORT_CHANCE
+		prefer_medium = (not prefer_short) and roll < (PetRuntimeConfig.ROAM_SHORT_CHANCE + PetRuntimeConfig.ROAM_MEDIUM_CHANCE)
 
 	for _attempt in range(96):
 		var region: int = regions[_attempt % regions.size()]
+		## Cross: bias attempts toward far half.
+		if prefer_cross and has_origin and _attempt < 48:
+			var mid2 := viewport_size.x * 0.5
+			if origin_v.x <= mid2:
+				region = RoamRegion.RIGHT if (_attempt % 2 == 0) else RoamRegion.CENTER_RIGHT
+			else:
+				region = RoamRegion.LEFT if (_attempt % 2 == 0) else RoamRegion.CENTER_LEFT
 		var xr := region_x_range(region)
 		if xr.y <= xr.x + 1.0:
 			continue
@@ -478,7 +498,14 @@ func random_roam_target(rng: RandomNumberGenerator, from_pos: Variant = null) ->
 				continue
 			if prefer_medium and (dist < min_travel or dist > min_travel * 5.0):
 				continue
-			if (not prefer_short) and (not prefer_medium) and dist < min_travel * 1.5:
+			if prefer_cross:
+				var mid3 := viewport_size.x * 0.5
+				var crosses := (origin_v.x <= mid3 and p.x > mid3) or (origin_v.x > mid3 and p.x <= mid3)
+				if not crosses and _attempt < 72:
+					continue
+				if dist < min_travel * 1.2:
+					continue
+			if (not prefer_short) and (not prefer_medium) and (not prefer_cross) and dist < min_travel * 1.5:
 				## Long roam — require meaningful travel.
 				if rng.randf() < 0.7:
 					continue

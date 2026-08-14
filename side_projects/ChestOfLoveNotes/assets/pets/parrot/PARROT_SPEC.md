@@ -247,9 +247,11 @@ Contact sheets: `tools/build_parrot_contact_sheets.py`.
 
 Defined in `config/pets/catalog.json`:
 
-- `unlock_type`: `FREE`
-- `default_unlocked`: `true`
+- `unlock_type` / `price_type`: `FREE`
+- `default_unlocked`: `false`
+- `available_in_store`: `true`
 - `enabled`: `true`
 - `asset_root`: `res://assets/pets/parrot/`
 
-Parrot remains owned by default via `PetManager`. No Pet Collection UI yet.
+Parrot is acquired via Pet Store → send → CHEST claim (not auto-owned).
+See `docs/PET_STORE_GIFT_DELIVERY.md`.

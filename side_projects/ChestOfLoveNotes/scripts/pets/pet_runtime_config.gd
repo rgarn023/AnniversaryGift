@@ -72,15 +72,27 @@ const FLIGHT_TAKEOFF_DURATION_SEC := 0.55
 const FLIGHT_CRUISE_DURATION_SEC := 2.4
 const FLIGHT_LAND_DURATION_SEC := 0.65
 
-## Probability weight when leaving IDLE (roam vs chest interaction). Ground only.
-const IDLE_TO_ROAM_WEIGHT := 0.72
+## Ground behavior decision weights (sum = 1.0) when leaving IDLE.
+## 35% short / 30% medium / 20% cross-screen / 10% chest / 5% longer idle.
+const BEHAVIOR_SHORT_ROAM_WEIGHT := 0.35
+const BEHAVIOR_MEDIUM_ROAM_WEIGHT := 0.30
+const BEHAVIOR_CROSS_ROAM_WEIGHT := 0.20
+const BEHAVIOR_CHEST_WEIGHT := 0.10
+const BEHAVIOR_LONG_IDLE_WEIGHT := 0.05
+## Legacy alias — roam share of ground decisions (short+medium+cross).
+const IDLE_TO_ROAM_WEIGHT := 0.85
 
-## Roam target distribution (full-width beach, no left bias).
+## Longer idle hold when the long-idle behavior wins.
+const LONG_IDLE_MIN_SEC := 4.5
+const LONG_IDLE_MAX_SEC := 8.0
+
+## Roam target distribution (full-width beach — LEFT ↔ RIGHT via routing).
 const ROAM_MIN_TRAVEL_PX := 48.0
-const ROAM_CROSS_SIDE_CHANCE := 0.38
-const ROAM_SHORT_CHANCE := 0.28
-const ROAM_MEDIUM_CHANCE := 0.42
-## Remainder ≈ long / cross-screen.
+## Within roam picks, force opposite half often enough to reach both shores.
+const ROAM_CROSS_SIDE_CHANCE := 0.55
+const ROAM_SHORT_CHANCE := 0.35
+const ROAM_MEDIUM_CHANCE := 0.30
+## Remainder ≈ long / cross-screen within roam.
 
 ## Tap hitbox — derived from master visible bbox (76×88), not full 128×128 canvas.
 ## Pad keeps Galaxy fingertip usable without stealing nearby chest taps.

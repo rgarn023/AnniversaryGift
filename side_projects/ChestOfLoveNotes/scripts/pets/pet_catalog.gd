@@ -1,7 +1,7 @@
 extends RefCounted
 class_name PetCatalog
 ## Scalable pet catalog loaded from config JSON.
-## Phase 1A: parrot only. No store prices / paid SKUs.
+## Parrot is FREE + store-available; ownership is empty until delivery claim.
 
 const CATALOG_PATH := "res://config/pets/catalog.json"
 const PET_PARROT := "parrot"
@@ -43,17 +43,20 @@ func load_catalog(path: String = CATALOG_PATH) -> bool:
 
 
 func _seed_builtin_parrot() -> void:
-	## Fallback if catalog JSON is missing — keeps Phase 1A tests/bootstrap sane.
+	## Fallback if catalog JSON is missing — keeps tests/bootstrap sane.
 	var def := PetDefinition.new()
 	def.id = PET_PARROT
 	def.display_name = "Parrot"
 	def.unlock_type = PetDefinition.UNLOCK_FREE
-	def.default_unlocked = true
+	def.price_type = PetDefinition.UNLOCK_FREE
+	def.default_unlocked = false
+	def.available_in_store = true
+	def.description = "A cheerful beach companion ready to hop beside your chest."
 	def.asset_root = "res://assets/pets/parrot/"
 	def.enabled = true
 	_by_id[def.id] = def
 	_order = [def.id]
-	_version = 1
+	_version = 2
 
 
 func version() -> int:
@@ -71,6 +74,15 @@ func all_definitions() -> Array[PetDefinition]:
 	return out
 
 
+func store_definitions() -> Array[PetDefinition]:
+	var out: Array[PetDefinition] = []
+	for id in _order:
+		var def: PetDefinition = _by_id[id]
+		if def != null and def.is_store_available():
+			out.append(def)
+	return out
+
+
 func get_definition(pet_id: String) -> PetDefinition:
 	return _by_id.get(pet_id, null)
 
@@ -80,6 +92,7 @@ func has_pet(pet_id: String) -> bool:
 
 
 func default_unlocked_ids() -> Array[String]:
+	## Legacy helper — production no longer auto-owns these.
 	var out: Array[String] = []
 	for id in _order:
 		var def: PetDefinition = _by_id[id]
