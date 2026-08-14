@@ -395,9 +395,10 @@ PY
 }
 
 # Godot may probe adb after a successful headless Android export even with no device.
+# It often invokes $ANDROID_HOME/platform-tools/adb by absolute path (PATH alone is not enough).
 # Stub only around export invocations; do not start an emulator or adb server.
 with_adb_stub() {
-  local stub_dir
+  local stub_dir sdk_adb sdk_adb_bak
   stub_dir="$(mktemp -d)"
   cat > "$stub_dir/adb" <<'ADB'
 #!/usr/bin/env bash
@@ -410,8 +411,27 @@ case "${1:-}" in
 esac
 ADB
   chmod +x "$stub_dir/adb"
+
+  sdk_adb=""
+  sdk_adb_bak=""
+  if [[ -n "${ANDROID_HOME:-}" && -x "${ANDROID_HOME}/platform-tools/adb" && ! -L "${ANDROID_HOME}/platform-tools/adb" ]]; then
+    sdk_adb="${ANDROID_HOME}/platform-tools/adb"
+    sdk_adb_bak="$(mktemp)"
+    cp -f "$sdk_adb" "$sdk_adb_bak"
+    cp -f "$stub_dir/adb" "$sdk_adb"
+    chmod +x "$sdk_adb"
+  fi
+
+  set +e
   PATH="$stub_dir:$PATH" "$@"
   local rc=$?
+  set -e
+
+  if [[ -n "$sdk_adb" && -n "$sdk_adb_bak" && -f "$sdk_adb_bak" ]]; then
+    cp -f "$sdk_adb_bak" "$sdk_adb"
+    chmod +x "$sdk_adb"
+    rm -f "$sdk_adb_bak"
+  fi
   rm -rf "$stub_dir"
   return "$rc"
 }
