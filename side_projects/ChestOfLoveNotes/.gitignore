@@ -11,6 +11,8 @@ secrets/
 key.properties
 *.keystore
 *.jks
+# Project-stable Android *test* signing identity (required for update-compatible APKs).
+!android/signing/chest_test_debug.keystore
 
 # Build
 build/*.aab

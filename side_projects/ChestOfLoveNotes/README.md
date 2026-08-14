@@ -52,23 +52,33 @@ godot --headless --path side_projects/ChestOfLoveNotes -s res://tests/test_demo_
 
 ## Build Android APK
 
-**Always use the export wrapper.** Do not call `godot --export-debug` directly for private-online APKs.
+**Always use the export wrapper.** Do not call `godot --export-debug` directly.
 
-`config/backend_config.json` is gitignored. Raw Godot export skips staging and produces APKs that show **Backend is not configured** on device (this is what broke v70).
+Raw Godot export is unsupported because it can:
+
+- skip gitignored `config/backend_config.json` staging (**Backend is not configured** — v70)
+- sign with a machine-local debug keystore (certificate churn → **App not installed** on update)
+- emit differently named duplicate APKs
 
 ```bash
 cd side_projects/ChestOfLoveNotes
 # Requires SUPABASE_URL + SUPABASE_ANON_KEY in the environment.
-bash tools/export_android_apk.sh ChestOfLoveNotes-v71-android-backend-config-fix-debug.apk
+bash tools/export_android_apk.sh
 ```
 
 The wrapper:
 
-1. Writes gitignored `config/backend_config.json` from env (URL + publishable/anon key only)
-2. Hard-fails if that config is missing or still a placeholder
-3. Exports the Android debug APK
-4. Hard-fails if the APK does not pack a live `assets/config/backend_config.json`
-5. Validates the packed bytes against the same runtime load rules as `BackendConfig`
+1. Signs with the **project-stable** test keystore (`android/signing/chest_test_debug.keystore`)
+2. Writes gitignored `config/backend_config.json` from env (URL + publishable/anon key only)
+3. Hard-fails if that config is missing or still a placeholder
+4. Exports one temporary APK, validates it, then publishes **exactly one** canonical filename:
+   `build/ChestOfLoveNotes-vXX-<version-slug>-debug.apk`
+5. Hard-fails on package ID / versionCode / signing-cert mismatches
+6. Removes temporary duplicates for the current version
+
+See [docs/APK_UPDATE_COMPATIBILITY.md](docs/APK_UPDATE_COMPATIBILITY.md) and [android/signing/README.md](android/signing/README.md).
+
+**Samsung / existing installs:** APKs before the stable keystore used one-off certs. Uninstall once, then install the new APK; later updates can replace in place.
 
 Manual prepare/verify (debugging only; still finish with the wrapper):
 
