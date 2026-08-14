@@ -1,0 +1,40 @@
+# Godot
+.godot/
+*.translation
+export_credentials.cfg
+
+# Build outputs
+build/*.aab
+build/*.idsig
+*.aab
+# Keep the distributable debug APK in-repo for easy download
+!build/AnniversaryGift-debug.apk
+!build/AnniversaryGift-fixed-debug.apk
+!build/AnniversaryGift-pdf-preview-fixed-debug.apk
+!build/AnniversaryGift-preview-layout-fixed-debug.apk
+*.apk
+!build/AnniversaryGift-debug.apk
+!build/AnniversaryGift-fixed-debug.apk
+!build/AnniversaryGift-pdf-preview-fixed-debug.apk
+!build/AnniversaryGift-preview-layout-fixed-debug.apk
+
+# Android Gradle build template (reinstall with tools/install_android_template.sh)
+android/build/
+android/build/.gradle/
+android/build/build/
+android/build/local.properties
+android/build/.cxx/
+*.keystore
+*.jks
+
+# OS / editor
+.DS_Store
+*.swp
+*~
+.idea/
+.vscode/
+
+# Secrets — never commit keystores or passwords
+secrets/
+*.pem
+key.properties
