@@ -248,9 +248,177 @@ sha256_of() {
   sha256sum "$1" | awk '{print $1}'
 }
 
+# Godot Android release packs remapped textures as:
+#   .../assets/.godot/imported/frame_XXXX.png-<hash>.ctex
+# with remap sidecars under:
+#   .../assets/assets/branding/splash_frames/frame_XXXX.png.import
+# (AAB may nest the same under base/ or assetPackInstallTime/.)
+# Do NOT require "splash_frames" in the .ctex ZIP path — that path never exists.
+verify_godot_splash_packaging() {
+  local archive="$1"
+  local label="$2"
+  python3 - "$archive" "$label" <<'PY'
+import re
+import sys
+import zipfile
+
+archive, label = sys.argv[1], sys.argv[2]
+with zipfile.ZipFile(archive) as z:
+    names = z.namelist()
+
+gif_hits = [n for n in names if n.endswith(".gif") or "154659_cursor_under4mb" in n]
+if gif_hits:
+    raise SystemExit(f"{label}: source GIF present in archive: {gif_hits[:5]}")
+
+# Godot project data / resource containers (not individual top-level .pck required).
+project_binary = [n for n in names if n.endswith("project.binary") or n.endswith("/project.binary")]
+sparsepck = [n for n in names if n.endswith("assets.sparsepck") or n.endswith("/assets.sparsepck")]
+imported_dir = [n for n in names if "/.godot/imported/" in n]
+if not project_binary:
+    raise SystemExit(f"{label}: missing Godot project.binary in packaged assets")
+if not imported_dir and not sparsepck:
+    raise SystemExit(
+        f"{label}: missing Godot imported resources and assets.sparsepck "
+        "(no project resource pack detected)"
+    )
+
+# Remapped splash frames: .ctex basenames, not splash_frames/.../.ctex ZIP members.
+frame_ctex_re = re.compile(r"(?:^|/)(?:\.godot/)?imported/frame_(\d{4})\.png-[0-9a-fA-F]+\.ctex$")
+frame_idxs = sorted({int(m.group(1)) for n in names for m in [frame_ctex_re.search(n)] if m})
+frame_imports = [
+    n for n in names
+    if "splash_frames/" in n and n.endswith(".png.import") and re.search(r"frame_\d{4}\.png\.import$", n)
+]
+meta = [n for n in names if n.endswith("splash_frames_meta.json")]
+still_ctex = [
+    n for n in names
+    if re.search(r"(?:^|/)(?:\.godot/)?imported/splash_still\.png-[0-9a-fA-F]+\.ctex$", n)
+]
+still_import = [n for n in names if n.endswith("splash_still.png.import")]
+
+if frame_idxs != list(range(48)):
+    raise SystemExit(
+        f"{label}: expected imported splash frame .ctex indices 0..47, "
+        f"found {len(frame_idxs)} ({frame_idxs[:8]}{'...' if len(frame_idxs) > 8 else ''})"
+    )
+if len(frame_imports) != 48:
+    raise SystemExit(
+        f"{label}: expected 48 splash_frames/*.png.import remaps, found {len(frame_imports)}"
+    )
+if not meta:
+    raise SystemExit(f"{label}: splash_frames_meta.json missing from packaged project data")
+if not still_ctex and not still_import:
+    raise SystemExit(
+        f"{label}: splash_still missing (expected .godot/imported splash_still*.ctex and/or .import)"
+    )
+
+# Optional: sparsepck index should mention at least one splash frame when present.
+if sparsepck:
+    with zipfile.ZipFile(archive) as z:
+        blob = z.read(sparsepck[0])
+    if b"frame_0000.png-" not in blob and b"splash_frames/frame_0000" not in blob:
+        raise SystemExit(
+            f"{label}: assets.sparsepck present but does not index splash frame_0000"
+        )
+
+print(
+    f"OK ({label}): GIF absent; Godot project.binary present; "
+    f"imported splash .ctex frames=48; remaps=48; still/meta present"
+    + (f"; sparsepck={sparsepck[0]}" if sparsepck else "")
+)
+PY
+}
+
+verify_source_splash_resources() {
+  echo "== Verify source splash resources (pre-export) =="
+  python3 - "$ROOT" <<'PY'
+import json
+import re
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+frames_dir = root / "assets/branding/splash_frames"
+meta_path = root / "assets/branding/splash_frames_meta.json"
+still = root / "assets/branding/splash_still.png"
+gif = root / "assets/branding/154659_cursor_under4mb.gif"
+boot = (root / "scripts/ui/charoite_boot.gd").read_text(encoding="utf-8")
+presets = (root / "export_presets.cfg").read_text(encoding="utf-8")
+
+pngs = sorted(frames_dir.glob("frame_*.png"))
+imports = sorted(frames_dir.glob("frame_*.png.import"))
+if len(pngs) != 48:
+    raise SystemExit(f"expected 48 splash PNG frames, found {len(pngs)}")
+if len(imports) != 48:
+    raise SystemExit(f"expected 48 splash .import sidecars, found {len(imports)}")
+idxs = [int(p.stem.split("_")[1]) for p in pngs]
+if idxs != list(range(48)):
+    raise SystemExit(f"splash frame indices not contiguous 0..47: {idxs[:8]}...")
+
+meta = json.loads(meta_path.read_text(encoding="utf-8"))
+if int(meta.get("frame_count", -1)) != 48:
+    raise SystemExit(f"splash_frames_meta.json frame_count != 48 ({meta.get('frame_count')})")
+durs = meta.get("durations_ms", [])
+if not isinstance(durs, list) or len(durs) != 48:
+    raise SystemExit("splash_frames_meta.json durations_ms must have 48 entries")
+if not still.is_file():
+    raise SystemExit("splash_still.png missing")
+if not gif.is_file():
+    raise SystemExit("source GIF missing on disk (must remain in repo but excluded from export)")
+
+for imp in imports:
+    text = imp.read_text(encoding="utf-8")
+    if ".ctex" not in text or "dest_files=" not in text:
+        raise SystemExit(f"{imp.name} does not remap to a .ctex dest")
+
+if "splash_frames/frame_%04d.png" not in boot:
+    raise SystemExit("CharoiteBoot does not reference generated splash_frames paths")
+if "splash_frames_meta.json" not in boot:
+    raise SystemExit("CharoiteBoot does not reference splash_frames_meta.json")
+if re.search(r"load\(\s*SOURCE_GIF\s*\)|FileAccess\.open\(\s*SOURCE_GIF", boot):
+    raise SystemExit("CharoiteBoot must not load the excluded source GIF at runtime")
+
+exc = re.search(r'^exclude_filter="([^"]*)"$', presets, re.M)
+inc = re.search(r'^include_filter="([^"]*)"$', presets, re.M)
+if not exc or "154659_cursor_under4mb.gif" not in exc.group(1):
+    raise SystemExit("export_presets.cfg must exclude the source splash GIF")
+if not inc or "splash_frames" not in inc.group(1):
+    raise SystemExit("export_presets.cfg include_filter must keep splash_frames")
+if "154659_cursor_under4mb.gif" in (inc.group(1) if inc else ""):
+    raise SystemExit("source GIF must not be in include_filter")
+
+print(
+    "OK: source splash frames=48; imports=48; meta/still present; "
+    "CharoiteBoot uses generated frames; GIF excluded from Android export"
+)
+PY
+}
+
+# Godot may probe adb after a successful headless Android export even with no device.
+# Stub only around export invocations; do not start an emulator or adb server.
+with_adb_stub() {
+  local stub_dir
+  stub_dir="$(mktemp -d)"
+  cat > "$stub_dir/adb" <<'ADB'
+#!/usr/bin/env bash
+# CI stub: Godot/headless export probes adb; no device is required for artifact builds.
+case "${1:-}" in
+  start-server|kill-server|wait-for-device) exit 0 ;;
+  devices) echo "List of devices attached"; exit 0 ;;
+  version) echo "Android Debug Bridge version 1.0.41 (ci-stub)"; exit 0 ;;
+  *) exit 0 ;;
+esac
+ADB
+  chmod +x "$stub_dir/adb"
+  PATH="$stub_dir:$PATH" "$@"
+  local rc=$?
+  rm -rf "$stub_dir"
+  return "$rc"
+}
+
 verify_apk() {
   local apk="$1"
-  local bytes mib sha pkg vc vn abis cert verify_rc gif_hits splash_hits
+  local bytes mib sha pkg vc vn abis cert verify_rc
   [[ -f "$apk" ]] || die "APK missing: $apk"
   bytes=$(wc -c < "$apk" | tr -d ' ')
   mib=$(python3 -c "print(f'{int('$bytes')/1024/1024:.3f}')")
@@ -300,29 +468,18 @@ verify_apk() {
   echo "apksigner_verify=OK"
   [[ "$cert" == "$EXPECTED_CERT" ]] || die "signing cert mismatch: $cert"
 
+  verify_godot_splash_packaging "$apk" "APK"
+
   python3 - "$apk" <<'PY'
 import sys, zipfile
 apk = sys.argv[1]
 with zipfile.ZipFile(apk) as z:
     names = z.namelist()
-gif_hits = [n for n in names if n.endswith('.gif') or '154659_cursor_under4mb' in n]
-splash = [n for n in names if 'splash_frames' in n and n.endswith('.ctex')]
-# Godot may pack under assets/ or asset-pack-like paths; match by basename.
-still = [n for n in names if n.endswith('splash_still.png')]
-meta = [n for n in names if n.endswith('splash_frames_meta.json')]
-if gif_hits:
-    raise SystemExit(f'source GIF present in APK: {gif_hits[:5]}')
-if len(splash) != 48:
-    raise SystemExit(f'expected 48 splash .ctex frames, found {len(splash)}')
-if not still:
-    raise SystemExit('splash_still.png missing from APK')
-if not meta:
-    raise SystemExit('splash_frames_meta.json missing from APK')
 libs = [n for n in names if n.startswith('lib/') and n.endswith('.so')]
 non_arm64 = [n for n in libs if '/arm64-v8a/' not in n]
 if non_arm64:
     raise SystemExit(f'non-arm64 libs present: {non_arm64[:8]}')
-print(f'OK: GIF absent; splash frames={len(splash)}; still/meta present; arm64-only libs')
+print('OK: arm64-only libs')
 PY
 
   APK_BYTES="$bytes"
@@ -383,18 +540,11 @@ abis = sorted({n.split('/')[2] for n in names if n.startswith('base/lib/') and n
 print('abis=', ','.join(abis))
 if abis != ['arm64-v8a', 'armeabi-v7a']:
     raise SystemExit(f'unexpected AAB ABIs: {abis}')
-gif_hits = [n for n in names if n.endswith('.gif') or '154659_cursor_under4mb' in n]
-if gif_hits:
-    raise SystemExit(f'source GIF present in AAB: {gif_hits[:5]}')
-splash = [n for n in names if 'splash_frames' in n and n.endswith('.ctex')]
-if len(splash) != 48:
-    raise SystemExit(f'expected 48 splash .ctex in AAB, found {len(splash)}')
-still = [n for n in names if n.endswith('splash_still.png')]
-meta = [n for n in names if n.endswith('splash_frames_meta.json')]
-if not still or not meta:
-    raise SystemExit('AAB missing splash_still and/or splash_frames_meta')
-print(f'OK: GIF absent; splash frames={len(splash)}; modules/abis OK')
+print('OK: modules/abis OK')
 PY
+
+  # Same Godot remapped packaging as APK (paths may live under base/ or assetPackInstallTime/).
+  verify_godot_splash_packaging "$aab" "AAB"
 
   out_dir="$(mktemp -d)"
   device_spec="$out_dir/device-spec-arm64.json"
@@ -491,6 +641,7 @@ if [[ ! -f assets/branding/splash_frames_meta.json || ! -f assets/branding/splas
   echo "== Prepare splash frames from source GIF (assets missing) =="
   python3 tools/prepare_charoite_splash_from_gif.py
 fi
+verify_source_splash_resources
 
 mkdir -p "$BUILD_DIR" "$DIST_DIR"
 rm -f "$APK_OUT" "$AAB_OUT" "$SHA_OUT" \
@@ -506,7 +657,7 @@ echo "Temporarily set LAST_RELEASED_VERSION_CODE=71 for CI reproduce of v72 (wil
 
 echo "== Export RELEASE APK (arm64-only) =="
 patch_presets 0 false true "build/.tmp-export-v72-release.apk"
-"$GODOT" --headless --path . --export-release "Android" "$BUILD_DIR/.tmp-export-v72-release.apk"
+with_adb_stub "$GODOT" --headless --path . --export-release "Android" "$BUILD_DIR/.tmp-export-v72-release.apk"
 [[ -f "$BUILD_DIR/.tmp-export-v72-release.apk" ]] || die "APK export failed"
 cp -f "$BUILD_DIR/.tmp-export-v72-release.apk" "$APK_OUT"
 cp -f "$APK_OUT" "$BUILD_DIR/$APK_NAME"
@@ -514,7 +665,7 @@ verify_apk "$APK_OUT"
 
 echo "== Export RELEASE AAB (armeabi-v7a + arm64-v8a) =="
 patch_presets 1 true true "build/.tmp-export-v72.aab"
-"$GODOT" --headless --path . --export-release "Android" "$BUILD_DIR/.tmp-export-v72.aab"
+with_adb_stub "$GODOT" --headless --path . --export-release "Android" "$BUILD_DIR/.tmp-export-v72.aab"
 [[ -f "$BUILD_DIR/.tmp-export-v72.aab" ]] || die "AAB export failed"
 cp -f "$BUILD_DIR/.tmp-export-v72.aab" "$AAB_OUT"
 cp -f "$AAB_OUT" "$BUILD_DIR/$AAB_NAME"
