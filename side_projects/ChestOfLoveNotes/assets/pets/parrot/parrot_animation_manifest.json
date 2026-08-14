@@ -1,10 +1,10 @@
 {
   "version": 1,
   "pet_id": "parrot",
-  "phase": "1B-2B",
+  "phase": "1B-2B-1",
   "visuals_enabled": false,
   "artwork_ready": false,
-  "status": "awaiting_animation_frames",
+  "status": "idle_artwork_ready_awaiting_remaining_frames",
   "approved_master_path": "assets/pets/parrot/source/parrot_master.png",
   "approved_master_sha256": "89e28ad50111f8c6ebf1e5abbea29934b3df9bd79060e38bc8c5e3e3d382e0e2",
   "approved_master_status": "LOCKED",
@@ -89,8 +89,9 @@
       "frame_duration_sec": 0.2,
       "loop": true,
       "flip_for_left": true,
-      "status": "awaiting_artwork",
-      "intent": "Subtle breathing, blink, tiny head movement"
+      "status": "artwork_ready",
+      "intent": "Subtle breathing, blink, tiny head movement",
+      "notes": "Production idle frames 00-04 authored from LOCKED master; ground anchor preserved; visuals still disabled."
     },
     {
       "name": "move",

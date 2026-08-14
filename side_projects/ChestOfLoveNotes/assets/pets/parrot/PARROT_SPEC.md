@@ -8,7 +8,7 @@
 | Default unlocked | Yes — available to all users |
 | Role | First test / flagship free pet |
 | Billing | **None** — never tied to Google Play Billing |
-| Artwork | **LOCKED master** — Phase 1B-2B ingest; animation frames not authored yet |
+| Artwork | **LOCKED master** + **IDLE frames ready** (Phase 1B-2B-1); MOVE / CHEST / TAP still awaiting |
 | Manifest | `assets/pets/parrot/parrot_animation_manifest.json` |
 | Visuals enabled | **false** (`PetRuntimeConfig.PET_VISUALS_ENABLED`) |
 
@@ -28,7 +28,21 @@
 | Bottom baseline (last opaque row) | **115** (spec ground anchor remains **116**; 1 px harmless) |
 | Design | Red / yellow / blue stylized macaw |
 
-This exact parrot design is **LOCKED**. Do not redraw, regenerate, recolor, or change proportions. Future IDLE / MOVE / CHEST_INTERACTION / TAP_REACTION frames must preserve this design (verified against the SHA-256 above). Animation frame PNGs are **not** created yet.
+This exact parrot design is **LOCKED**. Do not redraw, regenerate, recolor, or change proportions. Future MOVE / CHEST_INTERACTION / TAP_REACTION frames must preserve this design (verified against the SHA-256 above).
+
+### Idle frames (Phase 1B-2B-1) — READY
+
+| Field | Value |
+| --- | --- |
+| Status | **artwork_ready** (idle only) |
+| Paths | `idle/parrot_idle_00.png` … `idle/parrot_idle_04.png` |
+| Canvas | 128×128 PNG RGBA, transparent background |
+| Facing | RIGHT |
+| Ground anchor | **(64, 116)** — feet/baseline stable across the loop |
+| Playback | 5 frames @ 5 fps, looping |
+| Motion | Subtle breathe + blink + tiny head settle; derived from LOCKED master (not redrawn) |
+
+MOVE / CHEST_INTERACTION / TAP_REACTION PNGs are **not** created yet. Package `artwork_ready` remains **false** until the full set exists. Do **not** enable visuals.
 
 ---
 
@@ -141,7 +155,8 @@ assets/pets/parrot/
   source/   # raw / contact sheets (not runtime)
 ```
 
-Animation folders currently contain `.gitkeep` only — **no fake PNGs**.  
+`idle/` contains production idle frames `parrot_idle_00.png`–`parrot_idle_04.png`.  
+`move/`, `chest_interaction/`, and `tap_reaction/` still contain `.gitkeep` only — **no fake PNGs**.  
 `source/parrot_master.png` is the LOCKED production master (ingest only; not loaded at runtime).
 
 ---
