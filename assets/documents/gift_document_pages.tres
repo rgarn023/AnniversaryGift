@@ -1,0 +1,9 @@
+[gd_resource type="Resource" script_class="GiftDocumentPages" load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/gift_document_pages.gd" id="1_script"]
+[ext_resource type="Texture2D" path="res://assets/documents/pdf_pages/page_001.png" id="2_p1"]
+[ext_resource type="Texture2D" path="res://assets/documents/pdf_pages/page_002.png" id="3_p2"]
+
+[resource]
+script = ExtResource("1_script")
+pages = Array[Texture2D]([ExtResource("2_p1"), ExtResource("3_p2")])
