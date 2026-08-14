@@ -33,6 +33,8 @@ var _pet_shadow: Node2D = null
 var _tap_hit: Control = null
 var _runtime_scale: float = 0.72
 var _shadow_draw: PetShadowDraw = null
+var _position_persist_cb: Callable = Callable()
+var _last_committed_pos: Vector2 = Vector2(INF, INF)
 
 
 func _ready() -> void:
@@ -57,15 +59,21 @@ func setup_from_definition(def: PetDefinition) -> void:
 	_apply_visual_gate()
 
 
-func configure_runtime(vp_size: Vector2, chest_local_rect: Rect2, seed: int = -1) -> void:
+func configure_runtime(vp_size: Vector2, chest_local_rect: Rect2, seed: int = -1, restore_world: Variant = null) -> void:
 	if seed >= 0:
 		rng.seed = seed
 	else:
 		rng.randomize()
 	safe_area.configure(vp_size, chest_local_rect)
 	_arrival_epsilon = 3.0 * safe_area.scale_factor()
-	## Spawn must never start inside / overlapping the expanded chest obstacle.
-	position = safe_area.ensure_safe_position(safe_area.default_spawn_position(rng), rng)
+	## Prefer restored last-safe world position; always validate against CURRENT safe area.
+	var spawn := safe_area.default_spawn_position(rng)
+	if typeof(restore_world) == TYPE_VECTOR2:
+		spawn = safe_area.ensure_safe_position(restore_world as Vector2, rng)
+	else:
+		## Spawn must never start inside / overlapping the expanded chest obstacle.
+		spawn = safe_area.ensure_safe_position(spawn, rng)
+	position = spawn
 	target_position = position
 	_configured = true
 	_ensure_visual_nodes()
@@ -75,6 +83,29 @@ func configure_runtime(vp_size: Vector2, chest_local_rect: Rect2, seed: int = -1
 	_apply_visual_gate()
 	set_process(PetRuntimeConfig.PET_RUNTIME_ENABLED)
 	_begin_idle()
+	## Initial commit happens via _begin_idle once persist callback is wired.
+
+
+func set_position_persist_callback(cb: Callable) -> void:
+	_position_persist_cb = cb
+
+
+func get_persistable_world_position() -> Vector2:
+	## Last safe point: clamp current against chest/ocean/UI before callers persist.
+	if safe_area == null:
+		return position
+	return safe_area.ensure_safe_position(position, rng)
+
+
+func _commit_safe_position() -> void:
+	## Disk writes only through PetManager callback; skip duplicates / every-frame spam.
+	if not _position_persist_cb.is_valid():
+		return
+	var safe_pos := get_persistable_world_position()
+	if safe_pos.distance_squared_to(_last_committed_pos) < 0.25:
+		return
+	_last_committed_pos = safe_pos
+	_position_persist_cb.call(safe_pos)
 
 
 func _ensure_visual_nodes() -> void:
@@ -395,6 +426,8 @@ func request_tap_reaction() -> void:
 
 
 func pause_for_reward() -> void:
+	## Persist before temporary hide so restore survives reward teardown.
+	_commit_safe_position()
 	paused = true
 	if PetRuntimeConfig.reward_policy_default() == PetRuntimeConfig.RewardPetPolicy.HIDE_TEMPORARILY:
 		reward_hide_requested = true
@@ -524,6 +557,13 @@ func _begin_idle() -> void:
 	_chest_anim_playing = false
 	_state_timer = rng.randf_range(PetRuntimeConfig.IDLE_MIN_SEC, PetRuntimeConfig.IDLE_MAX_SEC)
 	transition_to(PetState.Kind.IDLE)
+	## Persist when entering IDLE after movement / arrival (not every process frame).
+	_commit_safe_position()
+
+
+func _commit_safe_position_from_roam_arrive() -> void:
+	## Explicit ROAM-target-reached hook (also covered by _begin_idle).
+	_commit_safe_position()
 
 
 func _tick_idle(delta: float) -> void:

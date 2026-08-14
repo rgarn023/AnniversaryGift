@@ -1080,6 +1080,8 @@ func _add_bottom_nav(selected: String) -> void:
 	]
 	for t in tabs:
 		var b := Button.new()
+		## Stable names so runtime dumps can find the real bottom-nav Profile control.
+		b.name = "BottomNav_%s" % str(t[0])
 		b.text = "%s\n%s" % [str(t[1]), str(t[2])]
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		b.custom_minimum_size = Vector2(0, MobileUi.font_touch(MobileUi.TOUCH_NAV_H) - 2)

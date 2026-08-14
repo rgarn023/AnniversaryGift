@@ -61,8 +61,8 @@ func _test_flags_and_version() -> void:
 		PetRuntimeConfig.reward_policy_default() == PetRuntimeConfig.RewardPetPolicy.HIDE_TEMPORARILY,
 		"reward policy HIDE_TEMPORARILY"
 	)
-	_assert(BuildFlags.APP_VERSION_CODE == 66, "versionCode 66")
-	_assert(BuildFlags.APP_VERSION_NAME == "0.1.66-profile-pet-production-path-fix", "versionName 66")
+	_assert(BuildFlags.APP_VERSION_CODE == 67, "versionCode 67")
+	_assert(BuildFlags.APP_VERSION_NAME == "0.1.67-profile-pet-persistence-fix", "versionName 67")
 	_assert(is_equal_approx(PetRuntimeConfig.MOVE_SPEED_PX_PER_SEC, 72.0), "move speed 72")
 	var hit := PetRuntimeConfig.tap_hitbox_size_canvas()
 	_assert(is_equal_approx(hit.x, 96.0) and is_equal_approx(hit.y, 108.0), "tap hitbox canvas 96x108")
@@ -269,7 +269,7 @@ func _test_regressions_locked() -> void:
 	_assert(chest.contains("CHEST_FRAME_COUNT := 13"), "chest open intact")
 	_assert(chest.contains("REVEAL_FRAME_COUNT := 8"), "baked reveal intact")
 	_assert(env.contains("CHEST_GROUND_Y := 0.888"), "ground intact")
-	_assert(flags.contains("APP_VERSION_CODE := 66"), "version 64")
+	_assert(flags.contains("APP_VERSION_CODE := 67"), "version 64")
 	_assert(main.contains("pause_for_chest_reward"), "reward pause wired")
 	_assert(main.contains("resume_after_chest_reward"), "reward resume wired")
 	_assert(not main.contains("BillingClient"), "no billing in main")

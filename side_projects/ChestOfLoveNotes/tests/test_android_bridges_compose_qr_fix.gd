@@ -115,9 +115,9 @@ func _run() -> void:
 	_assert(map.contains("_gesture_layer"), "map gesture layer unchanged")
 
 	## VERSION / APK
-	_assert(flags.contains("APP_VERSION_CODE := 66"), "versionCode 66")
-	_assert(preset.contains("version/code=66"), "export 66")
-	_assert(preset.contains("v66-profile-pet-production-path-fix-debug.apk") or export_sh.contains("v66-profile-pet-production-path-fix-debug.apk"), "APK name")
+	_assert(flags.contains("APP_VERSION_CODE := 67"), "versionCode 67")
+	_assert(preset.contains("version/code=67"), "export 66")
+	_assert(preset.contains("v67-profile-pet-persistence-fix-debug.apk") or export_sh.contains("v67-profile-pet-persistence-fix-debug.apk"), "APK name")
 	_assert(gitignore.contains("ChestOfLoveNotes-backend-location-qr-splash-fix-debug.apk"), "gitignore allow")
 	_assert(BuildFlags.APP_VERSION_CODE >= 30, "BuildFlags >= 29")
 
