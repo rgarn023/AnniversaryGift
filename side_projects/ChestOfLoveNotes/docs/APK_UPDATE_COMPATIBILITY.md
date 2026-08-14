@@ -44,6 +44,17 @@ GitHub Release tags inspected each had **one** asset. Confusion came from local/
 5. Mandatory wrapper: `tools/export_android_apk.sh` → one canonical filename
 6. Gate: `tools/verify_apk_update_compatibility.py`
 
-### One-time uninstall
+## Built canonical APK (this change)
 
-Because prior installs (including Samsung known-good v61) used incompatible one-off certs, **in-place update from those builds is impossible**. Uninstall once, then install the new stably-signed APK. Subsequent updates with this keystore can proceed normally when versionCode increases.
+| Field | Value |
+| --- | --- |
+| Filename | `ChestOfLoveNotes-v72-apk-signing-pipeline-fix-debug.apk` |
+| Path | `side_projects/ChestOfLoveNotes/build/ChestOfLoveNotes-v72-apk-signing-pipeline-fix-debug.apk` |
+| versionCode | `72` |
+| versionName | `0.1.72-apk-signing-pipeline-fix` |
+| Package ID | `com.charoitegames.chestoflovenotes` |
+| Signing cert SHA-256 | `5fbad9830b2a9827d2d1f7f8a38dafea0ae772793a99c4f4952a6b1d424f863b` |
+| APK SHA-256 | `a9dc1b4b6d3dd3f80206242f6a48a81eb6a6d79fa0f9c629fe0cdc5348715319` |
+| Same-version APK count in `build/` | **1** |
+
+Compared to Samsung known-good v61: package ID matches; **signing certificate differs** (v61 was an ephemeral Godot debug cert). In-place update from v61–v71 is not possible — uninstall once, then install v72.

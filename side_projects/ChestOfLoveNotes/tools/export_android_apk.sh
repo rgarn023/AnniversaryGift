@@ -238,13 +238,12 @@ fi
 echo "== Stage single canonical artifact =="
 ARTIFACTS_DIR="/opt/cursor/artifacts"
 mkdir -p "$ARTIFACTS_DIR"
-# Remove any prior same-version staged APKs with different names.
+# Remove any prior same-version staged APKs with different names, plus failed stubs.
 shopt -s nullglob
-for staged in "$ARTIFACTS_DIR"/ChestOfLoveNotes-v"${VERSION_CODE}"-*.apk; do
-  if [[ "$(basename "$staged")" != "$CANONICAL_NAME" ]]; then
-    echo "Removing non-canonical staged APK: $staged"
-    rm -f "$staged"
-  fi
+for staged in "$ARTIFACTS_DIR"/ChestOfLoveNotes-v"${VERSION_CODE}"-*.apk \
+              "$ARTIFACTS_DIR"/.tmp-ChestOfLoveNotes-v"${VERSION_CODE}"-*.apk; do
+  echo "Removing prior staged APK/stub: $staged"
+  rm -f "$staged"
 done
 # Also clear generic confusing names from staging.
 for staged in "$ARTIFACTS_DIR"/app-debug.apk "$ARTIFACTS_DIR"/ChestOfLoveNotes-debug.apk; do
@@ -252,14 +251,18 @@ for staged in "$ARTIFACTS_DIR"/app-debug.apk "$ARTIFACTS_DIR"/ChestOfLoveNotes-d
 done
 shopt -u nullglob
 
-if cp -f "$CANONICAL_APK" "$ARTIFACTS_DIR/$CANONICAL_NAME"; then
-  ART_SHA=$(sha256sum "$ARTIFACTS_DIR/$CANONICAL_NAME" | awk '{print $1}')
-  if [[ "$ART_SHA" != "$CANON_SHA" ]]; then
-    die "artifacts copy SHA mismatch"
-  fi
-  ls -lh "$CANONICAL_APK" "$ARTIFACTS_DIR/$CANONICAL_NAME"
+STAGE_TMP="$ARTIFACTS_DIR/.tmp-${CANONICAL_NAME}"
+STAGE_FINAL="$ARTIFACTS_DIR/$CANONICAL_NAME"
+rm -f "$STAGE_TMP" "$STAGE_FINAL"
+if cp -f "$CANONICAL_APK" "$STAGE_TMP" \
+  && ART_SHA=$(sha256sum "$STAGE_TMP" | awk '{print $1}') \
+  && [[ "$ART_SHA" == "$CANON_SHA" ]] \
+  && mv -f "$STAGE_TMP" "$STAGE_FINAL"; then
+  ls -lh "$CANONICAL_APK" "$STAGE_FINAL"
+  echo "OK: staged artifact SHA matches canonical ($ART_SHA)"
 else
-  echo "WARNING: could not copy APK to $ARTIFACTS_DIR (export still OK)" >&2
+  rm -f "$STAGE_TMP" "$STAGE_FINAL"
+  echo "WARNING: could not stage APK under $ARTIFACTS_DIR (export still OK; use build/ canonical)" >&2
   ls -lh "$CANONICAL_APK"
 fi
 
