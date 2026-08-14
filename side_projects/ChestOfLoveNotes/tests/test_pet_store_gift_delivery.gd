@@ -43,13 +43,13 @@ func _run() -> void:
 
 
 func _test_version() -> void:
-	_assert(BuildFlags.APP_VERSION_CODE == 69, "versionCode 69")
-	_assert(BuildFlags.APP_VERSION_NAME == "0.1.69-pet-store-gift-delivery", "versionName 69")
+	_assert(BuildFlags.APP_VERSION_CODE == 70, "versionCode 70")
+	_assert(BuildFlags.APP_VERSION_NAME == "0.1.70-pet-store-gifting", "versionName 70")
 	var preset := FileAccess.get_file_as_string("res://export_presets.cfg")
-	_assert(preset.contains("version/code=69"), "export versionCode 69")
-	_assert(preset.contains("0.1.69-pet-store-gift-delivery"), "export versionName 69")
+	_assert(preset.contains("version/code=70"), "export versionCode 70")
+	_assert(preset.contains("0.1.70-pet-store-gifting"), "export versionName 70")
 	var proj := FileAccess.get_file_as_string("res://project.godot")
-	_assert(proj.contains("0.1.69-pet-store-gift-delivery"), "project.godot version")
+	_assert(proj.contains("0.1.70-pet-store-gifting"), "project.godot version")
 
 
 func _test_catalog() -> void:

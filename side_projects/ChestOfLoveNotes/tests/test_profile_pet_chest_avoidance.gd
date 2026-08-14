@@ -68,11 +68,11 @@ func _make_actor(seed: int = 42, vp: Vector2 = Vector2(390, 844)) -> PetActor:
 
 
 func _test_version() -> void:
-	_assert(BuildFlags.APP_VERSION_CODE == 69, "versionCode 69")
-	_assert(BuildFlags.APP_VERSION_NAME == "0.1.69-pet-store-gift-delivery", "versionName 69")
+	_assert(BuildFlags.APP_VERSION_CODE == 70, "versionCode 70")
+	_assert(BuildFlags.APP_VERSION_NAME == "0.1.70-pet-store-gifting", "versionName 70")
 	var preset := FileAccess.get_file_as_string("res://export_presets.cfg")
-	_assert(preset.contains("version/code=69"), "export versionCode 69")
-	_assert(preset.contains("0.1.69-pet-store-gift-delivery"), "export versionName 69")
+	_assert(preset.contains("version/code=70"), "export versionCode 70")
+	_assert(preset.contains("0.1.70-pet-store-gifting"), "export versionName 70")
 
 
 func _test_profile_pet_persistence() -> void:

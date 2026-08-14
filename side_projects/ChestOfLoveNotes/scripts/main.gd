@@ -1177,13 +1177,14 @@ func _on_chest_tapped() -> void:
 	var dim_tw := create_tween()
 	dim_tw.tween_property(dim, "color:a", 0.45 if not state.reduced_motion else 0.28, 0.28)
 
-	## PET_GIFT branch: approved chest open WITHOUT baked scroll reveal.
+	## PET_GIFT branch first (deterministic priority over NORMAL_SCROLL).
+	## Unread love notes remain pending for a subsequent open — not discarded.
 	if has_pet_gift:
 		await _chest.play_open_animation(state.reduced_motion, false)
 		await _present_pet_gift_delivery(pending_gift, dim)
 		return
 
-	## Always open — scroll emerges only when a new scroll exists.
+	## NORMAL_SCROLL: approved open + baked reveal only when a new scroll exists.
 	await _chest.play_open_animation(state.reduced_motion, has_scroll_reward)
 
 	if not has_scroll_reward:
@@ -4444,18 +4445,18 @@ func _send_pet_gift_to(pet_id: String, recipient_mode: String) -> void:
 	if state == null or state.pet_gifts == null:
 		_show_toast("Pet gifts unavailable.")
 		return
-	var sender_id := state.current_user_id()
+	var sender_id: String = state.current_user_id()
 	if sender_id.is_empty():
 		_show_toast("Sign in to send a pet.")
 		return
-	var recipient_id := sender_id
+	var recipient_id: String = sender_id
 	if recipient_mode == PetGiftService.RECIPIENT_PERSON:
-		var person := _person_from_friends_cache()
+		var person: Dictionary = _person_from_friends_cache()
 		recipient_id = str(person.get("id", "")).strip_edges()
 		if recipient_id.is_empty():
 			_show_toast(ProductStrings.PET_CONNECT_PERSON_FIRST)
 			return
-	var use_local := state.is_demo() or not state.is_online()
+	var use_local: bool = state.is_demo() or not state.is_online()
 	var result: Dictionary = await state.pet_gifts.send_pet_gift(pet_id, sender_id, recipient_id, use_local)
 	if not bool(result.get("ok", false)):
 		_show_toast(str(result.get("error", "Could not send pet gift.")))

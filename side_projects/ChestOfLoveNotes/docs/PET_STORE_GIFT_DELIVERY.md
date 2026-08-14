@@ -98,4 +98,4 @@ This pass uses approved idle parrot art + a celebratory overlay after the normal
 
 ## Version
 
-`0.1.69-pet-store-gift-delivery` (versionCode **69**)
+`0.1.70-pet-store-gifting` (versionCode **70**)
