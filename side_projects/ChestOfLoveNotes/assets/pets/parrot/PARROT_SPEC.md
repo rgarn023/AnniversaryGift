@@ -8,7 +8,7 @@
 | Default unlocked | Yes — available to all users |
 | Role | First test / flagship free pet |
 | Billing | **None** — never tied to Google Play Billing |
-| Artwork | **LOCKED master** + **IDLE + MOVE frames ready** (Phase 1B-2B-2); CHEST / TAP still awaiting |
+| Artwork | **LOCKED master** + **IDLE + MOVE + CHEST_INTERACTION ready** (Phase 1B-2B-3); TAP still awaiting |
 | Manifest | `assets/pets/parrot/parrot_animation_manifest.json` |
 | Visuals enabled | **false** (`PetRuntimeConfig.PET_VISUALS_ENABLED`) |
 
@@ -54,7 +54,19 @@ This exact parrot design is **LOCKED**. Do not redraw, regenerate, recolor, or c
 | Playback | 7 frames @ 10 fps, looping |
 | Motion | Cute beach hop/waddle (crouch → lift → peak → land → settle); derived from LOCKED master (not redrawn) |
 
-CHEST_INTERACTION / TAP_REACTION PNGs are **not** created yet. Package `artwork_ready` remains **false** until the full set exists. Do **not** enable visuals.
+### Chest interaction frames (Phase 1B-2B-3) — READY
+
+| Field | Value |
+| --- | --- |
+| Status | **artwork_ready** |
+| Paths | `chest_interaction/parrot_chest_00.png` … `chest_interaction/parrot_chest_07.png` |
+| Canvas | 128×128 PNG RGBA, transparent background |
+| Facing | RIGHT |
+| Ground anchor | **(64, 116)** — feet locked every frame; no hop |
+| Playback | 8 frames @ 10 fps, play once |
+| Motion | Affectionate lean / nuzzle / rub toward chest side, then settle; actor already beside chest at runtime — no whole-sprite travel; chest not baked into frames |
+
+TAP_REACTION PNGs are **not** created yet. Package `artwork_ready` remains **false** until the full set exists. Do **not** enable visuals.
 
 ---
 
@@ -169,7 +181,8 @@ assets/pets/parrot/
 
 `idle/` contains production idle frames `parrot_idle_00.png`–`parrot_idle_04.png`.  
 `move/` contains production move frames `parrot_move_00.png`–`parrot_move_06.png`.  
-`chest_interaction/` and `tap_reaction/` still contain `.gitkeep` only — **no fake PNGs**.  
+`chest_interaction/` contains production frames `parrot_chest_00.png`–`parrot_chest_07.png`.  
+`tap_reaction/` still contains `.gitkeep` only — **no fake PNGs**.  
 `source/parrot_master.png` is the LOCKED production master (ingest only; not loaded at runtime).
 
 ---

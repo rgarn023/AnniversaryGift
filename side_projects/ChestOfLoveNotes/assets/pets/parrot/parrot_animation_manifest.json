@@ -1,10 +1,10 @@
 {
   "version": 1,
   "pet_id": "parrot",
-  "phase": "1B-2B-2",
+  "phase": "1B-2B-3",
   "visuals_enabled": false,
   "artwork_ready": false,
-  "status": "idle_and_move_artwork_ready_awaiting_remaining_frames",
+  "status": "idle_move_chest_artwork_ready_awaiting_tap",
   "approved_master_path": "assets/pets/parrot/source/parrot_master.png",
   "approved_master_sha256": "89e28ad50111f8c6ebf1e5abbea29934b3df9bd79060e38bc8c5e3e3d382e0e2",
   "approved_master_status": "LOCKED",
@@ -134,8 +134,9 @@
       "frame_duration_sec": 0.1,
       "loop": false,
       "flip_for_left": true,
-      "status": "awaiting_artwork",
-      "intent": "Affectionate nuzzle/rub or friendly beside-chest interaction, then return to neutral"
+      "status": "artwork_ready",
+      "intent": "Affectionate nuzzle/rub or friendly beside-chest interaction, then return to neutral",
+      "notes": "Production chest_interaction frames 00-07 authored from LOCKED master (foot-locked lean/nuzzle/rub; no hop; no whole-sprite travel; chest not baked); visuals still disabled."
     },
     {
       "name": "tap_reaction",
