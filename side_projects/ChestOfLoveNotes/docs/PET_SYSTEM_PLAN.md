@@ -70,7 +70,7 @@ Expected / delivered:
 - Spawn/show free parrot on CHEST with idle/move/chest/tap animations
 - Soft runtime shadow + tight tap hitbox; hide during reward
 - Still no Pet Collection UI, purchases, or gifting
-- versionCode 62 / `0.1.62-free-parrot-runtime`
+- versionCode 63 / `0.1.63-parrot-visible-fix`
 ---
 
 ## PHASE 1C — Pet selection / basic Pet Collection

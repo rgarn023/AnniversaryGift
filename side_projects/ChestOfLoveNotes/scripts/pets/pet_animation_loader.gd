@@ -107,6 +107,16 @@ func load_manifest(path: String) -> bool:
 	return true
 
 
+func _frame_resource_exists(path: String) -> bool:
+	## Exported APKs pack remapped .ctex textures — not the original PNG bytes.
+	## FileAccess.file_exists(res://…png) is FALSE on device after export, while
+	## ResourceLoader.exists / load() still resolve the imported texture. Using
+	## FileAccess here forced artwork_ready=false → PetVisual stayed fully hidden.
+	if ResourceLoader.exists(path):
+		return true
+	return FileAccess.file_exists(path)
+
+
 func _probe_animation_files() -> void:
 	missing_files.clear()
 	present_files.clear()
@@ -121,7 +131,7 @@ func _probe_animation_files() -> void:
 		for i in range(count):
 			var fname := _format_frame_name(pattern, i, name, folder)
 			var path := root + folder + "/" + fname
-			if FileAccess.file_exists(path):
+			if _frame_resource_exists(path):
 				present_files.append(path)
 			else:
 				missing_files.append(path)

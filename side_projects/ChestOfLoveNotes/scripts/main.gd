@@ -886,9 +886,15 @@ func _mount_pet_runtime(chest_env: Node) -> void:
 		var br: Vector2 = (root as Node2D).to_local(grect.position + grect.size)
 		chest_local = Rect2(tl, br - tl)
 	state.pets.configure_spawned_actor(vp, chest_local)
+	## Normal CHEST entry must never keep a stale reward-hide from a prior open.
+	if actor.has_method("resume_after_reward"):
+		actor.call("resume_after_reward")
 	## Pet draws above beach art inside ChestEnvironment; UI margin (z=2) stays above.
 	if root is CanvasItem:
 		(root as CanvasItem).z_index = 1
+	if actor is CanvasItem:
+		## Keep parrot above ocean shimmer clip (z=1) within the environment stack.
+		(actor as CanvasItem).z_index = 3
 
 
 func _show_main_chest() -> void:
