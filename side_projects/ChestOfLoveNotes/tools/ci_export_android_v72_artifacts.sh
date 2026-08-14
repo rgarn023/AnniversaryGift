@@ -32,7 +32,7 @@ fi
 export ANDROID_HOME="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}}"
 export ANDROID_SDK_ROOT="$ANDROID_HOME"
 export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-21-openjdk-amd64}"
-export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/build-tools/34.0.0:$PATH"
+export PATH="$JAVA_HOME/bin:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/build-tools/34.0.0:$PATH"
 
 EXPECTED_PACKAGE="$(tr -d '[:space:]' < "$EXPECTED_PKG_FILE")"
 EXPECTED_CERT="$(tr -d '[:space:]' < "$EXPECTED_CERT_FILE" | tr 'A-F' 'a-f')"
@@ -103,6 +103,58 @@ android_build_tools() {
 BT="$(android_build_tools)"
 AAPT="$BT/aapt"
 APKSIGNER="$BT/apksigner"
+
+# Resolve apkanalyzer if present (preferred for application-id).
+resolve_apkanalyzer() {
+  if command -v apkanalyzer >/dev/null 2>&1; then
+    command -v apkanalyzer
+    return 0
+  fi
+  local cand
+  for cand in \
+    "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" \
+    "$ANDROID_HOME/tools/bin/apkanalyzer"; do
+    if [[ -x "$cand" ]]; then
+      echo "$cand"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Extract Android application ID from an APK.
+# Never use a greedy ".*name='...'" match: that falsely returns values from
+# versionName / platformBuildVersionName / compileSdkVersionCodename (e.g. "16").
+# Prints the ID on stdout; returns non-zero (with ERROR on stderr) on failure.
+# Callers must not rely on die/exit inside $(...) — that only kills the subshell.
+extract_apk_package_id() {
+  local apk="$1"
+  local pkg="" analyzer=""
+
+  if analyzer="$(resolve_apkanalyzer)"; then
+    pkg="$("$analyzer" manifest application-id "$apk" 2>/dev/null | tr -d '[:space:]' || true)"
+  fi
+
+  if [[ -z "$pkg" ]]; then
+    # Anchor to the package: line's name='...' field only.
+    pkg="$("$AAPT" dump badging "$apk" | sed -n "s/^package: name='\([^']*\)'.*/\1/p" | head -n1 | tr -d '[:space:]')"
+  fi
+
+  if [[ -z "$pkg" ]]; then
+    echo "ERROR: failed to parse package/application ID from APK (empty parser output)" >&2
+    return 1
+  fi
+  if [[ "$pkg" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: parsed package ID is purely numeric ('$pkg'); refusing misleading mismatch (likely parser bug)" >&2
+    return 1
+  fi
+  # Require at least one dot-separated Java-style package segment pair.
+  if [[ ! "$pkg" =~ ^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z][a-zA-Z0-9_]*)+$ ]]; then
+    echo "ERROR: malformed package/application ID from parser: '$pkg'" >&2
+    return 1
+  fi
+  printf '%s\n' "$pkg"
+}
 
 patch_presets() {
   local export_format="$1"
@@ -219,17 +271,21 @@ verify_apk() {
 
   local badging
   badging="$("$AAPT" dump badging "$apk")"
-  pkg=$(sed -n "s/.*name='\([^']*\)'.*/\1/p" <<<"$badging" | head -1)
-  vc=$(sed -n "s/.*versionCode='\([^']*\)'.*/\1/p" <<<"$badging" | head -1)
-  vn=$(sed -n "s/.*versionName='\([^']*\)'.*/\1/p" <<<"$badging" | head -1)
-  abis=$(sed -n "s/.*native-code: '\([^']*\)'.*/\1/p" <<<"$badging" | head -1 | tr -d ' ')
+  pkg="$(extract_apk_package_id "$apk")" || die "package/application ID extraction failed"
+  # versionCode / versionName: match those keys explicitly (not a bare name=).
+  vc=$(sed -n "s/^package:.*versionCode='\([^']*\)'.*/\1/p" <<<"$badging" | head -n1)
+  vn=$(sed -n "s/^package:.*versionName='\([^']*\)'.*/\1/p" <<<"$badging" | head -n1)
+  abis=$(sed -n "s/^native-code: '\([^']*\)'.*/\1/p" <<<"$badging" | head -n1 | tr -d ' ')
 
   echo "package=$pkg"
   echo "versionCode=$vc"
   echo "versionName=$vn"
   echo "abis=$abis"
 
-  [[ "$pkg" == "$EXPECTED_PACKAGE" ]] || die "package mismatch: $pkg"
+  [[ -n "$vc" ]] || die "failed to parse versionCode from APK badging"
+  [[ -n "$vn" ]] || die "failed to parse versionName from APK badging"
+  [[ -n "$abis" ]] || die "failed to parse native-code ABIs from APK badging"
+  [[ "$pkg" == "$EXPECTED_PACKAGE" ]] || die "package mismatch: got '$pkg', expected '$EXPECTED_PACKAGE'"
   [[ "$vc" == "72" ]] || die "versionCode mismatch: $vc"
   [[ "$vn" == "$VERSION_NAME" ]] || die "versionName mismatch: $vn"
   [[ "$abis" == "arm64-v8a" ]] || die "ABI mismatch (want arm64-v8a only): '$abis'"
