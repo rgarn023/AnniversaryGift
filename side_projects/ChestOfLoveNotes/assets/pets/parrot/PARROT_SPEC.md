@@ -8,7 +8,7 @@
 | Default unlocked | Yes — available to all users |
 | Role | First test / flagship free pet |
 | Billing | **None** — never tied to Google Play Billing |
-| Artwork | **LOCKED master** + **IDLE frames ready** (Phase 1B-2B-1); MOVE / CHEST / TAP still awaiting |
+| Artwork | **LOCKED master** + **IDLE + MOVE frames ready** (Phase 1B-2B-2); CHEST / TAP still awaiting |
 | Manifest | `assets/pets/parrot/parrot_animation_manifest.json` |
 | Visuals enabled | **false** (`PetRuntimeConfig.PET_VISUALS_ENABLED`) |
 
@@ -34,7 +34,7 @@ This exact parrot design is **LOCKED**. Do not redraw, regenerate, recolor, or c
 
 | Field | Value |
 | --- | --- |
-| Status | **artwork_ready** (idle only) |
+| Status | **artwork_ready** |
 | Paths | `idle/parrot_idle_00.png` … `idle/parrot_idle_04.png` |
 | Canvas | 128×128 PNG RGBA, transparent background |
 | Facing | RIGHT |
@@ -42,7 +42,19 @@ This exact parrot design is **LOCKED**. Do not redraw, regenerate, recolor, or c
 | Playback | 5 frames @ 5 fps, looping |
 | Motion | Subtle breathe + blink + tiny head settle; derived from LOCKED master (not redrawn) |
 
-MOVE / CHEST_INTERACTION / TAP_REACTION PNGs are **not** created yet. Package `artwork_ready` remains **false** until the full set exists. Do **not** enable visuals.
+### Move frames (Phase 1B-2B-2) — READY
+
+| Field | Value |
+| --- | --- |
+| Status | **artwork_ready** |
+| Paths | `move/parrot_move_00.png` … `move/parrot_move_06.png` |
+| Canvas | 128×128 PNG RGBA, transparent background |
+| Facing | RIGHT |
+| Ground anchor | **(64, 116)** — contact frames lock feet; hop lifts body inside frame (≤16 px) |
+| Playback | 7 frames @ 10 fps, looping |
+| Motion | Cute beach hop/waddle (crouch → lift → peak → land → settle); derived from LOCKED master (not redrawn) |
+
+CHEST_INTERACTION / TAP_REACTION PNGs are **not** created yet. Package `artwork_ready` remains **false** until the full set exists. Do **not** enable visuals.
 
 ---
 
@@ -156,7 +168,8 @@ assets/pets/parrot/
 ```
 
 `idle/` contains production idle frames `parrot_idle_00.png`–`parrot_idle_04.png`.  
-`move/`, `chest_interaction/`, and `tap_reaction/` still contain `.gitkeep` only — **no fake PNGs**.  
+`move/` contains production move frames `parrot_move_00.png`–`parrot_move_06.png`.  
+`chest_interaction/` and `tap_reaction/` still contain `.gitkeep` only — **no fake PNGs**.  
 `source/parrot_master.png` is the LOCKED production master (ingest only; not loaded at runtime).
 
 ---
