@@ -1,10 +1,10 @@
 {
   "version": 1,
   "pet_id": "parrot",
-  "phase": "1B-2B-3",
+  "phase": "1B-2B-4",
   "visuals_enabled": false,
-  "artwork_ready": false,
-  "status": "idle_move_chest_artwork_ready_awaiting_tap",
+  "artwork_ready": true,
+  "status": "ARTWORK_READY",
   "approved_master_path": "assets/pets/parrot/source/parrot_master.png",
   "approved_master_sha256": "89e28ad50111f8c6ebf1e5abbea29934b3df9bd79060e38bc8c5e3e3d382e0e2",
   "approved_master_status": "LOCKED",
@@ -154,8 +154,9 @@
       "frame_duration_sec": 0.1,
       "loop": false,
       "flip_for_left": true,
-      "status": "awaiting_artwork",
-      "intent": "Quick cheerful surprise/reaction, then return to idle"
+      "status": "artwork_ready",
+      "intent": "Quick cheerful surprise/reaction, then return to idle",
+      "notes": "Production tap_reaction frames 00-04 authored from LOCKED master (foot-locked head perk / eye widen / small wing flutter + body pop; no hop; no canvas travel); visuals still disabled."
     }
   ],
   "state_mapping": {

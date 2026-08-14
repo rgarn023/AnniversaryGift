@@ -8,7 +8,7 @@
 | Default unlocked | Yes — available to all users |
 | Role | First test / flagship free pet |
 | Billing | **None** — never tied to Google Play Billing |
-| Artwork | **LOCKED master** + **IDLE + MOVE + CHEST_INTERACTION ready** (Phase 1B-2B-3); TAP still awaiting |
+| Artwork | **LOCKED master** + **full animation set ready** (Phase 1B-2B-4: IDLE + MOVE + CHEST_INTERACTION + TAP_REACTION) |
 | Manifest | `assets/pets/parrot/parrot_animation_manifest.json` |
 | Visuals enabled | **false** (`PetRuntimeConfig.PET_VISUALS_ENABLED`) |
 
@@ -66,7 +66,19 @@ This exact parrot design is **LOCKED**. Do not redraw, regenerate, recolor, or c
 | Playback | 8 frames @ 10 fps, play once |
 | Motion | Affectionate lean / nuzzle / rub toward chest side, then settle; actor already beside chest at runtime — no whole-sprite travel; chest not baked into frames |
 
-TAP_REACTION PNGs are **not** created yet. Package `artwork_ready` remains **false** until the full set exists. Do **not** enable visuals.
+### Tap reaction frames (Phase 1B-2B-4) — READY
+
+| Field | Value |
+| --- | --- |
+| Status | **artwork_ready** |
+| Paths | `tap_reaction/parrot_tap_00.png` … `tap_reaction/parrot_tap_04.png` |
+| Canvas | 128×128 PNG RGBA, transparent background |
+| Facing | RIGHT |
+| Ground anchor | **(64, 116)** — feet locked every frame; no hop / no canvas travel |
+| Playback | 5 frames @ 10 fps, play once |
+| Motion | Quick cheerful tap reaction (head perk + eye widen → small wing flutter / body pop → settle → near-neutral exit); derived from LOCKED master (not redrawn) |
+
+Full package is **25/25** frames. Manifest `artwork_ready = true`, `status = ARTWORK_READY`. Do **not** enable visuals yet (Phase 1B-2C).
 
 ---
 
@@ -182,7 +194,7 @@ assets/pets/parrot/
 `idle/` contains production idle frames `parrot_idle_00.png`–`parrot_idle_04.png`.  
 `move/` contains production move frames `parrot_move_00.png`–`parrot_move_06.png`.  
 `chest_interaction/` contains production frames `parrot_chest_00.png`–`parrot_chest_07.png`.  
-`tap_reaction/` still contains `.gitkeep` only — **no fake PNGs**.  
+`tap_reaction/` contains production frames `parrot_tap_00.png`–`parrot_tap_04.png`.  
 `source/parrot_master.png` is the LOCKED production master (ingest only; not loaded at runtime).
 
 ---
@@ -200,11 +212,11 @@ PetActor
 | --- | --- |
 | `PET_RUNTIME_ENABLED` | `true` |
 | `PET_VISUALS_ENABLED` | `false` |
-| `artwork_ready` | `false` until all contract frames exist |
+| `artwork_ready` | **true** (full 25-frame package present; visuals still gated) |
 | Missing art | Non-fatal; no placeholders; no error spam |
 
-Validation: `tools/validate_parrot_assets.py` → `AWAITING_ARTWORK` when empty.  
-Contact sheets (later): `tools/build_parrot_contact_sheets.py`.
+Validation: `tools/validate_parrot_assets.py` → `ARTWORK_READY` for full package.  
+Contact sheets: `tools/build_parrot_contact_sheets.py`.
 
 ---
 
