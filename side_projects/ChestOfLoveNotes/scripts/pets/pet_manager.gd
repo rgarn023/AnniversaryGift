@@ -1,8 +1,7 @@
 extends RefCounted
 class_name PetManager
 ## Owns pet catalog + local ownership/active-pet persistence + CHEST spawn.
-## Phase 1B-1: invisible runtime spawn when PET_RUNTIME_ENABLED.
-## Visuals gated by PetRuntimeConfig.PET_VISUALS_ENABLED (false).
+## Phase 1B-2C: free parrot visuals enabled when PET_VISUALS_ENABLED + artwork_ready.
 
 const PERSIST_PATH := "user://coln_pets.cfg"
 const SECTION_OWNED := "owned"

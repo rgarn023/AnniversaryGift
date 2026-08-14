@@ -1,8 +1,8 @@
 {
   "version": 1,
   "pet_id": "parrot",
-  "phase": "1B-2B-4",
-  "visuals_enabled": false,
+  "phase": "1B-2C",
+  "visuals_enabled": true,
   "artwork_ready": true,
   "status": "ARTWORK_READY",
   "approved_master_path": "assets/pets/parrot/source/parrot_master.png",
@@ -68,8 +68,14 @@
   "shadow": {
     "strategy": "runtime_soft_ellipse",
     "authored_shadow_asset": false,
-    "render_now": false,
-    "notes": "Small subtle ellipse under pet; may scale slightly during hop. Match restrained chest contact-shadow tone. Do not render until Phase 1B-2C."
+    "render_now": true,
+    "notes": "Small subtle ellipse under pet; may scale slightly during hop. Match restrained chest contact-shadow tone. Enabled in Phase 1B-2C."
+  },
+  "tap_hitbox": {
+    "derived_from": "master_visible_bbox_76x88",
+    "pad_px": 10,
+    "canvas_size_px": [96, 108],
+    "notes": "Tight finger hitbox in canvas space; PetVisual scale applies. Must not steal nearby chest taps."
   },
   "asset_root": "res://assets/pets/parrot/",
   "animations": [

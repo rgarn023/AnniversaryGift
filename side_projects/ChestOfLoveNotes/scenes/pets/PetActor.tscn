@@ -17,3 +17,8 @@ modulate = Color(1, 1, 1, 0)
 visible = false
 modulate = Color(1, 1, 1, 0)
 centered = true
+
+[node name="TapHitBox" type="Control" parent="PetVisual"]
+visible = true
+mouse_filter = 2
+focus_mode = 0

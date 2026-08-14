@@ -1,8 +1,7 @@
 extends Node2D
 class_name PetActor
 ## Runtime pet instance on the CHEST screen.
-## Phase 1B-2A: animation contract + loader ready; ZERO visible pixels.
-## PetVisual exists but stays hidden until PET_VISUALS_ENABLED + artwork.
+## Phase 1B-2C: free parrot visuals enabled (validated artwork).
 
 signal state_changed(previous: int, next: int)
 signal tapped
@@ -26,11 +25,14 @@ var _hold_timer: float = 0.0
 var _state_before_tap: int = PetState.Kind.IDLE
 var _arrival_epsilon: float = 3.0
 var _configured: bool = false
+var _chest_anim_playing: bool = false
 
 var _pet_visual: Node2D = null
 var _animated_sprite: AnimatedSprite2D = null
 var _pet_shadow: Node2D = null
+var _tap_hit: Control = null
 var _runtime_scale: float = 0.72
+var _shadow_draw: PetShadowDraw = null
 
 
 func _ready() -> void:
@@ -38,10 +40,8 @@ func _ready() -> void:
 	_load_animation_contract()
 	_apply_visual_gate()
 	z_index = 3
-	## Logic runs even while visually invisible.
 	set_process(PetRuntimeConfig.PET_RUNTIME_ENABLED)
 	set_physics_process(false)
-	## No Area2D / clickable region — do not intercept CHEST taps.
 	if not _configured:
 		_begin_idle()
 
@@ -70,6 +70,7 @@ func configure_runtime(vp_size: Vector2, chest_local_rect: Rect2, seed: int = -1
 	_ensure_visual_nodes()
 	_load_animation_contract()
 	_apply_runtime_scale()
+	_layout_tap_hitbox()
 	_apply_visual_gate()
 	set_process(PetRuntimeConfig.PET_RUNTIME_ENABLED)
 	_begin_idle()
@@ -78,10 +79,14 @@ func configure_runtime(vp_size: Vector2, chest_local_rect: Rect2, seed: int = -1
 func _ensure_visual_nodes() -> void:
 	## Structure:
 	## PetActor
-	## ├── PetVisual (Node2D) — always hidden in 1B-2A
-	## │   ├── PetShadow (Node2D) — runtime ellipse later; not drawn yet
-	## │   └── AnimatedSprite2D — no SpriteFrames until artwork_ready
+	## └── PetVisual (Node2D)
+	##     ├── PetShadow (PetShadowDraw) — soft runtime ellipse
+	##     ├── AnimatedSprite2D — real parrot frames when artwork_ready
+	##     └── TapHitBox (Control) — tight finger hitbox; does not cover chest
 	if _pet_visual != null and is_instance_valid(_pet_visual):
+		_ensure_shadow_script()
+		_ensure_tap_hitbox_node()
+		_apply_anchor_offset()
 		return
 	_pet_visual = get_node_or_null("PetVisual") as Node2D
 	if _pet_visual == null:
@@ -93,37 +98,103 @@ func _ensure_visual_nodes() -> void:
 		_pet_shadow = Node2D.new()
 		_pet_shadow.name = "PetShadow"
 		_pet_visual.add_child(_pet_shadow)
+	_ensure_shadow_script()
 	_animated_sprite = _pet_visual.get_node_or_null("AnimatedSprite2D") as AnimatedSprite2D
 	if _animated_sprite == null:
 		_animated_sprite = AnimatedSprite2D.new()
 		_animated_sprite.name = "AnimatedSprite2D"
 		_pet_visual.add_child(_animated_sprite)
-	## Offset so ground_anchor lands on PetActor.position (feet on sand path).
-	## Sprite draws centered on AnimatedSprite2D by default — shift by anchor.
+	_ensure_tap_hitbox_node()
 	_apply_anchor_offset()
-	## Hard hide — no placeholder texture, no colored rect.
+	_animated_sprite.centered = true
+	_animated_sprite.flip_h = false
+	## Default hidden until gate enables (artwork + PET_VISUALS_ENABLED).
 	_pet_visual.visible = false
 	_pet_visual.modulate.a = 0.0
 	_animated_sprite.visible = false
 	_animated_sprite.modulate.a = 0.0
 	_pet_shadow.visible = false
 	_pet_shadow.modulate.a = 0.0
-	_animated_sprite.sprite_frames = null
-	_animated_sprite.centered = true
-	_animated_sprite.flip_h = false
+
+
+func _ensure_shadow_script() -> void:
+	if _pet_shadow == null:
+		return
+	if _pet_shadow.get_script() == null:
+		_pet_shadow.set_script(load("res://scripts/pets/pet_shadow.gd"))
+	_shadow_draw = _pet_shadow as PetShadowDraw
+	if _shadow_draw != null:
+		_shadow_draw.queue_redraw()
+
+
+func _ensure_tap_hitbox_node() -> void:
+	if _pet_visual == null:
+		return
+	_tap_hit = _pet_visual.get_node_or_null("TapHitBox") as Control
+	if _tap_hit == null:
+		_tap_hit = Control.new()
+		_tap_hit.name = "TapHitBox"
+		_tap_hit.focus_mode = Control.FOCUS_NONE
+		_tap_hit.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+		_tap_hit.gui_input.connect(_on_tap_hit_gui_input)
+		_pet_visual.add_child(_tap_hit)
+	_layout_tap_hitbox()
+
+
+func _layout_tap_hitbox() -> void:
+	if _tap_hit == null or animation_loader == null:
+		return
+	## Hitbox in PetVisual / canvas space (PetVisual.scale applies on screen).
+	## Body bbox (24,28)-(99,115) + 10px pad → 96×108, origin at ground_anchor.
+	var pad := PetRuntimeConfig.TAP_HITBOX_PAD_PX
+	var left := PetRuntimeConfig.TAP_HITBOX_BODY_LEFT_PX - pad
+	var top := PetRuntimeConfig.TAP_HITBOX_BODY_TOP_PX - pad
+	var size := PetRuntimeConfig.tap_hitbox_size_canvas()
+	var anchor := animation_loader.ground_anchor
+	_tap_hit.position = Vector2(left - anchor.x, top - anchor.y)
+	_tap_hit.size = size
+	_tap_hit.mouse_filter = (
+		Control.MOUSE_FILTER_STOP
+		if PetRuntimeConfig.PET_VISUALS_ENABLED and is_artwork_ready() and not reward_hide_requested and not paused
+		else Control.MOUSE_FILTER_IGNORE
+	)
+
+
+func _on_tap_hit_gui_input(event: InputEvent) -> void:
+	if not PetRuntimeConfig.PET_VISUALS_ENABLED:
+		return
+	if paused or reward_hide_requested:
+		return
+	if not is_artwork_ready():
+		return
+	if state == PetState.Kind.TAP_REACTION:
+		## Consume rapid re-taps during reaction so they cannot fall through to chest.
+		if _is_press_event(event):
+			_tap_hit.accept_event()
+		return
+	if not _is_press_event(event):
+		return
+	_tap_hit.accept_event()
+	trigger_tap_reaction()
+
+
+func _is_press_event(event: InputEvent) -> bool:
+	if event is InputEventScreenTouch:
+		return (event as InputEventScreenTouch).pressed
+	if event is InputEventMouseButton:
+		var mb := event as InputEventMouseButton
+		return mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT
+	return false
 
 
 func _load_animation_contract() -> void:
-	## Safe if called repeatedly. Missing art → artwork_ready=false, no spam.
 	if animation_loader == null:
 		animation_loader = PetAnimationLoader.new()
 	if pet_id.is_empty() or pet_id == "parrot":
 		animation_loader.load_parrot_manifest()
 	else:
-		## Future pets: still use parrot loader path only for Phase 1.
 		animation_loader.load_parrot_manifest()
 	if animation_loader.artwork_ready and animation_loader.sprite_frames != null:
-		## Attach frames only when complete; still keep node hidden.
 		if _animated_sprite != null:
 			_animated_sprite.sprite_frames = animation_loader.sprite_frames
 	else:
@@ -135,6 +206,7 @@ func _load_animation_contract() -> void:
 	_apply_anchor_offset()
 	_apply_runtime_scale()
 	_apply_facing_to_sprite()
+	_layout_tap_hitbox()
 
 
 func _apply_anchor_offset() -> void:
@@ -146,7 +218,7 @@ func _apply_anchor_offset() -> void:
 	var center := Vector2(float(canvas.x) * 0.5, float(canvas.y) * 0.5)
 	_animated_sprite.position = Vector2(center.x - anchor.x, center.y - anchor.y)
 	if _pet_shadow != null:
-		## Shadow sits at feet (actor origin) — tiny downward bias reserved for later.
+		## Shadow centered under feet (actor origin / ground anchor).
 		_pet_shadow.position = Vector2(0, 1)
 
 
@@ -160,9 +232,13 @@ func _apply_runtime_scale() -> void:
 
 
 func _apply_visual_gate() -> void:
-	## Critical: no placeholder graphics. Visual subtree stays fully hidden in 1B-2A.
 	_ensure_visual_nodes()
-	var show := PetRuntimeConfig.PET_VISUALS_ENABLED and animation_loader != null and animation_loader.artwork_ready
+	var show := (
+		PetRuntimeConfig.PET_VISUALS_ENABLED
+		and animation_loader != null
+		and animation_loader.artwork_ready
+		and not reward_hide_requested
+	)
 	if show:
 		visible = true
 		modulate.a = 1.0
@@ -170,12 +246,20 @@ func _apply_visual_gate() -> void:
 		_pet_visual.modulate.a = 1.0
 		_animated_sprite.visible = true
 		_animated_sprite.modulate.a = 1.0
-		## Shadow still reserved — not rendered until Phase 1B-2C chooses to.
-		_pet_shadow.visible = false
-		_pet_shadow.modulate.a = 0.0
+		_pet_shadow.visible = true
+		_pet_shadow.modulate.a = 1.0
+		if _shadow_draw != null:
+			_shadow_draw.queue_redraw()
+		_play_animation_for_visual_state(_visual_state)
 	else:
-		visible = false
-		modulate.a = 0.0
+		visible = false if not PetRuntimeConfig.PET_VISUALS_ENABLED or not is_artwork_ready() else true
+		## When reward-hiding, keep actor node alive but fully invisible.
+		if reward_hide_requested and PetRuntimeConfig.PET_VISUALS_ENABLED and is_artwork_ready():
+			visible = true
+			modulate.a = 0.0
+		elif not show:
+			visible = false
+			modulate.a = 0.0
 		if _pet_visual != null:
 			_pet_visual.visible = false
 			_pet_visual.modulate.a = 0.0
@@ -187,29 +271,31 @@ func _apply_visual_gate() -> void:
 		if _pet_shadow != null:
 			_pet_shadow.visible = false
 			_pet_shadow.modulate.a = 0.0
-		## Strip any accidental drawable children (safety) except known structure.
 		for c in get_children():
 			if c is CanvasItem and c != _pet_visual:
 				(c as CanvasItem).visible = false
 				(c as CanvasItem).modulate.a = 0.0
+	_layout_tap_hitbox()
 
 
 func set_runtime_visible(enabled: bool) -> void:
-	## Kept for API compatibility; Phase 1B-2A still honors PET_VISUALS_ENABLED + artwork.
 	if not PetRuntimeConfig.PET_VISUALS_ENABLED or not is_artwork_ready():
 		_apply_visual_gate()
 		set_process(PetRuntimeConfig.PET_RUNTIME_ENABLED)
+		return
+	if reward_hide_requested and not enabled:
+		_apply_visual_gate()
+		set_process(false)
 		return
 	visible = enabled
 	modulate.a = 1.0 if enabled else 0.0
 	if _pet_visual != null:
 		_pet_visual.visible = enabled
 		_pet_visual.modulate.a = 1.0 if enabled else 0.0
-	set_process(PetRuntimeConfig.PET_RUNTIME_ENABLED)
+	set_process(PetRuntimeConfig.PET_RUNTIME_ENABLED and enabled)
 
 
 func set_visual_state(visual_name: String) -> void:
-	## Animation API — no-op playback while visuals disabled or art missing.
 	_visual_state = visual_name
 	_apply_facing_to_sprite()
 	if not PetRuntimeConfig.PET_VISUALS_ENABLED:
@@ -229,6 +315,25 @@ func is_artwork_ready() -> bool:
 
 func get_artwork_ready() -> bool:
 	return is_artwork_ready()
+
+
+func get_tap_hitbox_size_canvas() -> Vector2:
+	return PetRuntimeConfig.tap_hitbox_size_canvas()
+
+
+func get_tap_hitbox_size_screen() -> Vector2:
+	var s := _runtime_scale
+	if safe_area != null:
+		s *= safe_area.scale_factor()
+	return PetRuntimeConfig.tap_hitbox_size_canvas() * s
+
+
+func get_on_screen_visible_height() -> float:
+	## Approx visible parrot height after runtime scale (master body ~88px).
+	var s := _runtime_scale
+	if safe_area != null:
+		s *= safe_area.scale_factor()
+	return PetRuntimeConfig.TAP_HITBOX_BODY_H_PX * s
 
 
 func _play_animation_for_visual_state(visual_name: String) -> void:
@@ -257,7 +362,9 @@ func transition_to(next_state: int) -> void:
 		PetState.Kind.ROAM:
 			set_visual_state("move")
 		PetState.Kind.CHEST_INTERACTION:
-			set_visual_state("chest_interaction")
+			## Approach uses move; one-shot chest anim starts on arrival.
+			_chest_anim_playing = false
+			set_visual_state("move")
 		PetState.Kind.TAP_REACTION:
 			set_visual_state("tap_reaction")
 		_:
@@ -265,30 +372,36 @@ func transition_to(next_state: int) -> void:
 
 
 func trigger_tap_reaction() -> void:
-	## Callable by tests / future hitbox. Does not register input itself.
-	if paused:
+	if paused or reward_hide_requested:
+		return
+	if state == PetState.Kind.TAP_REACTION:
 		return
 	_state_before_tap = state
-	if _state_before_tap == PetState.Kind.TAP_REACTION:
-		_state_before_tap = PetState.Kind.IDLE
 	_hold_timer = PetRuntimeConfig.TAP_REACTION_HOLD_SEC
+	## Prefer authored anim length when available (5 @ 10fps = 0.5s).
+	if animation_loader != null and animation_loader.artwork_ready:
+		var anim_def: Dictionary = animation_loader.get_animation_def("tap_reaction")
+		var frames := int(anim_def.get("expected_frame_count", 5))
+		var fps := float(anim_def.get("fps", 10.0))
+		if fps > 0.0:
+			_hold_timer = maxf(PetRuntimeConfig.TAP_REACTION_HOLD_SEC, float(frames) / fps + 0.15)
 	transition_to(PetState.Kind.TAP_REACTION)
 	tapped.emit()
 
 
 func request_tap_reaction() -> void:
-	## Alias for Phase 1A API.
 	trigger_tap_reaction()
 
 
 func pause_for_reward() -> void:
 	paused = true
-	## Optional future hide pathway (no visible effect while visuals are off).
 	if PetRuntimeConfig.reward_policy_default() == PetRuntimeConfig.RewardPetPolicy.HIDE_TEMPORARILY:
 		reward_hide_requested = true
-	## Abort in-flight chest interaction so reward is never contested.
+	## Abort in-flight motion so reward is never contested.
 	if state == PetState.Kind.CHEST_INTERACTION or state == PetState.Kind.ROAM:
 		target_position = position
+	_chest_anim_playing = false
+	_apply_visual_gate()
 	set_process(false)
 
 
@@ -301,7 +414,6 @@ func resume_after_reward() -> void:
 
 
 func set_reward_hide_requested(hide: bool) -> void:
-	## Explicit control for Phase 1B-2 policy choice A vs B.
 	reward_hide_requested = hide
 	_apply_visual_gate()
 
@@ -340,14 +452,19 @@ func get_debug_snapshot() -> Dictionary:
 		"visible": visible,
 		"modulate_a": modulate.a,
 		"pet_visual_visible": _pet_visual.visible if _pet_visual != null else false,
+		"shadow_visible": _pet_shadow.visible if _pet_shadow != null else false,
 		"flip_h": _animated_sprite.flip_h if _animated_sprite != null else false,
+		"tap_hitbox_canvas": get_tap_hitbox_size_canvas(),
+		"tap_hitbox_screen": get_tap_hitbox_size_screen(),
+		"on_screen_visible_height": get_on_screen_visible_height(),
+		"runtime_scale": _runtime_scale,
+		"pet_visual_scale": _pet_visual.scale if _pet_visual != null else Vector2.ZERO,
 		"safe_area": safe_area.to_debug_dict(),
 		"animation_loader": anim_debug,
 	}
 
 
 func force_state_for_test(next_state: int) -> void:
-	## Deterministic test hook.
 	match next_state:
 		PetState.Kind.IDLE:
 			_begin_idle()
@@ -381,14 +498,18 @@ func _process(delta: float) -> void:
 			_tick_idle(delta)
 		PetState.Kind.ROAM:
 			_tick_move_toward(delta, true)
+			_update_shadow_hop_from_move_anim()
 		PetState.Kind.CHEST_INTERACTION:
 			_tick_chest_interaction(delta)
 		PetState.Kind.TAP_REACTION:
 			_tick_tap_reaction(delta)
+	if state != PetState.Kind.ROAM and _shadow_draw != null:
+		_shadow_draw.set_hop_lift(0.0)
 
 
 func _begin_idle() -> void:
 	target_position = position
+	_chest_anim_playing = false
 	_state_timer = rng.randf_range(PetRuntimeConfig.IDLE_MIN_SEC, PetRuntimeConfig.IDLE_MAX_SEC)
 	transition_to(PetState.Kind.IDLE)
 
@@ -404,6 +525,7 @@ func _tick_idle(delta: float) -> void:
 
 
 func _begin_roam() -> void:
+	_chest_anim_playing = false
 	target_position = safe_area.random_roam_target(rng)
 	transition_to(PetState.Kind.ROAM)
 
@@ -411,6 +533,7 @@ func _begin_roam() -> void:
 func _begin_chest_interaction() -> void:
 	target_position = safe_area.random_chest_interaction_target(rng)
 	_hold_timer = 0.0
+	_chest_anim_playing = false
 	transition_to(PetState.Kind.CHEST_INTERACTION)
 
 
@@ -439,24 +562,44 @@ func _tick_move_toward(delta: float, return_idle_on_arrive: bool) -> bool:
 
 
 func _tick_chest_interaction(delta: float) -> void:
-	if _hold_timer > 0.0:
+	if _chest_anim_playing:
 		_hold_timer -= delta
 		if _hold_timer <= 0.0:
 			_begin_idle()
 		return
 	var arrived := _tick_move_toward(delta, false)
 	if arrived:
-		_hold_timer = PetRuntimeConfig.CHEST_INTERACTION_HOLD_SEC
+		_face_toward_chest()
+		## Stop translation; play chest_interaction once.
+		target_position = position
+		_chest_anim_playing = true
+		set_visual_state("chest_interaction")
+		var hold := PetRuntimeConfig.CHEST_INTERACTION_HOLD_SEC
+		if animation_loader != null and animation_loader.artwork_ready:
+			var anim_def: Dictionary = animation_loader.get_animation_def("chest_interaction")
+			var frames := int(anim_def.get("expected_frame_count", 8))
+			var fps := float(anim_def.get("fps", 10.0))
+			if fps > 0.0:
+				hold = maxf(hold, float(frames) / fps + 0.2)
+		_hold_timer = hold
 
 
 func _tick_tap_reaction(delta: float) -> void:
 	_hold_timer -= delta
 	if _hold_timer <= 0.0:
-		## Return to prior calm state (IDLE if previous was TAP/CHEST).
 		if _state_before_tap == PetState.Kind.ROAM:
 			_begin_roam()
 		else:
 			_begin_idle()
+
+
+func _face_toward_chest() -> void:
+	var mid := safe_area.chest_exclusion_rect().get_center().x
+	if position.x <= mid:
+		facing = Facing.RIGHT
+	else:
+		facing = Facing.LEFT
+	_apply_facing_to_sprite()
 
 
 func _update_facing(dx: float) -> void:
@@ -474,6 +617,31 @@ func _apply_facing_to_sprite() -> void:
 	if _animated_sprite == null:
 		return
 	_animated_sprite.flip_h = (facing == Facing.LEFT)
+
+
+func _update_shadow_hop_from_move_anim() -> void:
+	if _shadow_draw == null or _animated_sprite == null:
+		return
+	if not _animated_sprite.is_playing() or _animated_sprite.animation != "move":
+		_shadow_draw.set_hop_lift(0.0)
+		return
+	## Move frames: crouch→lift→peak→land. Peak around mid indices.
+	var frame := _animated_sprite.frame
+	var lift := 0.0
+	match frame:
+		1:
+			lift = 0.25
+		2:
+			lift = 0.55
+		3:
+			lift = 0.85
+		4:
+			lift = 0.45
+		5:
+			lift = 0.15
+		_:
+			lift = 0.0
+	_shadow_draw.set_hop_lift(lift)
 
 
 func is_y_in_ocean_exclusion(y_frac: float) -> bool:

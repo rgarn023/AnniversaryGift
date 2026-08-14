@@ -852,9 +852,9 @@ func _set_chest_environment_active(active: bool) -> void:
 		_chrome_bg.visible = not active
 
 
-func _mount_invisible_pet_runtime(chest_env: Node) -> void:
-	## Smallest CHEST integration: ChestEnvironment → PetRuntimeRoot → PetActor.
-	## No pet UI, no artwork, no placeholders.
+func _mount_pet_runtime(chest_env: Node) -> void:
+	## CHEST integration: ChestEnvironment → PetRuntimeRoot → PetActor (free parrot).
+	## No pet inventory UI / shop / billing — parrot appears as the free active pet.
 	if state == null or state.pets == null:
 		return
 	if not state.pets.should_spawn_on_chest():
@@ -886,6 +886,9 @@ func _mount_invisible_pet_runtime(chest_env: Node) -> void:
 		var br: Vector2 = (root as Node2D).to_local(grect.position + grect.size)
 		chest_local = Rect2(tl, br - tl)
 	state.pets.configure_spawned_actor(vp, chest_local)
+	## Pet draws above beach art inside ChestEnvironment; UI margin (z=2) stays above.
+	if root is CanvasItem:
+		(root as CanvasItem).z_index = 1
 
 
 func _show_main_chest() -> void:
@@ -1004,9 +1007,8 @@ func _show_main_chest() -> void:
 	_chest.configure(LoveNotesChest.ChestState.READY, false)
 	_chest.set_unread_badge(int(counts.unread))
 
-	## Phase 1B-1: invisible pet runtime under ChestEnvironment/PetRuntimeRoot.
-	## PET_VISUALS_ENABLED is false — zero user-visible change vs v61.
-	await _mount_invisible_pet_runtime(chest_env)
+	## Phase 1B-2C: free parrot runtime under ChestEnvironment/PetRuntimeRoot.
+	await _mount_pet_runtime(chest_env)
 
 	if state.is_demo():
 		var demo_row := HBoxContainer.new()

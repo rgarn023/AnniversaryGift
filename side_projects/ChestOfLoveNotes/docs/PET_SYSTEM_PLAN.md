@@ -41,38 +41,36 @@ Delivered:
 - Safe-area roam clamps; chest exclusion; reward pause/resume
 - Duplicate-spawn protection; persistence; no artwork / Pet UI / billing
 
-### PHASE 1B-2A — Asset contract + visual loader preparation — **THIS PHASE**
+### PHASE 1B-2A — Asset contract + visual loader preparation — **COMPLETE**
 
 **Goal:** Lock the exact production art/animation contract and runtime loader **without** enabling visuals.
 
-Delivered / expected:
+Delivered:
 
 - `parrot_animation_manifest.json` (canvas, anchors, frame counts, fps, filenames)
 - Updated `PARROT_SPEC.md` with size / facing / flip / shadow contract
-- `PetAnimationLoader` — non-fatal missing-art path; `artwork_ready = false`
-- `PetActor` visual tree (`PetVisual` → `AnimatedSprite2D`) kept fully hidden
-- State → animation mapping + `flip_h` facing hooks (no playback yet)
-- `tools/validate_parrot_assets.py` → `AWAITING_ARTWORK` when empty
-- `tools/build_parrot_contact_sheets.py` ready for later frames
-- Still: `PET_VISUALS_ENABLED = false`, no placeholder graphics, no APK / version bump
+- `PetAnimationLoader` — non-fatal missing-art path; later `artwork_ready = true`
+- `PetActor` visual tree (`PetVisual` → `AnimatedSprite2D`) prepared
+- State → animation mapping + `flip_h` facing hooks
+- `tools/validate_parrot_assets.py`
 
-### PHASE 1B-2B — Actual parrot artwork + validation — **NEXT**
+### PHASE 1B-2B — Actual parrot artwork + validation — **COMPLETE**
 
-Expected:
+Delivered:
 
 - Author PNG frames per manifest filenames / canvas / anchors
-- Run `validate_parrot_assets.py` → `ARTWORK_READY`
-- Optional contact sheets via `build_parrot_contact_sheets.py`
-- Still do **not** enable `PET_VISUALS_ENABLED` until 1B-2C
+- `validate_parrot_assets.py` → `ARTWORK_READY` (25 frames)
+- Still did **not** enable `PET_VISUALS_ENABLED` until 1B-2C
 
-### PHASE 1B-2C — Enable visible runtime + Galaxy test
+### PHASE 1B-2C — Enable visible runtime + Galaxy test — **THIS PHASE**
 
-Expected:
+Expected / delivered:
 
-- Flip `PET_VISUALS_ENABLED` only after artwork passes validation
-- Spawn/show parrot on CHEST; Galaxy visual QA
+- Flip `PET_VISUALS_ENABLED` after artwork passes validation
+- Spawn/show free parrot on CHEST with idle/move/chest/tap animations
+- Soft runtime shadow + tight tap hitbox; hide during reward
 - Still no Pet Collection UI, purchases, or gifting
-
+- versionCode 62 / `0.1.62-free-parrot-runtime`
 ---
 
 ## PHASE 1C — Pet selection / basic Pet Collection

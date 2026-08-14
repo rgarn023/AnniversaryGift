@@ -65,7 +65,7 @@ func _test_manager_defaults_and_persistence() -> void:
 	get_root().add_child(host)
 	var spawned := mgr.spawn_active_pet(host)
 	_assert(spawned != null, "spawn_active_pet returns actor when runtime enabled")
-	_assert(spawned.visible == false or spawned.modulate.a == 0.0, "spawned actor invisible")
+	_assert(spawned.visible == true and spawned.modulate.a == 1.0, "spawned actor visible (1B-2C)")
 	mgr.despawn_active_pet()
 	host.queue_free()
 
@@ -105,7 +105,7 @@ func _test_pet_actor_scene() -> void:
 	actor.setup_from_definition(def)
 	_assert(actor.pet_id == "parrot", "actor pet_id set")
 	_assert(actor.state == PetState.Kind.IDLE, "actor starts IDLE")
-	_assert(actor.visible == false or actor.modulate.a == 0.0, "actor not visually presented")
+	_assert(actor.visible == true and actor.modulate.a == 1.0, "actor visually presented (1B-2C)")
 	actor.transition_to(PetState.Kind.ROAM)
 	_assert(actor.state == PetState.Kind.ROAM, "actor state machine accepts ROAM")
 	actor.queue_free()
@@ -113,8 +113,8 @@ func _test_pet_actor_scene() -> void:
 
 func _test_chest_spawn_wiring_phase1b1() -> void:
 	var main := FileAccess.get_file_as_string("res://scripts/main.gd")
-	_assert(main.contains("spawn_active_pet") or main.contains("_mount_invisible_pet_runtime"), "main mounts invisible pet runtime")
-	_assert(not main.contains("Pet Collection"), "no Pet Collection UI string")
+	_assert(main.contains("spawn_active_pet") or main.contains("_mount_pet_runtime") or main.contains("_mount_invisible_pet_runtime"), "main mounts pet runtime")
+	_assert(not main.contains("PetCollectionScreen") and not main.contains("open_pet_collection"), "no Pet Collection UI string")
 	_assert(not main.contains("Pet Shop"), "no Pet Shop UI string")
 	var mgr_src := FileAccess.get_file_as_string("res://scripts/pets/pet_manager.gd")
 	_assert(mgr_src.contains("PET_RUNTIME_ENABLED"), "runtime flag referenced")
@@ -122,7 +122,7 @@ func _test_chest_spawn_wiring_phase1b1() -> void:
 	_assert(not mgr_src.contains("sku"), "no purchase SKUs in PetManager")
 	var cfg_src := FileAccess.get_file_as_string("res://scripts/pets/pet_runtime_config.gd")
 	_assert(cfg_src.contains("PET_RUNTIME_ENABLED := true"), "runtime enabled")
-	_assert(cfg_src.contains("PET_VISUALS_ENABLED := false"), "visuals disabled")
+	_assert(cfg_src.contains("PET_VISUALS_ENABLED := true"), "visuals enabled (1B-2C)")
 
 
 func _test_asset_folders_and_docs() -> void:
@@ -152,5 +152,5 @@ func _test_regression_untouched() -> void:
 	_assert(main.contains("YOUR CHEST"), "YOUR CHEST hierarchy intact")
 	_assert(main.contains("ChestEnvironment.CHEST_GROUND_Y"), "main chest plant intact")
 	_assert(main.contains("disconnect_my_person") or FileAccess.get_file_as_string("res://scripts/network/friend_service.gd").contains("disconnect_my_person"), "disconnect path present")
-	_assert(flags.contains("APP_VERSION_CODE := 61"), "versionCode unchanged at 61")
-	_assert(flags.contains("0.1.61-baked-scroll-reveal"), "versionName unchanged")
+	_assert(flags.contains("APP_VERSION_CODE := 62"), "versionCode 62")
+	_assert(flags.contains("0.1.62-free-parrot-runtime"), "versionName 62")

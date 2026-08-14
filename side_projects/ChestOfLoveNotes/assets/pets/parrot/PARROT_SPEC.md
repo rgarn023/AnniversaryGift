@@ -10,7 +10,7 @@
 | Billing | **None** — never tied to Google Play Billing |
 | Artwork | **LOCKED master** + **full animation set ready** (Phase 1B-2B-4: IDLE + MOVE + CHEST_INTERACTION + TAP_REACTION) |
 | Manifest | `assets/pets/parrot/parrot_animation_manifest.json` |
-| Visuals enabled | **false** (`PetRuntimeConfig.PET_VISUALS_ENABLED`) |
+| Visuals enabled | **true** (`PetRuntimeConfig.PET_VISUALS_ENABLED`) — Phase 1B-2C |
 
 ---
 

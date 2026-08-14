@@ -52,7 +52,7 @@ func _make_actor(seed: int = 42, vp: Vector2 = Vector2(390, 844)) -> PetActor:
 
 func _test_runtime_flags() -> void:
 	_assert(PetRuntimeConfig.PET_RUNTIME_ENABLED == true, "PET_RUNTIME_ENABLED true")
-	_assert(PetRuntimeConfig.PET_VISUALS_ENABLED == false, "PET_VISUALS_ENABLED false")
+	_assert(PetRuntimeConfig.PET_VISUALS_ENABLED == true, "PET_VISUALS_ENABLED true (1B-2C)")
 	_assert(PetRuntimeConfig.MOVE_SPEED_PX_PER_SEC > 0.0, "move speed configured")
 	_assert(PetRuntimeConfig.MOVE_SPEED_PX_PER_SEC < 200.0, "move speed not absurd")
 	_assert(PetRuntimeConfig.IDLE_MIN_SEC >= 2.0, "idle min ~2s")
@@ -259,23 +259,19 @@ func _test_persistence_and_fallback() -> void:
 
 
 func _test_visual_invisibility() -> void:
+	## Historical name — Phase 1B-2C enables free parrot visuals with real artwork.
 	var actor := _make_actor(1)
-	_assert(actor.visible == false, "actor visible false")
-	_assert(actor.modulate.a == 0.0, "actor alpha 0")
-	## Phase 1B-2A may add a hidden PetVisual tree — never a drawn placeholder.
+	_assert(actor.visible == true, "actor visible")
+	_assert(actor.modulate.a == 1.0, "actor alpha 1")
+	_assert(actor.is_artwork_ready(), "artwork ready")
 	var visual := actor.get_node_or_null("PetVisual") as CanvasItem
-	if visual != null:
-		_assert(visual.visible == false, "PetVisual hidden")
-		_assert(visual.modulate.a == 0.0, "PetVisual alpha 0")
-		var spr := visual.get_node_or_null("AnimatedSprite2D") as AnimatedSprite2D
-		if spr != null:
-			_assert(spr.visible == false, "AnimatedSprite2D hidden")
-			_assert(spr.sprite_frames == null or not actor.is_artwork_ready(), "no playable placeholder frames")
-	for c in actor.get_children():
-		if c is CanvasItem:
-			_assert((c as CanvasItem).visible == false, "no visible canvas child")
-			_assert((c as CanvasItem).modulate.a == 0.0, "canvas child alpha 0")
-	## Confirm no art files in parrot animation folders.
+	_assert(visual != null, "PetVisual exists")
+	_assert(visual.visible == true, "PetVisual visible")
+	var spr := visual.get_node_or_null("AnimatedSprite2D") as AnimatedSprite2D
+	_assert(spr != null, "AnimatedSprite2D exists")
+	_assert(spr.visible == true, "AnimatedSprite2D visible")
+	_assert(spr.sprite_frames != null, "real sprite frames attached")
+	## Confirm art files in parrot animation folders (source master + anim frames).
 	for folder in ["idle", "move", "chest_interaction", "tap_reaction", "source"]:
 		var path := "res://assets/pets/parrot/%s" % folder
 		_assert(DirAccess.open(path) != null, "folder exists %s" % folder)
@@ -289,18 +285,18 @@ func _test_visual_invisibility() -> void:
 				if lower.ends_with(".png") or lower.ends_with(".webp") or lower.ends_with(".jpg"):
 					art = true
 			fname = dir.get_next()
-		_assert(not art, "no artwork in %s" % folder)
+		_assert(art, "artwork present in %s" % folder)
 	actor.queue_free()
 
 
 func _test_main_mount_wiring() -> void:
 	var main := FileAccess.get_file_as_string("res://scripts/main.gd")
-	_assert(main.contains("_mount_invisible_pet_runtime"), "main mounts pet runtime")
+	_assert(main.contains("_mount_pet_runtime") or main.contains("_mount_invisible_pet_runtime"), "main mounts pet runtime")
 	_assert(main.contains("PetRuntimeRoot") or main.contains("ensure_pet_runtime_root"), "PetRuntimeRoot path")
 	_assert(main.contains("pause_for_chest_reward"), "main pauses pet on reward")
 	_assert(main.contains("resume_after_chest_reward"), "main resumes pet after empty open")
 	_assert(main.contains("notify_chest_screen_cleared"), "main clears pet on leave")
-	_assert(not main.contains("Pet Collection"), "no Pet Collection UI")
+	_assert(not main.contains("PetCollectionScreen") and not main.contains("open_pet_collection"), "no Pet Collection UI")
 	_assert(not main.contains("Pet Shop"), "no Pet Shop UI")
 	## No placeholder draw calls introduced for pets in main.
 	_assert(not main.contains("placeholder parrot"), "no placeholder parrot text")
@@ -325,8 +321,8 @@ func _test_regression_locked_systems() -> void:
 	_assert(friends.contains("disconnect_my_person"), "disconnect path present")
 	_assert(disconnect_fn.contains("record_my_person_pair_end"), "pair end recording intact")
 	_assert(mig.contains("my_person_pair_ends"), "pair ends table intact")
-	_assert(flags.contains("APP_VERSION_CODE := 61"), "versionCode unchanged at 61")
-	_assert(flags.contains("0.1.61-baked-scroll-reveal"), "versionName unchanged")
+	_assert(flags.contains("APP_VERSION_CODE := 62"), "versionCode 62")
+	_assert(flags.contains("0.1.62-free-parrot-runtime"), "versionName 62")
 	var catalog := FileAccess.get_file_as_string("res://config/pets/catalog.json")
 	_assert(catalog.contains("\"unlock_type\": \"FREE\""), "parrot remains FREE")
 	_assert(catalog.contains("\"default_unlocked\": true"), "parrot default unlocked")

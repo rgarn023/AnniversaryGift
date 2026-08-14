@@ -47,7 +47,8 @@ func _make_actor(seed: int = 42) -> PetActor:
 
 func _test_flags_and_manifest() -> void:
 	_assert(PetRuntimeConfig.PET_RUNTIME_ENABLED == true, "PET_RUNTIME_ENABLED true")
-	_assert(PetRuntimeConfig.PET_VISUALS_ENABLED == false, "PET_VISUALS_ENABLED false")
+	## Phase 1B-2C enables visuals; 1B-2A contract checks remain for mapping/anchors.
+	_assert(PetRuntimeConfig.PET_RUNTIME_ENABLED == true, "runtime still enabled")
 	_assert(FileAccess.file_exists("res://assets/pets/parrot/parrot_animation_manifest.json"), "manifest exists")
 	var raw := FileAccess.get_file_as_string("res://assets/pets/parrot/parrot_animation_manifest.json")
 	var parsed: Variant = JSON.parse_string(raw)
@@ -60,8 +61,8 @@ func _test_flags_and_manifest() -> void:
 	_assert(int(m.get("ground_anchor_y", 0)) == 116, "ground_anchor_y 116")
 	_assert(str(m.get("default_facing", "")) == "right", "default facing right")
 	_assert(is_equal_approx(float(m.get("recommended_runtime_scale", 0.0)), 0.72), "runtime scale 0.72")
-	_assert(bool(m.get("visuals_enabled", true)) == false, "manifest visuals_enabled false")
-	_assert(str(m.get("status", "")) == "awaiting_artwork", "manifest awaiting_artwork")
+	_assert(bool(m.get("visuals_enabled", false)) == true, "manifest visuals_enabled true (1B-2C)")
+	_assert(str(m.get("status", "")) == "ARTWORK_READY", "manifest ARTWORK_READY")
 	var anims: Array = m.get("animations", [])
 	_assert(anims.size() == 4, "four animations defined")
 	var by_name := {}
@@ -93,49 +94,45 @@ func _test_flags_and_manifest() -> void:
 
 
 func _test_loader_missing_art_safe() -> void:
+	## 1B-2C: artwork is present; keep mapping + loader contract checks.
 	var loader := PetAnimationLoader.new()
 	_assert(loader.load_parrot_manifest(), "loader loads manifest")
-	_assert(loader.artwork_ready == false, "artwork_ready false")
-	_assert(loader.load_status == "awaiting_artwork", "load_status awaiting_artwork")
-	_assert(loader.sprite_frames == null, "no SpriteFrames without art")
-	_assert(loader.missing_files.size() > 0, "missing files listed")
-	_assert(not loader.should_attempt_playback(), "no playback while visuals off / no art")
+	_assert(loader.artwork_ready == true, "artwork_ready true")
+	_assert(loader.load_status == "artwork_ready", "load_status artwork_ready")
+	_assert(loader.sprite_frames != null, "SpriteFrames with art")
+	_assert(loader.missing_files.is_empty(), "no missing files")
+	_assert(loader.should_attempt_playback(), "playback when visuals on + art")
 	_assert(loader.animation_name_for_visual_state("idle") == "idle", "map idle")
 	_assert(loader.animation_name_for_visual_state("move") == "move", "map move")
 	_assert(loader.animation_name_for_visual_state("roam") == "move", "map roam→move")
 	_assert(loader.animation_name_for_visual_state("chest_interaction") == "chest_interaction", "map chest")
 	_assert(loader.animation_name_for_visual_state("tap_reaction") == "tap_reaction", "map tap")
 	var dbg: Dictionary = loader.to_debug_dict()
-	_assert(dbg.get("artwork_ready") == false, "debug artwork_ready false")
+	_assert(dbg.get("artwork_ready") == true, "debug artwork_ready true")
 	_assert(dbg.has("load_detail"), "debug load_detail")
 
 
 func _test_actor_visual_tree_hidden() -> void:
+	## Renamed historically; 1B-2C expects visible tree when artwork ready.
 	var actor := _make_actor(5)
-	_assert(actor.visible == false, "actor hidden")
-	_assert(actor.modulate.a == 0.0, "actor alpha 0")
-	_assert(actor.is_artwork_ready() == false, "actor artwork_ready false")
+	_assert(actor.visible == true, "actor visible")
+	_assert(actor.modulate.a == 1.0, "actor alpha 1")
+	_assert(actor.is_artwork_ready() == true, "actor artwork_ready true")
 	var visual := actor.get_node_or_null("PetVisual") as Node2D
 	_assert(visual != null, "PetVisual exists")
-	_assert(visual.visible == false, "PetVisual hidden")
-	_assert(visual.modulate.a == 0.0, "PetVisual alpha 0")
+	_assert(visual.visible == true, "PetVisual visible")
 	var spr := visual.get_node_or_null("AnimatedSprite2D") as AnimatedSprite2D
 	_assert(spr != null, "AnimatedSprite2D exists")
-	_assert(spr.visible == false, "sprite hidden")
-	_assert(spr.sprite_frames == null, "no sprite frames attached")
-	_assert(not spr.is_playing(), "sprite not playing")
+	_assert(spr.visible == true, "sprite visible")
+	_assert(spr.sprite_frames != null, "sprite frames attached")
 	var shadow := visual.get_node_or_null("PetShadow") as Node2D
 	_assert(shadow != null, "PetShadow reserved")
-	_assert(shadow.visible == false, "PetShadow hidden")
-	## set_visual_state must not enable visibility without flags/art.
 	actor.set_visual_state("move")
-	_assert(actor.visible == false, "still invisible after set_visual_state")
-	_assert(spr.visible == false, "sprite still hidden after set_visual_state")
-	_assert(not spr.is_playing(), "no playback without artwork")
+	_assert(actor.get_visual_state() == "move", "visual state move")
 	var snap: Dictionary = actor.get_debug_snapshot()
-	_assert(snap.get("artwork_ready") == false, "snapshot artwork_ready false")
-	_assert(snap.get("visuals_enabled") == false, "snapshot visuals false")
-	_assert(snap.get("pet_visual_visible") == false, "snapshot pet_visual_visible false")
+	_assert(snap.get("artwork_ready") == true, "snapshot artwork_ready true")
+	_assert(snap.get("visuals_enabled") == true, "snapshot visuals true")
+	_assert(snap.get("pet_visual_visible") == true, "snapshot pet_visual_visible true")
 	actor.queue_free()
 
 
@@ -145,7 +142,14 @@ func _test_state_animation_mapping() -> void:
 	actor.force_state_for_test(PetState.Kind.ROAM)
 	_assert(actor.get_visual_state() == "move", "ROAM→move visual")
 	actor.force_state_for_test(PetState.Kind.CHEST_INTERACTION)
-	_assert(actor.get_visual_state() == "chest_interaction", "CHEST→chest_interaction visual")
+	## Approach uses move; chest_interaction starts after arrival.
+	_assert(actor.get_visual_state() == "move", "CHEST approach uses move visual")
+	var pts: Array = actor.safe_area.chest_interaction_points()
+	if pts.size() > 0:
+		actor.position = pts[0]
+		actor.target_position = pts[0]
+		actor._tick_chest_interaction(0.016)
+		_assert(actor.get_visual_state() == "chest_interaction", "CHEST→chest_interaction after arrive")
 	actor.trigger_tap_reaction()
 	_assert(actor.get_visual_state() == "tap_reaction", "TAP→tap_reaction visual")
 	actor.queue_free()
@@ -169,13 +173,12 @@ func _test_facing_flip_logic() -> void:
 	actor._tick_move_toward(0.05, false)
 	_assert(actor.facing == PetActor.Facing.LEFT, "move left sets LEFT")
 	_assert(spr.flip_h == true, "move left sets flip")
-	## Still invisible.
-	_assert(actor.visible == false, "facing changes stay invisible")
+	_assert(actor.visible == true, "facing changes keep actor visible")
 	actor.queue_free()
 
 
 func _test_no_placeholder_and_regression() -> void:
-	## No PNG art yet.
+	## Artwork present for all four folders.
 	for folder in ["idle", "move", "chest_interaction", "tap_reaction"]:
 		var dir := DirAccess.open("res://assets/pets/parrot/%s" % folder)
 		_assert(dir != null, "folder %s" % folder)
@@ -184,10 +187,10 @@ func _test_no_placeholder_and_regression() -> void:
 		var art := false
 		while fname != "":
 			var lower := fname.to_lower()
-			if lower.ends_with(".png") or lower.ends_with(".jpg") or lower.ends_with(".webp"):
+			if lower.ends_with(".png"):
 				art = true
 			fname = dir.get_next()
-		_assert(not art, "no artwork yet in %s" % folder)
+		_assert(art, "artwork present in %s" % folder)
 	_assert(FileAccess.file_exists("res://scripts/pets/pet_animation_loader.gd"), "loader script exists")
 	_assert(FileAccess.file_exists("res://assets/pets/parrot/PARROT_SPEC.md"), "PARROT_SPEC updated path")
 	var plan := FileAccess.get_file_as_string("res://docs/PET_SYSTEM_PLAN.md")
@@ -201,5 +204,5 @@ func _test_no_placeholder_and_regression() -> void:
 	_assert(chest.contains("CHEST_FRAME_COUNT := 13"), "chest open intact")
 	_assert(chest.contains("REVEAL_FRAME_COUNT := 8"), "baked reveal intact")
 	_assert(env.contains("CHEST_GROUND_Y := 0.888"), "ground intact")
-	_assert(flags.contains("APP_VERSION_CODE := 61"), "version unchanged")
-	_assert(not plan.contains("Pet Collection") or plan.contains("Still no Pet Collection"), "no Pet Collection ship yet")
+	_assert(flags.contains("APP_VERSION_CODE := 62"), "version 62")
+	_assert(plan.contains("Still no Pet Collection") or plan.contains("no Pet Collection"), "no Pet Collection ship yet")
