@@ -14,6 +14,8 @@ var profiles: ProfileService
 var scrolls: ScrollService
 var friends: FriendService
 var demo: DemoSession = DemoSession.new()
+## Pet catalog + local ownership (Phase 1A scaffold). Does not spawn on CHEST yet.
+var pets: PetManager = PetManager.new()
 var reduced_motion: bool = false
 ## Ephemeral plaintext held only while a scroll viewer is open.
 var open_message_plaintext: String = ""
@@ -72,6 +74,8 @@ func _init() -> void:
 
 
 func bootstrap() -> void:
+	## Local free-pet persistence only — no CHEST spawn in Phase 1A.
+	pets.bootstrap()
 	var is_release := OS.has_feature("release") or not OS.is_debug_build()
 	if config.load_config():
 		mode = Mode.ONLINE
