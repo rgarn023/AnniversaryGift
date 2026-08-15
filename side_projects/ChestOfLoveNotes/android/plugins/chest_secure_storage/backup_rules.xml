@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Exclude encrypted session SharedPreferences from Auto Backup / device transfer. -->
+<full-backup-content>
+    <exclude domain="sharedpref" path="coln_chest_secure_session_prefs.xml" />
+    <!-- Legacy plugin prefs name (if present on upgrade). -->
+    <exclude domain="sharedpref" path="coln_secure_session_prefs.xml" />
+</full-backup-content>
