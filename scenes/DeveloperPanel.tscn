@@ -1,0 +1,7 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/developer_panel.gd" id="1_dev"]
+
+[node name="DeveloperPanel" type="CanvasLayer"]
+layer = 60
+script = ExtResource("1_dev")

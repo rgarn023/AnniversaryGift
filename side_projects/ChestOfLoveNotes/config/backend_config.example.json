@@ -1,0 +1,5 @@
+{
+  "supabase_url": "YOUR_SUPABASE_URL",
+  "supabase_publishable_key": "YOUR_SUPABASE_PUBLISHABLE_KEY",
+  "environment": "development"
+}

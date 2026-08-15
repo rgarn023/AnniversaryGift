@@ -1,0 +1,69 @@
+[gd_scene load_steps=12 format=3]
+
+[ext_resource type="Script" path="res://scripts/chest.gd" id="1_chest"]
+[ext_resource type="Texture2D" path="res://assets/art/chest/chest_closed.png" id="2_closed"]
+[ext_resource type="Texture2D" path="res://assets/art/chest/chest_ajar.png" id="3_ajar"]
+[ext_resource type="Texture2D" path="res://assets/art/chest/chest_half.png" id="4_half"]
+[ext_resource type="Texture2D" path="res://assets/art/chest/chest_open.png" id="5_open"]
+[ext_resource type="Texture2D" path="res://assets/art/chest/chest_contact_shadow.png" id="6_shadow"]
+[ext_resource type="Texture2D" path="res://assets/art/chest/chest_inner_glow.png" id="7_glow"]
+[ext_resource type="Texture2D" path="res://assets/art/chest/chest_front_lip.png" id="8_lip"]
+[ext_resource type="Texture2D" path="res://assets/art/chest/chest_latch.png" id="9_latch"]
+[ext_resource type="Texture2D" path="res://assets/art/chest/chest_lock.png" id="10_lock"]
+[ext_resource type="Texture2D" path="res://assets/art/scroll/scroll_rolled.png" id="11_rolled"]
+
+[node name="Chest" type="Control"]
+custom_minimum_size = Vector2(560, 560)
+layout_mode = 3
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -280.0
+offset_top = -280.0
+offset_right = 280.0
+offset_bottom = 280.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_chest")
+
+[node name="PreloadClosed" type="TextureRect" parent="."]
+visible = false
+texture = ExtResource("2_closed")
+
+[node name="PreloadAjar" type="TextureRect" parent="."]
+visible = false
+texture = ExtResource("3_ajar")
+
+[node name="PreloadHalf" type="TextureRect" parent="."]
+visible = false
+texture = ExtResource("4_half")
+
+[node name="PreloadOpen" type="TextureRect" parent="."]
+visible = false
+texture = ExtResource("5_open")
+
+[node name="PreloadShadow" type="TextureRect" parent="."]
+visible = false
+texture = ExtResource("6_shadow")
+
+[node name="PreloadGlow" type="TextureRect" parent="."]
+visible = false
+texture = ExtResource("7_glow")
+
+[node name="PreloadLip" type="TextureRect" parent="."]
+visible = false
+texture = ExtResource("8_lip")
+
+[node name="PreloadLatch" type="TextureRect" parent="."]
+visible = false
+texture = ExtResource("9_latch")
+
+[node name="PreloadLock" type="TextureRect" parent="."]
+visible = false
+texture = ExtResource("10_lock")
+
+[node name="PreloadRolled" type="TextureRect" parent="."]
+visible = false
+texture = ExtResource("11_rolled")

@@ -1,0 +1,7 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/chest/treasure_chest.gd" id="1"]
+
+[node name="LoveNotesChest" type="Control"]
+custom_minimum_size = Vector2(560, 560)
+script = ExtResource("1")

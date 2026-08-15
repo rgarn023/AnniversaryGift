@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+ extraction rules: never cloud-/device-transfer encrypted sessions. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="coln_chest_secure_session_prefs.xml" />
+        <exclude domain="sharedpref" path="coln_secure_session_prefs.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="coln_chest_secure_session_prefs.xml" />
+        <exclude domain="sharedpref" path="coln_secure_session_prefs.xml" />
+    </device-transfer>
+</data-extraction-rules>
