@@ -13,6 +13,7 @@ var membership: MembershipService
 var profiles: ProfileService
 var scrolls: ScrollService
 var friends: FriendService
+var relationship_labels: RelationshipLabelService
 var pet_gifts: PetGiftService
 var demo: DemoSession = DemoSession.new()
 ## Pet catalog + local ownership. Spawn only when owned + enabled.
@@ -74,6 +75,7 @@ func _init() -> void:
 	profiles = ProfileService.new(api, tokens)
 	scrolls = ScrollService.new(api)
 	friends = FriendService.new(api)
+	relationship_labels = RelationshipLabelService.new(api)
 	pet_gifts = PetGiftService.new(api)
 
 

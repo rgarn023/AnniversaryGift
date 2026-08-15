@@ -45,6 +45,28 @@ const GEOFENCE_RATIONALE := "Allow background location so Chest of Love Notes ca
 const CONNECTION_REQUEST_ACCEPTED := "Connection request accepted"
 const PERMISSIONS_SETUP_WHY := "A few optional permissions help Chest of Love Notes work smoothly. You can change these anytime in Profile."
 const PERMISSIONS_SECTION := "PERMISSIONS"
+const RELATIONSHIP_SECTION := "Relationship"
+const EDIT_RELATIONSHIP := "Edit relationship"
+const RELATIONSHIP_SAVE := "Save"
+const RELATIONSHIP_SKIP := "Skip for now"
+const RELATIONSHIP_NOT_SET := "Not set"
+const RELATIONSHIP_OTHER := "Other"
+const RELATIONSHIP_CUSTOM_HINT := "Custom label (e.g. Soulmate)"
+const RELATIONSHIP_SAVE_FAILED := "Connected, but relationship could not be saved. You can set it anytime."
+
+
+static func relationship_prompt_title(display_name: String) -> String:
+	var n := display_name.strip_edges()
+	if n.is_empty():
+		n = PERSON
+	return "What is %s to you?" % n
+
+
+static func relationship_line(display_label: String) -> String:
+	var d := display_label.strip_edges()
+	if d.is_empty():
+		d = RELATIONSHIP_NOT_SET
+	return "Relationship: %s" % d
 
 
 static func sending_to(display_name: String) -> String:

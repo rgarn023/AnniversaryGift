@@ -62,6 +62,40 @@ Deno.serve(async (req) => {
         console.warn("person profile lookup failed; returning pairing with fallback", pErr);
       }
 
+      // Owner-only relationship label (private). Never expose the other user's label.
+      let relationship_label: Record<string, unknown> = {
+        relationship_key: "not_set",
+        custom_label: null,
+        display_label: "Not set",
+      };
+      const { data: relRow, error: relErr } = await service
+        .from("my_person_relationship_labels")
+        .select("relationship_key, custom_label")
+        .eq("friendship_id", pairingId)
+        .eq("owner_user_id", me)
+        .maybeSingle();
+      if (relErr) {
+        // Table may be missing until migration applied — treat as Not set.
+        console.warn("relationship label lookup skipped", relErr);
+      } else if (relRow) {
+        const key = String(relRow.relationship_key ?? "not_set");
+        const custom = relRow.custom_label == null ? null : String(relRow.custom_label);
+        const display = (() => {
+          if (key === "other") return custom && custom.trim() ? custom.trim() : "Other";
+          if (key === "not_set") return "Not set";
+          if (key === "fiance") return "Fiancé";
+          if (key === "fiancee") return "Fiancée";
+          if (key === "significant_other") return "Significant Other";
+          if (key === "best_friend") return "Best Friend";
+          return key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+        })();
+        relationship_label = {
+          relationship_key: key,
+          custom_label: custom,
+          display_label: display,
+        };
+      }
+
       if (profile) {
         person = {
           id: profile.id,
@@ -72,6 +106,9 @@ Deno.serve(async (req) => {
           connected_at: connectedAt,
           pairing_id: pairingId,
           profile_pending: false,
+          relationship_label,
+          relationship_key: relationship_label.relationship_key,
+          relationship_custom_label: relationship_label.custom_label,
         };
       } else {
         person = {
@@ -83,6 +120,9 @@ Deno.serve(async (req) => {
           connected_at: connectedAt,
           pairing_id: pairingId,
           profile_pending: true,
+          relationship_label,
+          relationship_key: relationship_label.relationship_key,
+          relationship_custom_label: relationship_label.custom_label,
         };
       }
     } else {

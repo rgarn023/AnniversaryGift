@@ -2607,6 +2607,8 @@ func _show_friends() -> void:
 				_show_toast("You're now connected with %s." % sname)
 				_play_friends_celebration()
 				state.invalidate_cache("friends")
+				## Connection already succeeded — relationship prompt is independent.
+				await _prompt_relationship_after_connect(sname, true)
 				_show_friends()
 			else:
 				_show_toast(str(result.get("error", "Could not accept.")))
@@ -2705,6 +2707,12 @@ func _show_friends() -> void:
 		name_l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		MobileUi.apply_label(name_l, MobileUi.SIZE_SECTION, MobileUi.COLOR_TITLE, true)
 		list.add_child(name_l)
+		var rel_info: Dictionary = RelationshipLabelHelper.from_person_payload(person)
+		var rel_l := Label.new()
+		rel_l.name = "RelationshipStatusLabel"
+		rel_l.text = str(rel_info.get("display_label", ProductStrings.RELATIONSHIP_NOT_SET))
+		MobileUi.apply_label(rel_l, MobileUi.SIZE_BODY, MobileUi.COLOR_SECONDARY, false)
+		list.add_child(rel_l)
 		var user := IdentityHelper.username_from_profile(person)
 		if not user.is_empty():
 			var user_l := Label.new()
@@ -2718,6 +2726,16 @@ func _show_friends() -> void:
 			since_l.text = ProductStrings.connected_since(dt)
 			MobileUi.apply_label(since_l, MobileUi.SIZE_HELPER, MobileUi.COLOR_HELPER, false)
 			list.add_child(since_l)
+		var edit_rel := Button.new()
+		edit_rel.text = ProductStrings.EDIT_RELATIONSHIP
+		edit_rel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		MobileUi.style_button(edit_rel, MobileUi.TOUCH_SECONDARY_H)
+		edit_rel.pressed.connect(func() -> void:
+			await _show_relationship_editor(person, false)
+			if _current_screen == "friends":
+				_show_friends()
+		)
+		list.add_child(edit_rel)
 		var show_mine := Button.new()
 		show_mine.text = ProductStrings.SHOW_MY_CODE
 		show_mine.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -2755,10 +2773,191 @@ func _show_friends() -> void:
 			state.mark_cache_fresh("friends")
 			## Rebuild once with fresh person data (still after first paint).
 			_show_friends()
+			await _maybe_prompt_relationship_for_active_person()
 		elif person.is_empty():
 			var err := str(fr.get("error", "Could not load My Person."))
 			if not err.is_empty():
 				_show_toast(err)
+	elif state.is_online() and not person.is_empty():
+		await _maybe_prompt_relationship_for_active_person()
+
+
+func _person_pairing_id(person: Dictionary) -> String:
+	var pid := str(person.get("pairing_id", person.get("friendship_id", ""))).strip_edges()
+	return pid
+
+
+func _maybe_prompt_relationship_for_active_person() -> void:
+	if not state.is_online() or _current_screen != "friends":
+		return
+	var person: Dictionary = _person_from_friends_cache()
+	if person.is_empty():
+		return
+	var pairing_id := _person_pairing_id(person)
+	var rel: Dictionary = RelationshipLabelHelper.from_person_payload(person)
+	var key := str(rel.get("relationship_key", RelationshipLabelHelper.KEY_NOT_SET))
+	if RelationshipLabelHelper.should_prompt_for_pairing(
+		pairing_id,
+		key,
+		str(person.get("connected_at", ""))
+	):
+		await _show_relationship_editor(person, true)
+
+
+func _prompt_relationship_after_connect(display_name: String, force: bool = true) -> void:
+	## Refresh person payload first so we have pairing_id.
+	if state.is_demo():
+		return
+	var fr: Dictionary = await state.friends.get_my_person()
+	if bool(fr.get("ok", false)):
+		var data: Dictionary = fr.get("data", {}) if typeof(fr.get("data")) == TYPE_DICTIONARY else {}
+		state.apply_friends_payload(data)
+		state.mark_cache_fresh("friends")
+	var person: Dictionary = _person_from_friends_cache()
+	if person.is_empty():
+		return
+	if str(person.get("display_name", "")).is_empty() and not display_name.is_empty():
+		person["display_name"] = display_name
+	var pairing_id := _person_pairing_id(person)
+	if force and not pairing_id.is_empty():
+		## Do not mark known yet — editor marks after save/skip.
+		RelationshipLabelHelper.mark_prompt_seeded()
+	await _show_relationship_editor(person, true)
+
+
+func _show_relationship_editor(person: Dictionary, is_prompt: bool) -> void:
+	## Modal dropdown for personal relationship label. Skip never blocks the connection.
+	var pairing_id := _person_pairing_id(person)
+	var display_name := IdentityHelper.display_name_from_profile(person)
+	var current: Dictionary = RelationshipLabelHelper.from_person_payload(person)
+	_clear_overlay()
+	if _overlay == null:
+		return
+	_overlay.visible = true
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.72)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_overlay.add_child(dim)
+	var host := MarginContainer.new()
+	host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	SafeAreaHelper.apply_to_margin(host, 24, 24, 24)
+	_overlay.add_child(host)
+	var panel := PanelContainer.new()
+	host.add_child(panel)
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 12)
+	panel.add_child(col)
+	var title := Label.new()
+	title.text = ProductStrings.relationship_prompt_title(display_name) if is_prompt else ProductStrings.EDIT_RELATIONSHIP
+	title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	MobileUi.apply_label(title, MobileUi.SIZE_SECTION, MobileUi.COLOR_TITLE, true)
+	col.add_child(title)
+	var help := Label.new()
+	help.text = "This stays private to you."
+	help.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	MobileUi.apply_label(help, MobileUi.SIZE_HELPER, MobileUi.COLOR_HELPER, false)
+	col.add_child(help)
+	var select := OptionButton.new()
+	select.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	select.custom_minimum_size.y = MobileUi.TOUCH_SECONDARY_H
+	var labels := RelationshipLabelHelper.option_labels()
+	for i in labels.size():
+		select.add_item(labels[i], i)
+	select.select(RelationshipLabelHelper.index_for_key(str(current.get("relationship_key", RelationshipLabelHelper.KEY_NOT_SET))))
+	col.add_child(select)
+	var custom := LineEdit.new()
+	custom.placeholder_text = ProductStrings.RELATIONSHIP_CUSTOM_HINT
+	custom.max_length = RelationshipLabelHelper.CUSTOM_MAX_LEN
+	custom.text = str(current.get("custom_label", ""))
+	custom.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	MobileUi.style_line_edit(custom)
+	custom.visible = RelationshipLabelHelper.normalize_key(str(current.get("relationship_key", ""))) == RelationshipLabelHelper.KEY_OTHER
+	col.add_child(custom)
+	select.item_selected.connect(func(idx: int) -> void:
+		var k := RelationshipLabelHelper.key_at_index(idx)
+		custom.visible = k == RelationshipLabelHelper.KEY_OTHER
+	)
+	var err := Label.new()
+	err.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	MobileUi.apply_label(err, MobileUi.SIZE_HELPER, MobileUi.COLOR_DANGER, true)
+	col.add_child(err)
+	var save_btn := Button.new()
+	save_btn.text = ProductStrings.RELATIONSHIP_SAVE
+	save_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	MobileUi.style_button(save_btn, MobileUi.TOUCH_CTA_H)
+	col.add_child(save_btn)
+	var skip_btn := Button.new()
+	skip_btn.text = ProductStrings.RELATIONSHIP_SKIP if is_prompt else "Cancel"
+	skip_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	MobileUi.style_button(skip_btn, MobileUi.TOUCH_SECONDARY_H)
+	col.add_child(skip_btn)
+
+	var finished := false
+	skip_btn.pressed.connect(func() -> void:
+		if finished:
+			return
+		finished = true
+		if not pairing_id.is_empty():
+			RelationshipLabelHelper.mark_pairing_prompt_known(pairing_id)
+		_hide_overlay()
+	)
+	save_btn.pressed.connect(func() -> void:
+		if finished:
+			return
+		var key := RelationshipLabelHelper.key_at_index(select.selected)
+		var custom_text := custom.text
+		if not RelationshipLabelHelper.is_valid_selection(key, custom_text):
+			err.text = "Enter a custom label (1–%d characters)." % RelationshipLabelHelper.CUSTOM_MAX_LEN
+			return
+		finished = true
+		save_btn.disabled = true
+		skip_btn.disabled = true
+		if state.is_demo():
+			## Demo: update local person payload only.
+			person["relationship_key"] = key
+			person["relationship_custom_label"] = RelationshipLabelHelper.sanitize_custom(custom_text) if key == RelationshipLabelHelper.KEY_OTHER else ""
+			person["relationship_label"] = {
+				"relationship_key": key,
+				"custom_label": person["relationship_custom_label"],
+				"display_label": RelationshipLabelHelper.display_for_key(key, str(person["relationship_custom_label"])),
+			}
+			if typeof(state.cached_friends) == TYPE_DICTIONARY:
+				state.cached_friends["person"] = person
+			if not pairing_id.is_empty():
+				RelationshipLabelHelper.mark_pairing_prompt_known(pairing_id)
+			_hide_overlay()
+			_show_toast("Relationship updated.")
+			return
+		if pairing_id.is_empty():
+			_hide_overlay()
+			_show_toast(ProductStrings.RELATIONSHIP_SAVE_FAILED)
+			return
+		var result: Dictionary = {}
+		if key == RelationshipLabelHelper.KEY_NOT_SET:
+			result = await state.relationship_labels.clear(pairing_id)
+		else:
+			result = await state.relationship_labels.upsert(pairing_id, key, custom_text)
+		if bool(result.get("ok", false)):
+			var label: Dictionary = result.get("label", {}) if typeof(result.get("label")) == TYPE_DICTIONARY else {}
+			person["relationship_label"] = label
+			person["relationship_key"] = str(label.get("relationship_key", key))
+			person["relationship_custom_label"] = str(label.get("custom_label", ""))
+			if typeof(state.cached_friends) == TYPE_DICTIONARY:
+				state.cached_friends["person"] = person
+			RelationshipLabelHelper.mark_pairing_prompt_known(pairing_id)
+			_hide_overlay()
+			_show_toast("Relationship updated.")
+		else:
+			finished = false
+			save_btn.disabled = false
+			skip_btn.disabled = false
+			err.text = str(result.get("error", ProductStrings.RELATIONSHIP_SAVE_FAILED))
+	)
+	## Wait until overlay closes (save or skip).
+	while _overlay != null and _overlay.visible:
+		await get_tree().process_frame
+
 
 
 func _confirm_disconnect_person(person: Dictionary) -> void:
