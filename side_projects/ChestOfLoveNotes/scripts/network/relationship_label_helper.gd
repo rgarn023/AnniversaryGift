@@ -77,15 +77,26 @@ static func sanitize_custom(raw: String) -> String:
 	var s := raw.strip_edges()
 	if s.is_empty():
 		return ""
-	## Strip control characters and angle brackets (basic XSS/injection hygiene).
+	## Strip HTML-like tags and control characters (basic XSS/injection hygiene).
 	var out := ""
-	for i in s.length():
+	var i := 0
+	while i < s.length():
 		var ch := s.unicode_at(i)
 		if ch < 32:
+			i += 1
 			continue
-		if ch == 60 or ch == 62: ## < >
+		if ch == 60: ## '<'
+			var close := s.find(">", i + 1)
+			if close >= 0:
+				i = close + 1
+				continue
+			i += 1
+			continue
+		if ch == 62: ## stray '>'
+			i += 1
 			continue
 		out += String.chr(ch)
+		i += 1
 	out = out.strip_edges()
 	if out.length() > CUSTOM_MAX_LEN:
 		out = out.substr(0, CUSTOM_MAX_LEN)
