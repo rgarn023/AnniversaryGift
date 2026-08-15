@@ -1,0 +1,35 @@
+-- =============================================================================
+-- Chest of Love Notes — LOCAL DEMO SEED (comments / structure only)
+-- =============================================================================
+--
+-- IMPORTANT:
+--   This seed is for *local supabase* development scaffolding only.
+--   It does NOT insert real private messages, and must NEVER contain anything
+--   resembling Mandy's anniversary gift content or real personal correspondence.
+--
+-- The actual product demo experience lives in the Godot client as
+--   LOCAL DEMO MODE  (see scripts/demo/).
+-- That client-side demo uses fictional offline scrolls and does not call
+-- these tables with real secrets.
+--
+-- If you need DB rows for local API testing, create throwaway auth users via
+-- the Supabase Auth admin API / Studio, then upsert profiles, for example:
+--
+--   -- After creating auth users with ids :alice and :bob locally:
+--   -- insert into public.profiles (id, username, display_name, friend_code)
+--   -- values
+--   --   (:alice, 'alice_demo', 'Alice Demo', 'CHEST-AAAA01'),
+--   --   (:bob,   'bob_demo',   'Bob Demo',   'CHEST-BBBB02');
+--   --
+--   -- insert into public.friendships (user_one_id, user_two_id)
+--   -- values (least(:alice,:bob), greatest(:alice,:bob));
+--   --
+--   -- Scroll ciphertext must be written ONLY through the send-scroll edge
+--   -- function (service role + MESSAGE_ENCRYPTION_KEY). Do not hand-insert
+--   -- plaintext into scroll_contents.
+--
+-- This file intentionally performs no DML so `supabase db reset` stays safe
+-- for contributors who have not provisioned demo auth users.
+-- =============================================================================
+
+select 'demo_seed: no-op (local structure notes only; use client LOCAL DEMO MODE)' as notice;
