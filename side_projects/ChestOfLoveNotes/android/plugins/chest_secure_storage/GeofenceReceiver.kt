@@ -24,7 +24,7 @@ class GeofenceReceiver : BroadcastReceiver() {
 		const val EXTRA_SCROLL_ID = "scroll_id"
 		private const val PREFS = "coln_geofences"
 		private const val KEY_FENCES = "fences_json"
-		private const val CH_ID = "coln_scheduled_ready"
+		private const val CH_ID = ChestNotifyPlugin.CH_SCROLLS
 
 		fun persistFence(ctx: Context, scrollId: String, lat: Double, lng: Double, radiusM: Float) {
 			val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -127,10 +127,18 @@ class GeofenceReceiver : BroadcastReceiver() {
 		deepLink: String,
 	) {
 		try {
+			if (Build.VERSION.SDK_INT >= 33) {
+				val granted = ctx.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
+					android.content.pm.PackageManager.PERMISSION_GRANTED
+				if (!granted) {
+					Log.i(TAG, "geofence notify skipped: permission denied")
+					return
+				}
+			}
 			if (Build.VERSION.SDK_INT >= 26) {
 				val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 				nm.createNotificationChannel(
-					NotificationChannel(CH_ID, "Scroll Ready", NotificationManager.IMPORTANCE_DEFAULT),
+					NotificationChannel(CH_ID, "Scrolls", NotificationManager.IMPORTANCE_DEFAULT),
 				)
 			}
 			val launch = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName) ?: Intent()
@@ -149,8 +157,16 @@ class GeofenceReceiver : BroadcastReceiver() {
 				@Suppress("DEPRECATION")
 				Notification.Builder(ctx)
 			}
+			val pkg = ctx.packageName
+			val res = ctx.resources
+			val iconCandidates = intArrayOf(
+				res.getIdentifier("ic_coln_notification", "drawable", pkg),
+				res.getIdentifier("icon", "mipmap", pkg),
+				ctx.applicationInfo.icon,
+			)
+			val iconRes = iconCandidates.firstOrNull { it != 0 } ?: android.R.drawable.stat_notify_chat
 			val notif = builder
-				.setSmallIcon(android.R.drawable.ic_dialog_info)
+				.setSmallIcon(iconRes)
 				.setContentTitle(title)
 				.setContentText(body)
 				.setContentIntent(pi)

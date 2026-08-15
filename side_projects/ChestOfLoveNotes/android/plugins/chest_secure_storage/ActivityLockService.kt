@@ -274,7 +274,7 @@ class ActivityLockService : Service(), LocationListener {
 			Notification.Builder(this)
 		}
 		val notif = builder
-			.setSmallIcon(android.R.drawable.ic_dialog_info)
+			.setSmallIcon(resolveNotifyIcon())
 			.setContentTitle("Activity Lock complete")
 			.setContentText("Activity Lock complete.")
 			.setAutoCancel(true)
@@ -283,6 +283,15 @@ class ActivityLockService : Service(), LocationListener {
 		val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 		nm.cancel(NOTIF_ID)
 		nm.notify(NOTIF_ID + 1, notif)
+	}
+
+	private fun resolveNotifyIcon(): Int {
+		val candidates = intArrayOf(
+			resources.getIdentifier("ic_coln_notification", "drawable", packageName),
+			resources.getIdentifier("icon", "mipmap", packageName),
+			applicationInfo.icon,
+		)
+		return candidates.firstOrNull { it != 0 } ?: android.R.drawable.stat_notify_chat
 	}
 
 	private fun stopTracking(completed: Boolean) {

@@ -25,7 +25,8 @@ class ScheduledNotifyReceiver : BroadcastReceiver() {
 		const val ACTION_BOOT = Intent.ACTION_BOOT_COMPLETED
 		const val PREFS = "coln_scheduled_notify"
 		const val KEY_ITEMS = "items_json"
-		const val CH_READY = "coln_scheduled_ready"
+		/** Stable channel — must match ChestNotifyPlugin.CH_SCROLLS (not a one-off id). */
+		const val CH_READY = ChestNotifyPlugin.CH_SCROLLS
 
 		fun persistItem(
 			ctx: Context,
@@ -166,10 +167,30 @@ class ScheduledNotifyReceiver : BroadcastReceiver() {
 			deepLink: String,
 		) {
 			try {
+				if (Build.VERSION.SDK_INT >= 33) {
+					val granted = ctx.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
+						android.content.pm.PackageManager.PERMISSION_GRANTED
+					if (!granted) {
+						Log.i(TAG, "fireNow skipped: POST_NOTIFICATIONS not granted")
+						return
+					}
+				} else {
+					val nmCheck = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+					if (!nmCheck.areNotificationsEnabled()) {
+						Log.i(TAG, "fireNow skipped: notifications disabled")
+						return
+					}
+				}
 				if (Build.VERSION.SDK_INT >= 26) {
 					val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 					nm.createNotificationChannel(
-						NotificationChannel(CH_READY, "Scroll Ready", NotificationManager.IMPORTANCE_DEFAULT),
+						NotificationChannel(CH_READY, "Scrolls", NotificationManager.IMPORTANCE_DEFAULT),
+					)
+					nm.createNotificationChannel(
+						NotificationChannel(ChestNotifyPlugin.CH_CHALLENGES, "Challenges", NotificationManager.IMPORTANCE_DEFAULT),
+					)
+					nm.createNotificationChannel(
+						NotificationChannel(ChestNotifyPlugin.CH_CONNECTIONS, "Connections", NotificationManager.IMPORTANCE_DEFAULT),
 					)
 				}
 				val launch = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName) ?: Intent()
@@ -181,15 +202,20 @@ class ScheduledNotifyReceiver : BroadcastReceiver() {
 					launch,
 					PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
 				)
-				val ch = if (channel == "scheduled_ready" || channel == CH_READY) CH_READY else CH_READY
+				val ch = when (channel) {
+					"activity", "focus", "challenges", ChestNotifyPlugin.CH_CHALLENGES -> ChestNotifyPlugin.CH_CHALLENGES
+					"connection", "connections", "friend_request", ChestNotifyPlugin.CH_CONNECTIONS -> ChestNotifyPlugin.CH_CONNECTIONS
+					else -> CH_READY
+				}
 				val builder = if (Build.VERSION.SDK_INT >= 26) {
 					Notification.Builder(ctx, ch)
 				} else {
 					@Suppress("DEPRECATION")
 					Notification.Builder(ctx)
 				}
+				val iconRes = resolveSmallIcon(ctx)
 				val notif = builder
-					.setSmallIcon(android.R.drawable.ic_dialog_info)
+					.setSmallIcon(iconRes)
 					.setContentTitle(title)
 					.setContentText(body)
 					.setStyle(Notification.BigTextStyle().bigText(body))
@@ -201,6 +227,21 @@ class ScheduledNotifyReceiver : BroadcastReceiver() {
 			} catch (e: Exception) {
 				Log.w(TAG, "fireNow failed: ${e.javaClass.simpleName}")
 			}
+		}
+
+		private fun resolveSmallIcon(ctx: Context): Int {
+			val pkg = ctx.packageName
+			val res = ctx.resources
+			val candidates = intArrayOf(
+				res.getIdentifier("ic_coln_notification", "drawable", pkg),
+				res.getIdentifier("icon", "mipmap", pkg),
+				res.getIdentifier("icon", "drawable", pkg),
+				ctx.applicationInfo.icon,
+			)
+			for (id in candidates) {
+				if (id != 0) return id
+			}
+			return android.R.drawable.stat_notify_chat
 		}
 	}
 

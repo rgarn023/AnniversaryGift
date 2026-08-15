@@ -40,6 +40,7 @@ var _sent_show_hidden: bool = false
 var _pending_hide_sent_id: String = ""
 var _qr_helper: QrHelper = QrHelper.new()
 var _req_notifier: RequirementNotifier = RequirementNotifier.new()
+var _chest_event_notifier: ChestEventNotifier = ChestEventNotifier.new()
 ## Permissions Setup / Manage Permissions live UI handles (query Android; never fake state).
 var _perm_setup_status: Dictionary = {} ## kind -> Label
 var _perm_setup_actions: Dictionary = {} ## kind -> Button
@@ -1292,6 +1293,9 @@ func _load_online_chest_items(filter: String) -> Array[Dictionary]:
 		## Central requirement-transition notifier (deduped local alerts).
 		if _req_notifier != null:
 			_req_notifier.evaluate_chest_items(scrolls)
+		## New scroll / connection-request local alerts (seeded then deduped).
+		if _chest_event_notifier != null:
+			_chest_event_notifier.evaluate_chest(scrolls, requests)
 	for s in scrolls:
 		if typeof(s) != TYPE_DICTIONARY:
 			continue
@@ -3869,8 +3873,16 @@ func _show_profile() -> void:
 	perm_sec.text = ProductStrings.PERMISSIONS_SECTION
 	MobileUi.apply_label(perm_sec, MobileUi.SIZE_SECTION, MobileUi.COLOR_TITLE)
 	col.add_child(perm_sec)
-	## Full-width status rows — never clip "Not Allowed".
-	col.add_child(_permission_status_row("Notifications", PermissionsHelper.notification_allowed()))
+	## Notifications subsection — Enabled / Disabled + open Android notification settings when denied.
+	var notify_sec := Label.new()
+	notify_sec.text = "Notifications"
+	MobileUi.apply_label(notify_sec, MobileUi.SIZE_BODY, MobileUi.COLOR_TITLE)
+	col.add_child(notify_sec)
+	col.add_child(_permission_status_row("Status", PermissionsHelper.notification_allowed()))
+	if OS.get_name() == "Android" and not PermissionsHelper.notification_allowed():
+		col.add_child(_make_button("Open Notification Settings", func() -> void:
+			PermissionsHelper.open_notification_settings()
+		, Vector2(0, MobileUi.TOUCH_SECONDARY_H)))
 	col.add_child(_permission_status_row("Location", PermissionsHelper.location_allowed()))
 	col.add_child(_permission_status_row("Camera", PermissionsHelper.camera_allowed()))
 	col.add_child(_make_button("Manage Permissions", func() -> void:
@@ -4718,8 +4730,11 @@ func _refresh_permissions_setup_ui() -> void:
 		var btn: Button = _perm_setup_actions.get(kind) as Button
 		if btn != null and is_instance_valid(btn):
 			if allowed:
-				btn.text = "Allowed"
+				btn.text = "Enabled"
 				btn.disabled = true
+			elif kind == "notifications" and PermissionsHelper.needs_settings(kind):
+				btn.text = "Open Notification Settings"
+				btn.disabled = false
 			elif PermissionsHelper.needs_settings(kind):
 				btn.text = "Open App Settings"
 				btn.disabled = false
@@ -4734,7 +4749,7 @@ func _on_permission_allow_tapped(kind: String) -> void:
 	match kind:
 		"notifications":
 			if PermissionsHelper.needs_settings(kind):
-				PermissionsHelper.open_app_settings()
+				PermissionsHelper.open_notification_settings()
 				return
 			result = PermissionsHelper.request_notifications()
 		"location":
@@ -4751,7 +4766,10 @@ func _on_permission_allow_tapped(kind: String) -> void:
 			return
 	if bool(result.get("needs_settings", false)):
 		_show_toast("Permission must be enabled in Android Settings.")
-		PermissionsHelper.open_app_settings()
+		if kind == "notifications":
+			PermissionsHelper.open_notification_settings()
+		else:
+			PermissionsHelper.open_app_settings()
 		return
 	## Wait for Android dialog result, then query real state.
 	for _i in range(24):
@@ -4885,9 +4903,13 @@ func _fill_permissions_manage_rows(box: VBoxContainer) -> void:
 		box.add_child(lab)
 		if allowed:
 			var ok := Label.new()
-			ok.text = "Allowed"
+			ok.text = "Enabled"
 			MobileUi.apply_label(ok, MobileUi.SIZE_SECONDARY, MobileUi.COLOR_TITLE, false)
 			box.add_child(ok)
+		elif kind == "notifications" and PermissionsHelper.needs_settings(kind):
+			box.add_child(_make_button("Open Notification Settings", func() -> void:
+				PermissionsHelper.open_notification_settings()
+			, Vector2(0, MobileUi.TOUCH_SECONDARY_H)))
 		elif PermissionsHelper.needs_settings(kind):
 			box.add_child(_make_button("Open App Settings", func() -> void:
 				PermissionsHelper.open_app_settings()
@@ -4896,6 +4918,10 @@ func _fill_permissions_manage_rows(box: VBoxContainer) -> void:
 			box.add_child(_make_button("Allow %s" % str(row[1]), func() -> void:
 				await _on_permission_allow_tapped(kind)
 			, Vector2(0, MobileUi.TOUCH_SECONDARY_H)))
+	if OS.get_name() == "Android" and not PermissionsHelper.notification_allowed():
+		box.add_child(_make_button("Open Notification Settings", func() -> void:
+			PermissionsHelper.open_notification_settings()
+		, Vector2(0, MobileUi.TOUCH_SECONDARY_H)))
 	box.add_child(_make_button("Open App Settings", func() -> void:
 		PermissionsHelper.open_app_settings()
 	, Vector2(0, MobileUi.TOUCH_PRIMARY_H)))

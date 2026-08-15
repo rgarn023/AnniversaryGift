@@ -208,11 +208,28 @@ class ChestNotifyPlugin(godot: Godot) : GodotPlugin(godot) {
 		}
 	}
 
+	/** Resolve a monochrome-safe small icon; never fall back to the generic dialog icon when app assets exist. */
+	fun resolveSmallIcon(ctx: Context): Int {
+		val pkg = ctx.packageName
+		val res = ctx.resources
+		val candidates = intArrayOf(
+			res.getIdentifier("ic_coln_notification", "drawable", pkg),
+			res.getIdentifier("icon", "mipmap", pkg),
+			res.getIdentifier("icon", "drawable", pkg),
+			ctx.applicationInfo.icon,
+		)
+		for (id in candidates) {
+			if (id != 0) return id
+		}
+		return android.R.drawable.stat_notify_chat
+	}
+
 	@UsedByGodot
 	fun show_notification(channel: String, title: String, body: String, deepLink: String, notifId: Int): Boolean {
 		return try {
 			ensure_channels()
-			if (!has_notification_permission() && Build.VERSION.SDK_INT >= 33) {
+			if (!has_notification_permission()) {
+				Log.i(TAG, "show_notification skipped: permission not granted")
 				return false
 			}
 			val ctx = appContext()
@@ -226,9 +243,9 @@ class ChestNotifyPlugin(godot: Godot) : GodotPlugin(godot) {
 				PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
 			)
 			val ch = when (channel) {
-				"new_scroll", "scheduled_ready", "scrolls", "ready" -> CH_SCROLLS
-				"activity", "focus", "challenges" -> CH_CHALLENGES
-				"connection", "connections", "friend_request" -> CH_CONNECTIONS
+				"new_scroll", "scheduled_ready", "scrolls", "ready", CH_SCROLLS, CH_READY -> CH_SCROLLS
+				"activity", "focus", "challenges", CH_CHALLENGES -> CH_CHALLENGES
+				"connection", "connections", "friend_request", CH_CONNECTIONS -> CH_CONNECTIONS
 				else -> CH_SCROLLS
 			}
 			val builder = if (Build.VERSION.SDK_INT >= 26) {
@@ -238,7 +255,7 @@ class ChestNotifyPlugin(godot: Godot) : GodotPlugin(godot) {
 				Notification.Builder(ctx)
 			}
 			val notif = builder
-				.setSmallIcon(android.R.drawable.ic_dialog_info)
+				.setSmallIcon(resolveSmallIcon(ctx))
 				.setContentTitle(title)
 				.setContentText(body)
 				.setStyle(Notification.BigTextStyle().bigText(body))

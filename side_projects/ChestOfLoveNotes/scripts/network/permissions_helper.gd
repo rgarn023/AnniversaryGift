@@ -80,7 +80,11 @@ static func camera_allowed() -> bool:
 
 
 static func status_label(allowed: bool) -> String:
-	return "Allowed" if allowed else "Not Allowed"
+	return "Enabled" if allowed else "Disabled / permission required"
+
+
+static func notification_status_label() -> String:
+	return status_label(notification_allowed())
 
 
 static func needs_settings(kind: String) -> bool:
@@ -202,6 +206,16 @@ static func open_app_settings() -> void:
 			return
 	if n != null and n.has_method("open_app_notification_settings"):
 		n.open_app_notification_settings()
+
+
+static func open_notification_settings() -> void:
+	## Prefer the Android app-notification settings page (Android 8+).
+	_log("open notification settings")
+	var n = Engine.get_singleton("ChestNotify") if Engine.has_singleton("ChestNotify") else null
+	if n != null and n.has_method("open_app_notification_settings"):
+		if bool(n.open_app_notification_settings()):
+			return
+	open_app_settings()
 
 
 static func snapshot() -> Dictionary:

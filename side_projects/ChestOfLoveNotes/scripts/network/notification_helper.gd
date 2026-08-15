@@ -3,7 +3,12 @@ class_name NotificationHelper
 ## Thin wrapper around ChestNotify Android plugin.
 
 const PLUGIN_NAME := "ChestNotify"
-const PREF_ASKED := "coln_notify_permission_asked"
+const PREF_PATH := "user://coln_notify_prefs.cfg"
+const PREF_ASKED_KEY := "permission_asked"
+
+## Stable notification ID ranges (do not collide across event kinds):
+## 1100–1199 scrolls, 1200–1299 connections, 1300–1399 focus,
+## 1400–1499 activity progress/complete, 200000+ scheduled-ready alarms.
 
 
 static func _plugin():
@@ -31,16 +36,33 @@ static func has_permission() -> bool:
 	return false
 
 
+static func _cfg() -> ConfigFile:
+	var c := ConfigFile.new()
+	c.load(PREF_PATH)
+	return c
+
+
+static func _was_permission_asked() -> bool:
+	return bool(_cfg().get_value("notify", PREF_ASKED_KEY, false))
+
+
+static func _mark_permission_asked() -> void:
+	var c := _cfg()
+	c.set_value("notify", PREF_ASKED_KEY, true)
+	c.save(PREF_PATH)
+
+
 static func request_permission_contextual(force: bool = false) -> void:
 	## Call from first-run Permissions Setup or after a user-relevant moment.
+	## Never re-prompt every cold start once asked/denied.
 	if OS.get_name() != "Android":
 		return
 	if has_permission():
 		ensure_channels()
 		return
-	if not force and bool(ProjectSettings.get_setting(PREF_ASKED, false)):
+	if not force and _was_permission_asked():
 		return
-	ProjectSettings.set_setting(PREF_ASKED, true)
+	_mark_permission_asked()
 	## Godot native dialog path (declared in export_presets post_notifications).
 	if OS.has_method("request_permission"):
 		OS.request_permission("android.permission.POST_NOTIFICATIONS")
@@ -48,6 +70,15 @@ static func request_permission_contextual(force: bool = false) -> void:
 	if p != null and p.has_method("request_notification_permission"):
 		p.request_notification_permission()
 	ensure_channels()
+
+
+static func open_notification_settings() -> bool:
+	var p = _plugin()
+	if p != null and p.has_method("open_app_notification_settings"):
+		return bool(p.open_app_notification_settings())
+	if p != null and p.has_method("open_app_settings"):
+		return bool(p.open_app_settings())
+	return false
 
 
 static func consume_pending_deeplink() -> String:
@@ -90,14 +121,21 @@ static func notify_new_scroll(from_name: String, scroll_id: String = "") -> void
 	var title := "New Scroll"
 	var body := "You received a new scroll." if who.is_empty() else "You received a new scroll from %s." % who
 	var link := "chest" if scroll_id.is_empty() else "chest:%s" % scroll_id
-	show("new_scroll", title, body, link, 1101)
+	## Per-scroll id so unrelated new scrolls do not overwrite each other.
+	var nid := 1101
+	if not scroll_id.is_empty():
+		nid = 1100 + int(absi(hash(scroll_id)) % 90)
+	show("new_scroll", title, body, link, nid)
 
 
-static func notify_connection_request(from_name: String) -> void:
+static func notify_connection_request(from_name: String, request_id: String = "") -> void:
 	var who := from_name.strip_edges()
 	if who.is_empty():
 		who = "Someone"
-	show("connections", "%s wants to connect with you." % who, ProductStrings.CONNECTION_REQUEST, "person", 1201)
+	var nid := 1201
+	if not request_id.is_empty():
+		nid = 1200 + int(absi(hash(request_id)) % 90)
+	show("connections", "%s wants to connect with you." % who, ProductStrings.CONNECTION_REQUEST, "person", nid)
 
 
 static func notify_scheduled_ready(scroll_id: String = "") -> void:
@@ -168,17 +206,18 @@ static func sync_scheduled_from_chest(items: Array) -> void:
 
 
 static func notify_activity_progress(current_km: float, target_km: float) -> void:
+	## Distinct from connection-request ids (1200–1299).
 	show(
 		"activity",
 		"Activity Lock in progress",
 		"%.1f / %s" % [current_km, ActivityLockHelper.format_km(target_km)],
 		"activity",
-		1201
+		1401
 	)
 
 
 static func notify_activity_complete() -> void:
-	show("activity", "Activity Lock complete", "Activity Lock complete.", "chest", 1202)
+	show("activity", "Activity Lock complete", "Activity Lock complete.", "chest", 1402)
 
 
 static func notify_focus_complete(all_ready: bool) -> void:

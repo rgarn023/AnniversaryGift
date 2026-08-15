@@ -16,6 +16,8 @@ if [[ ! -d "$BUILD_DIR" ]]; then
 fi
 
 mkdir -p "$JAVA_DST" "$RES_XML"
+RES_DRAWABLE="$BUILD_DIR/res/drawable"
+mkdir -p "$RES_DRAWABLE"
 cp -f "$PLUGIN_DIR/ChestSecureStoragePlugin.kt" "$JAVA_DST/ChestSecureStoragePlugin.kt"
 cp -f "$PLUGIN_DIR/ChestLocationPlugin.kt" "$JAVA_DST/ChestLocationPlugin.kt"
 cp -f "$PLUGIN_DIR/ChestMediaPlugin.kt" "$JAVA_DST/ChestMediaPlugin.kt"
@@ -28,6 +30,9 @@ cp -f "$PLUGIN_DIR/ScheduledNotifyReceiver.kt" "$JAVA_DST/ScheduledNotifyReceive
 cp -f "$PLUGIN_DIR/GeofenceReceiver.kt" "$JAVA_DST/GeofenceReceiver.kt"
 cp -f "$PLUGIN_DIR/backup_rules.xml" "$RES_XML/coln_backup_rules.xml"
 cp -f "$PLUGIN_DIR/data_extraction_rules.xml" "$RES_XML/coln_data_extraction_rules.xml"
+if [[ -f "$PLUGIN_DIR/res/drawable/ic_coln_notification.xml" ]]; then
+  cp -f "$PLUGIN_DIR/res/drawable/ic_coln_notification.xml" "$RES_DRAWABLE/ic_coln_notification.xml"
+fi
 
 rm -f "$BUILD_DIR/src/main/java/com/charoitegames/chestoflovenotes/SecureSessionPlugin.kt"
 
