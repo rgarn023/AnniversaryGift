@@ -18,7 +18,7 @@ import javax.crypto.spec.GCMParameterSpec
 /**
  * Godot Android plugin: ChestSecureStorage
  *
- * AES-256-GCM session encryption using a non-exportable Android Keystore key.
+ * AES-256-GCM encryption using a non-exportable Android Keystore key.
  * Only ciphertext, IV, and non-sensitive metadata are stored in private prefs.
  * Key material is never exposed to GDScript, logs, or SharedPreferences.
  */
@@ -34,6 +34,8 @@ class ChestSecureStoragePlugin(godot: Godot) : GodotPlugin(godot) {
 		private const val PREF_CIPHERTEXT = "session_ciphertext_b64"
 		private const val PREF_IV = "session_iv_b64"
 		private const val PREF_VERSION = "storage_version"
+		private const val PREF_OAUTH_CIPHERTEXT = "oauth_state_ciphertext_b64"
+		private const val PREF_OAUTH_IV = "oauth_state_iv_b64"
 		private const val GCM_TAG_BITS = 128
 		private const val TRANSFORMATION = "AES/GCM/NoPadding"
 	}
@@ -158,6 +160,78 @@ class ChestSecureStoragePlugin(godot: Godot) : GodotPlugin(godot) {
 		val prefs = prefs()
 		return !prefs.getString(PREF_CIPHERTEXT, null).isNullOrEmpty() &&
 			!prefs.getString(PREF_IV, null).isNullOrEmpty()
+	}
+
+	/**
+	 * Short-lived encrypted PKCE transaction state. This is deliberately separate
+	 * from the signed-in session so it survives Android process death while the
+	 * browser is open without changing Keep Me Signed In semantics.
+	 */
+	@UsedByGodot
+	fun secure_store_oauth_state(jsonString: String): Boolean {
+		if (jsonString.isEmpty()) return false
+		return try {
+			val key = getOrCreateKey()
+			val cipher = Cipher.getInstance(TRANSFORMATION)
+			cipher.init(Cipher.ENCRYPT_MODE, key)
+			val iv = cipher.iv
+			val ciphertext = cipher.doFinal(jsonString.toByteArray(Charsets.UTF_8))
+			val ok = prefs().edit()
+				.putString(PREF_OAUTH_CIPHERTEXT, Base64.encodeToString(ciphertext, Base64.NO_WRAP))
+				.putString(PREF_OAUTH_IV, Base64.encodeToString(iv, Base64.NO_WRAP))
+				.commit()
+			if (!ok) Log.w(TAG, "secure_store_oauth_state commit returned false")
+			ok
+		} catch (e: Exception) {
+			Log.w(TAG, "secure_store_oauth_state failed: ${e.javaClass.simpleName}")
+			false
+		}
+	}
+
+	@UsedByGodot
+	fun secure_load_oauth_state(): String {
+		return try {
+			val prefs = prefs()
+			val ctB64 = prefs.getString(PREF_OAUTH_CIPHERTEXT, null) ?: return ""
+			val ivB64 = prefs.getString(PREF_OAUTH_IV, null) ?: return ""
+			val key = getOrCreateKey()
+			val cipher = Cipher.getInstance(TRANSFORMATION)
+			val iv = Base64.decode(ivB64, Base64.NO_WRAP)
+			cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(GCM_TAG_BITS, iv))
+			val plain = cipher.doFinal(Base64.decode(ctB64, Base64.NO_WRAP))
+			String(plain, Charsets.UTF_8)
+		} catch (e: Exception) {
+			Log.w(TAG, "secure_load_oauth_state failed: ${e.javaClass.simpleName}")
+			try {
+				prefs().edit()
+					.remove(PREF_OAUTH_CIPHERTEXT)
+					.remove(PREF_OAUTH_IV)
+					.commit()
+			} catch (_: Exception) {
+				// ignore cleanup failures
+			}
+			""
+		}
+	}
+
+	@UsedByGodot
+	fun secure_delete_oauth_state(): Boolean {
+		return try {
+			prefs().edit()
+				.remove(PREF_OAUTH_CIPHERTEXT)
+				.remove(PREF_OAUTH_IV)
+				.commit()
+		} catch (e: Exception) {
+			Log.w(TAG, "secure_delete_oauth_state failed: ${e.javaClass.simpleName}")
+			false
+		}
+	}
+
+	@UsedByGodot
+	fun secure_has_oauth_state(): Boolean {
+		val prefs = prefs()
+		return !prefs.getString(PREF_OAUTH_CIPHERTEXT, null).isNullOrEmpty() &&
+			!prefs.getString(PREF_OAUTH_IV, null).isNullOrEmpty()
 	}
 
 	/** Intentionally never exposes Keystore key material to GDScript. */

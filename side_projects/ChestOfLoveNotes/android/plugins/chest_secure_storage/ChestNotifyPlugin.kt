@@ -119,7 +119,7 @@ class ChestNotifyPlugin(godot: Godot) : GodotPlugin(godot) {
 		val scheme = data.scheme?.lowercase() ?: return
 		if (scheme != AUTH_SCHEME) return
 		val host = data.host?.lowercase().orEmpty()
-		if (host.isNotEmpty() && host != AUTH_HOST) return
+		if (host != AUTH_HOST) return
 		val uri = data.toString()
 		if (uri.isBlank()) return
 		appContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -169,15 +169,23 @@ class ChestNotifyPlugin(godot: Godot) : GodotPlugin(godot) {
 
 	@UsedByGodot
 	fun consume_pending_auth_callback(): String {
+		/**
+		 * Compatibility name used by GDScript. Deliberately non-destructive:
+		 * AuthService clears only after terminal processing, so a process/network
+		 * interruption cannot lose a still-usable PKCE callback.
+		 */
+		return peek_pending_auth_callback()
+	}
+
+	@UsedByGodot
+	fun clear_pending_auth_callback(): Boolean {
 		return try {
-			val prefs = appContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-			val link = prefs.getString(KEY_PENDING_AUTH_CALLBACK, "") ?: ""
-			if (link.isNotEmpty()) {
-				prefs.edit().remove(KEY_PENDING_AUTH_CALLBACK).apply()
-			}
-			link
+			appContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+				.edit()
+				.remove(KEY_PENDING_AUTH_CALLBACK)
+				.commit()
 		} catch (_: Exception) {
-			""
+			false
 		}
 	}
 

@@ -20,11 +20,13 @@ static func redirect_uri() -> String:
 
 
 static func is_our_callback(uri: String) -> bool:
-	var u := uri.strip_edges()
-	if u.is_empty():
+	## Require the exact registered scheme + host. A matching scheme with a
+	## different host must never be treated as an auth callback.
+	var lower := uri.strip_edges().to_lower()
+	if lower.is_empty():
 		return false
-	var lower := u.to_lower()
-	return lower.begins_with("%s://" % APP_SCHEME) or lower.begins_with("%s:" % APP_SCHEME)
+	var base := REDIRECT_URI.to_lower()
+	return lower == base or lower.begins_with(base + "?") or lower.begins_with(base + "#")
 
 
 static func parse(uri: String) -> Dictionary:

@@ -8,6 +8,8 @@ const PASSWORD_RESET_GENERIC_MSG := (
 	"If an account exists for that email, a password reset link has been sent."
 )
 const MIN_PASSWORD_LEN := 8
+const OAUTH_STATE_VERSION := 1
+const OAUTH_STATE_TTL_SEC := 10 * 60
 
 var api: ApiClient
 var config: BackendConfig
@@ -16,9 +18,11 @@ var _resend_cooldown_until: int = 0
 var _is_refreshing: bool = false
 var _last_refresh_result: Dictionary = {"ok": false, "error": "Session refresh failed.", "invalid_session": false}
 
-## OAuth / recovery callback state (in-memory only).
+## OAuth callback state. The PKCE verifier/mode are mirrored into encrypted
+## Android Keystore-backed transient storage so browser OAuth survives process death.
 var _oauth_code_verifier: String = ""
 var _oauth_mode: String = "" ## "signin" | "link" | ""
+var _oauth_started_at_unix: int = 0
 var _callback_processing: bool = false
 var _last_callback_fp: String = ""
 var recovery_session_active: bool = false
@@ -125,17 +129,16 @@ func request_password_reset(email: String) -> Dictionary:
 	var e := email.strip_edges().to_lower()
 	if not is_valid_email_syntax(e):
 		return {"ok": false, "error": "Enter a valid email address.", "generic_success": false}
-	var url := "%s/auth/v1/recover" % config.supabase_url.rstrip("/")
-	var body := {
-		"email": e,
-		"redirect_to": AUTH_REDIRECT_URI,
-	}
-	var result: Dictionary = await api.request(url, "POST", body, false)
+	## Supabase GoTrue treats redirect_to as a query option for /recover.
+	var url := "%s/auth/v1/recover?redirect_to=%s" % [
+		config.supabase_url.rstrip("/"),
+		AUTH_REDIRECT_URI.uri_encode(),
+	]
+	var result: Dictionary = await api.request(url, "POST", {"email": e}, false)
 	## GoTrue commonly returns 200 even when the email is unknown.
 	## On transport/config failure, surface a real error; otherwise generic success.
 	if not bool(result.get("ok", false)):
 		var status := int(result.get("status", 0))
-		## 4xx that aren't "user not found" style still get generic copy when possible.
 		if status == 429:
 			return {"ok": false, "error": "Please wait a moment before requesting another reset email.", "generic_success": false}
 		if status == 0:
@@ -178,6 +181,10 @@ func begin_google_sign_in() -> Dictionary:
 		return {"ok": false, "error": "Backend is not configured."}
 	_oauth_code_verifier = _generate_code_verifier()
 	_oauth_mode = "signin"
+	_oauth_started_at_unix = int(Time.get_unix_time_from_system())
+	if not _persist_oauth_state():
+		cancel_oauth()
+		return {"ok": false, "error": "Secure Google sign-in storage is unavailable. Restart the app and try again."}
 	var challenge := _code_challenge_s256(_oauth_code_verifier)
 	var redirect_enc := AUTH_REDIRECT_URI.uri_encode()
 	var url := (
@@ -195,7 +202,8 @@ func begin_google_sign_in() -> Dictionary:
 
 func begin_link_google() -> Dictionary:
 	## Explicit identity link for an already signed-in email/password user.
-	## Uses Supabase's supported identities/authorize endpoint when available.
+	## Uses Supabase's supported identities/authorize endpoint only; never falls
+	## back to ordinary sign-in because that could switch to another user UUID.
 	if not config.is_configured():
 		return {"ok": false, "error": "Backend is not configured."}
 	if not tokens.has_session():
@@ -204,55 +212,67 @@ func begin_link_google() -> Dictionary:
 		return {"ok": false, "error": "Google is already linked to this account.", "already_linked": true}
 	_oauth_code_verifier = _generate_code_verifier()
 	_oauth_mode = "link"
+	_oauth_started_at_unix = int(Time.get_unix_time_from_system())
+	if not _persist_oauth_state():
+		cancel_oauth()
+		return {"ok": false, "error": "Secure Google linking storage is unavailable. Restart the app and try again."}
 	var challenge := _code_challenge_s256(_oauth_code_verifier)
 	var redirect_enc := AUTH_REDIRECT_URI.uri_encode()
 	var url := (
-		"%s/auth/v1/user/identities/authorize?provider=google&redirect_to=%s&code_challenge=%s&code_challenge_method=S256"
+		"%s/auth/v1/user/identities/authorize?provider=google&redirect_to=%s&code_challenge=%s&code_challenge_method=S256&skip_http_redirect=true"
 		% [config.supabase_url.rstrip("/"), redirect_enc, challenge.uri_encode()]
 	)
 	var result: Dictionary = await api.request(url, "GET", {}, true, "", false)
-	if bool(result.get("ok", false)):
-		var data: Dictionary = result.data if typeof(result.get("data")) == TYPE_DICTIONARY else {}
-		var link_url := str(data.get("url", "")).strip_edges()
-		if link_url.is_empty():
-			link_url = str(data.get("provider_url", "")).strip_edges()
-		if not link_url.is_empty():
-			return {"ok": true, "url": link_url, "redirect_uri": AUTH_REDIRECT_URI, "mode": "link", "error": ""}
-	## Fallback: open standard authorize while authenticated — Supabase may link
-	## matching verified emails depending on dashboard "Manual linking" settings.
-	var fallback := (
-		"%s/auth/v1/authorize?provider=google&redirect_to=%s&code_challenge=%s&code_challenge_method=S256"
-		% [config.supabase_url.rstrip("/"), redirect_enc, challenge.uri_encode()]
-	)
-	return {
-		"ok": true,
-		"url": fallback,
-		"redirect_uri": AUTH_REDIRECT_URI,
-		"mode": "link",
-		"error": "",
-		"note": "linking_via_authorize_fallback",
-	}
+	if not bool(result.get("ok", false)):
+		var status := int(result.get("status", 0))
+		cancel_oauth()
+		if status == 0:
+			return {"ok": false, "error": "No internet connection. Check your network and try again."}
+		return {
+			"ok": false,
+			"error": "Google account linking is unavailable. Enable manual identity linking in Supabase Auth settings and try again.",
+			"setup_required": true,
+			"status": status,
+		}
+	var data: Dictionary = result.data if typeof(result.get("data")) == TYPE_DICTIONARY else {}
+	var link_url := str(data.get("url", "")).strip_edges()
+	if link_url.is_empty():
+		link_url = str(data.get("provider_url", "")).strip_edges()
+	if link_url.is_empty():
+		cancel_oauth()
+		return {
+			"ok": false,
+			"error": "Google account linking is not enabled for this Supabase project.",
+			"setup_required": true,
+		}
+	return {"ok": true, "url": link_url, "redirect_uri": AUTH_REDIRECT_URI, "mode": "link", "error": ""}
 
 
 func cancel_oauth() -> void:
 	_oauth_code_verifier = ""
 	_oauth_mode = ""
+	_oauth_started_at_unix = 0
+	AndroidSecureStore.delete_oauth_state()
 
 
 func handle_auth_callback_uri(uri: String) -> Dictionary:
-	## Single-flight callback consumer. Duplicate / dead callbacks are rejected.
+	## Single-flight callback consumer. Terminal callbacks are explicitly cleared;
+	## transient network failures remain pending for another resume/retry.
 	if _callback_processing:
 		return {"ok": false, "error": "Sign-in is already being processed.", "duplicate": true}
 	var fp := AuthCallbackParser.fingerprint(uri)
 	if not fp.is_empty() and fp == _last_callback_fp:
+		AuthDeepLinkHelper.clear_pending_auth_callback()
 		return {"ok": false, "error": "This sign-in link was already used.", "duplicate": true, "dead": true}
 
 	_callback_processing = true
 	var parsed: Dictionary = AuthCallbackParser.parse(uri)
 	if not bool(parsed.get("ok", false)):
+		_last_callback_fp = fp
+		AuthDeepLinkHelper.clear_pending_auth_callback()
+		cancel_oauth()
 		_callback_processing = false
 		if bool(parsed.get("cancelled", false)):
-			cancel_oauth()
 			return {
 				"ok": false,
 				"cancelled": true,
@@ -267,7 +287,6 @@ func handle_auth_callback_uri(uri: String) -> Dictionary:
 			"error_code": str(parsed.get("error_code", "")),
 		}
 
-	_last_callback_fp = fp
 	var flow := str(parsed.get("flow", ""))
 	var out: Dictionary = {"ok": false, "error": "Session exchange failed."}
 	if flow == AuthCallbackParser.FLOW_RECOVERY or (
@@ -291,7 +310,11 @@ func handle_auth_callback_uri(uri: String) -> Dictionary:
 	else:
 		out = {"ok": false, "error": "Auth callback could not be understood.", "flow": flow}
 
-	cancel_oauth()
+	var terminal := not bool(out.get("retryable", false))
+	if terminal:
+		_last_callback_fp = fp
+		AuthDeepLinkHelper.clear_pending_auth_callback()
+		cancel_oauth()
 	_callback_processing = false
 	return out
 
@@ -301,7 +324,7 @@ func _exchange_pkce_code(code: String) -> Dictionary:
 		return {"ok": false, "error": "Backend is not configured."}
 	if code.is_empty():
 		return {"ok": false, "error": "Missing authorization code."}
-	if _oauth_code_verifier.is_empty():
+	if _oauth_code_verifier.is_empty() and not _restore_oauth_state():
 		return {"ok": false, "error": "Sign-in session expired. Please try Google sign-in again.", "expired": true}
 	var url := "%s/auth/v1/token?grant_type=pkce" % config.supabase_url.rstrip("/")
 	var body := {
@@ -309,13 +332,13 @@ func _exchange_pkce_code(code: String) -> Dictionary:
 		"code_verifier": _oauth_code_verifier,
 	}
 	var result: Dictionary = await api.request(url, "POST", body, false)
-	_oauth_code_verifier = ""
 	if not bool(result.get("ok", false)):
 		var status := int(result.get("status", 0))
+		var retryable := status == 0 or status == 429 or status >= 500
 		var err := str(result.get("error", "Could not complete Google sign-in."))
 		if status == 0:
 			err = "No internet connection. Check your network and try again."
-		return {"ok": false, "error": err, "status": status}
+		return {"ok": false, "error": err, "status": status, "retryable": retryable}
 	var data: Dictionary = result.data if typeof(result.get("data")) == TYPE_DICTIONARY else {}
 	return await _apply_token_session({
 		"access_token": str(data.get("access_token", "")),
@@ -369,6 +392,57 @@ func _apply_token_session(payload: Dictionary, as_recovery: bool) -> Dictionary:
 		"user_id": tokens.user_id,
 		"needs_password_reset": as_recovery,
 	}
+
+
+func _persist_oauth_state() -> bool:
+	if _oauth_code_verifier.is_empty() or (_oauth_mode != "signin" and _oauth_mode != "link"):
+		return false
+	var payload := JSON.stringify({
+		"version": OAUTH_STATE_VERSION,
+		"code_verifier": _oauth_code_verifier,
+		"mode": _oauth_mode,
+		"created_at": _oauth_started_at_unix,
+	})
+	if AndroidSecureStore.is_available():
+		return AndroidSecureStore.store_oauth_state_json(payload)
+	## Desktop/headless development has no Android Keystore. Memory-only is fine
+	## there; Android release must persist before opening the browser.
+	return OS.get_name() != "Android"
+
+
+func _restore_oauth_state() -> bool:
+	if not _oauth_code_verifier.is_empty():
+		return true
+	if not AndroidSecureStore.is_available() or not AndroidSecureStore.has_oauth_state():
+		return false
+	var raw := AndroidSecureStore.load_oauth_state_json()
+	if raw.is_empty():
+		return false
+	var parsed: Variant = JSON.parse_string(raw)
+	if typeof(parsed) != TYPE_DICTIONARY:
+		AndroidSecureStore.delete_oauth_state()
+		return false
+	var data: Dictionary = parsed
+	var version := int(data.get("version", 0))
+	var verifier := str(data.get("code_verifier", ""))
+	var mode := str(data.get("mode", ""))
+	var created := int(data.get("created_at", 0))
+	var now := int(Time.get_unix_time_from_system())
+	if (
+		version != OAUTH_STATE_VERSION
+		or verifier.length() < 43
+		or verifier.length() > 128
+		or (mode != "signin" and mode != "link")
+		or created <= 0
+		or now < created - 60
+		or now - created > OAUTH_STATE_TTL_SEC
+	):
+		AndroidSecureStore.delete_oauth_state()
+		return false
+	_oauth_code_verifier = verifier
+	_oauth_mode = mode
+	_oauth_started_at_unix = created
+	return true
 
 
 func has_google_provider() -> bool:
@@ -543,6 +617,7 @@ func logout_remote() -> void:
 func sign_out() -> void:
 	## Clears in-memory tokens and Android Keystore-backed session storage.
 	## Account password is never stored and therefore never wiped from disk here.
+	AuthDeepLinkHelper.clear_pending_auth_callback()
 	cancel_oauth()
 	recovery_session_active = false
 	linked_providers = PackedStringArray()
@@ -551,11 +626,10 @@ func sign_out() -> void:
 
 
 func _generate_code_verifier() -> String:
-	var alphabet := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
-	var out := ""
-	for _i in range(64):
-		out += alphabet[randi() % alphabet.length()]
-	return out
+	## Authentication material must use a CSPRNG, not gameplay PRNG/randi().
+	var crypto := Crypto.new()
+	var random_bytes := crypto.generate_random_bytes(32)
+	return Marshalls.raw_to_base64(random_bytes).replace("+", "-").replace("/", "_").rstrip("=")
 
 
 func _code_challenge_s256(verifier: String) -> String:

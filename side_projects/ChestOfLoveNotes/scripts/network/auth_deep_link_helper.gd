@@ -25,10 +25,20 @@ static func peek_pending_auth_callback() -> String:
 
 
 static func consume_pending_auth_callback() -> String:
+	## Compatibility name used by main.gd. Intentionally non-destructive now:
+	## AuthService clears the callback only after terminal success/failure so a
+	## process/network interruption cannot lose a still-usable PKCE callback.
 	var p = _plugin()
 	if p != null and p.has_method("consume_pending_auth_callback"):
 		return str(p.consume_pending_auth_callback())
 	return ""
+
+
+static func clear_pending_auth_callback() -> bool:
+	var p = _plugin()
+	if p != null and p.has_method("clear_pending_auth_callback"):
+		return bool(p.clear_pending_auth_callback())
+	return true
 
 
 static func open_external_auth_url(url: String) -> Dictionary:

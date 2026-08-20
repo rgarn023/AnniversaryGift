@@ -1,8 +1,8 @@
 extends RefCounted
 class_name AndroidSecureStore
 ## Thin GDScript bridge to the ChestSecureStorage Android Keystore plugin.
-## Never stores plaintext tokens under user://.
-## Headless tests may enable an in-memory fake backend (still never writes tokens to disk).
+## Never stores plaintext tokens or OAuth verifiers under user://.
+## Headless tests may enable an in-memory fake backend (still never writes secrets to disk).
 
 const PLUGIN_NAME := "ChestSecureStorage"
 const SETTINGS_PATH := "user://coln_settings.cfg"
@@ -12,6 +12,8 @@ const STORAGE_VERSION := 1
 static var _test_backend_enabled: bool = false
 static var _test_ciphertext: String = ""
 static var _test_iv: String = ""
+static var _test_oauth_ciphertext: String = ""
+static var _test_oauth_iv: String = ""
 static var _test_version: int = STORAGE_VERSION
 static var _test_force_unavailable: bool = false
 static var _test_force_decrypt_fail: bool = false
@@ -32,9 +34,19 @@ static func disable_test_backend() -> void:
 
 
 static func _clear_test_backend() -> void:
+	_clear_test_session_backend()
+	_clear_test_oauth_backend()
+	_test_version = STORAGE_VERSION
+
+
+static func _clear_test_session_backend() -> void:
 	_test_ciphertext = ""
 	_test_iv = ""
-	_test_version = STORAGE_VERSION
+
+
+static func _clear_test_oauth_backend() -> void:
+	_test_oauth_ciphertext = ""
+	_test_oauth_iv = ""
 
 
 static func is_available() -> bool:
@@ -131,12 +143,12 @@ static func store_session_json(json_string: String) -> bool:
 static func load_session_json() -> String:
 	if _test_backend_enabled:
 		if _test_force_decrypt_fail or _test_ciphertext.is_empty() or _test_iv.is_empty():
-			_clear_test_backend()
+			_clear_test_session_backend()
 			return ""
 		# Invalid base64 / corrupt blob → empty (same as Keystore decrypt failure).
 		var raw := Marshalls.base64_to_utf8(_test_ciphertext)
 		if str(raw).is_empty():
-			_clear_test_backend()
+			_clear_test_session_backend()
 			return ""
 		return str(raw)
 	var p := _plugin()
@@ -147,7 +159,7 @@ static func load_session_json() -> String:
 
 static func delete_session() -> bool:
 	if _test_backend_enabled:
-		_clear_test_backend()
+		_clear_test_session_backend()
 		return true
 	var p := _plugin()
 	if p == null:
@@ -162,6 +174,58 @@ static func has_session() -> bool:
 	if p == null:
 		return false
 	return bool(p.call("secure_has_session"))
+
+
+static func store_oauth_state_json(json_string: String) -> bool:
+	## Short-lived PKCE transaction state. Kept separate from the signed-in session
+	## so process death during browser OAuth does not destroy the verifier.
+	if json_string.is_empty():
+		return false
+	if _test_backend_enabled:
+		if _test_force_unavailable:
+			return false
+		_test_oauth_ciphertext = Marshalls.utf8_to_base64(json_string)
+		_test_oauth_iv = Marshalls.utf8_to_base64("oauth-iv-12b")
+		return true
+	var p := _plugin()
+	if p == null or not p.has_method("secure_store_oauth_state"):
+		return false
+	return bool(p.call("secure_store_oauth_state", json_string))
+
+
+static func load_oauth_state_json() -> String:
+	if _test_backend_enabled:
+		if _test_force_decrypt_fail or _test_oauth_ciphertext.is_empty() or _test_oauth_iv.is_empty():
+			_clear_test_oauth_backend()
+			return ""
+		var raw := Marshalls.base64_to_utf8(_test_oauth_ciphertext)
+		if str(raw).is_empty():
+			_clear_test_oauth_backend()
+			return ""
+		return str(raw)
+	var p := _plugin()
+	if p == null or not p.has_method("secure_load_oauth_state"):
+		return ""
+	return str(p.call("secure_load_oauth_state"))
+
+
+static func delete_oauth_state() -> bool:
+	if _test_backend_enabled:
+		_clear_test_oauth_backend()
+		return true
+	var p := _plugin()
+	if p == null or not p.has_method("secure_delete_oauth_state"):
+		return true
+	return bool(p.call("secure_delete_oauth_state"))
+
+
+static func has_oauth_state() -> bool:
+	if _test_backend_enabled:
+		return not _test_oauth_ciphertext.is_empty() and not _test_oauth_iv.is_empty()
+	var p := _plugin()
+	if p == null or not p.has_method("secure_has_oauth_state"):
+		return false
+	return bool(p.call("secure_has_oauth_state"))
 
 
 static func export_keystore_key() -> String:

@@ -23,6 +23,7 @@ func _run() -> void:
 	print("=== Chest of Love Notes v74 Auth Recovery / Google Tests ===")
 	_test_password_recovery()
 	_test_google_auth()
+	_test_oauth_reliability_hardening()
 	_test_account_security()
 	_test_no_secret_logging_surfaces()
 	_test_version_pins()
@@ -47,7 +48,8 @@ func _test_password_recovery() -> void:
 	_assert(AuthCallbackParser.is_valid_email_syntax("user@example.com"), "valid email accepted")
 
 	_assert(auth.contains("func request_password_reset"), "3 recovery endpoint/request exists")
-	_assert(auth.contains("/auth/v1/recover"), "recover path present")
+	_assert(auth.contains("/auth/v1/recover?redirect_to=%s"), "3 recover redirect_to is query option")
+	_assert(not auth.contains('"redirect_to": AUTH_REDIRECT_URI'), "3 redirect_to not incorrectly placed in recover JSON body")
 
 	_assert(auth.contains("PASSWORD_RESET_GENERIC_MSG"), "4 generic success constant")
 	_assert(
@@ -66,6 +68,8 @@ func _test_password_recovery() -> void:
 	var malformed := AuthCallbackParser.parse("https://evil.example/callback?code=abc")
 	_assert(not bool(malformed.get("ok", false)), "6 malformed callback fails safely")
 	_assert(str(malformed.get("flow", "")) == AuthCallbackParser.FLOW_MALFORMED, "6 malformed flow")
+	var wrong_host := AuthCallbackParser.parse("com.charoitegames.chestoflovenotes://evil-host?code=abc")
+	_assert(not bool(wrong_host.get("ok", false)), "6 matching scheme with wrong host is rejected")
 
 	var state := AppState.new()
 	state.bootstrap()
@@ -105,8 +109,9 @@ func _test_google_auth() -> void:
 	_assert(AuthCallbackParser.redirect_uri() == AuthService.AUTH_REDIRECT_URI, "13 redirect URI consistent")
 
 	_assert(auth.contains("handle_auth_callback_uri"), "14 OAuth callback handler exists")
-	_assert(deep.contains("consume_pending_auth_callback"), "14 deep link helper consume")
-	_assert(notify_kt.contains("consume_pending_auth_callback"), "14 android consume auth callback")
+	_assert(deep.contains("consume_pending_auth_callback"), "14 deep link helper consume compatibility")
+	_assert(deep.contains("clear_pending_auth_callback"), "14 deep link helper explicit clear")
+	_assert(notify_kt.contains("clear_pending_auth_callback"), "14 android explicit clear auth callback")
 	_assert(install.contains("auth-callback"), "14 intent filter auth-callback")
 
 	_assert(auth.contains("_callback_processing"), "15 single-flight callback processing")
@@ -127,6 +132,39 @@ func _test_google_auth() -> void:
 	_assert(not auth.contains("print(refresh"), "20 refresh tokens not logged")
 	_assert(not notify_kt.contains("Log.i(TAG, uri"), "20 android does not log auth uri")
 	_assert(notify_kt.contains("Never logs the URI") or notify_kt.contains("may contain"), "20 android warns against logging")
+
+
+func _test_oauth_reliability_hardening() -> void:
+	var auth := _src("res://scripts/network/auth_service.gd")
+	var secure := _src("res://scripts/network/android_secure_store.gd")
+	var secure_kt := _src("res://android/plugins/chest_secure_storage/ChestSecureStoragePlugin.kt")
+	var notify_kt := _src("res://android/plugins/chest_secure_storage/ChestNotifyPlugin.kt")
+
+	_assert(auth.contains("Crypto.new()") and auth.contains("generate_random_bytes(32)"), "PKCE verifier uses cryptographic randomness")
+	_assert(not auth.contains("randi()"), "PKCE verifier does not use gameplay PRNG")
+	_assert(auth.contains("_persist_oauth_state") and auth.contains("_restore_oauth_state"), "PKCE state persists/restores across process death")
+	_assert(auth.contains("OAUTH_STATE_TTL_SEC"), "transient PKCE state has expiry")
+	_assert(secure.contains("store_oauth_state_json") and secure.contains("load_oauth_state_json"), "GDScript secure store supports OAuth state")
+	_assert(secure_kt.contains("secure_store_oauth_state") and secure_kt.contains("PREF_OAUTH_CIPHERTEXT"), "Android Keystore plugin encrypts OAuth state")
+	_assert(auth.contains("skip_http_redirect=true"), "manual Google link requests provider URL without following redirect")
+	_assert(not auth.contains("linking_via_authorize_fallback"), "explicit link never falls back to ordinary sign-in")
+	_assert(notify_kt.contains("return peek_pending_auth_callback()"), "callback read is non-destructive until terminal handling")
+	_assert(auth.contains("AuthDeepLinkHelper.clear_pending_auth_callback()"), "terminal auth handling explicitly clears callback")
+	_assert(auth.contains('"retryable": retryable'), "transient PKCE exchange failures remain retryable")
+
+	AndroidSecureStore.enable_test_backend()
+	var oauth_payload := JSON.stringify({
+		"version": 1,
+		"code_verifier": "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_",
+		"mode": "signin",
+		"created_at": int(Time.get_unix_time_from_system()),
+	})
+	_assert(AndroidSecureStore.store_oauth_state_json(oauth_payload), "test backend stores transient OAuth state")
+	_assert(AndroidSecureStore.has_oauth_state(), "test backend reports transient OAuth state")
+	_assert(AndroidSecureStore.load_oauth_state_json() == oauth_payload, "test backend restores transient OAuth state")
+	_assert(AndroidSecureStore.delete_oauth_state(), "test backend deletes transient OAuth state")
+	_assert(not AndroidSecureStore.has_oauth_state(), "transient OAuth state is cleared")
+	AndroidSecureStore.disable_test_backend()
 
 
 func _test_account_security() -> void:
