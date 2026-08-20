@@ -186,7 +186,8 @@ for perm, extra in (
             1,
         )
 
-# Auth callback deep link on the main Godot activity (password recovery + Google OAuth).
+# Auth callback deep link — GodotApp is often android:exported=false with a launcher
+# activity-alias. Prefer an exported alias targeting .GodotApp for VIEW/BROWSABLE.
 auth_filter = '''
             <!-- Chest of Love Notes: Supabase auth callback (recovery + Google OAuth) -->
             <intent-filter>
@@ -199,23 +200,20 @@ auth_filter = '''
             </intent-filter>
 '''
 if 'android:host="auth-callback"' not in text and "android:host='auth-callback'" not in text:
-    # Insert after the first launcher MAIN/LAUNCHER intent-filter's closing tag inside an activity.
-    # Prefer the Godot main activity when identifiable; otherwise first exported activity.
     inserted = False
-    # Match first activity block that contains MAIN + LAUNCHER and inject after that filter.
-    act_iter = list(re.finditer(r'<activity\b[^>]*>.*?</activity>', text, flags=re.S))
-    for m in act_iter:
+    # Prefer launcher activity-alias (.GodotAppLauncher) when present.
+    alias_iter = list(re.finditer(r'<activity-alias\b[^>]*>.*?</activity-alias>', text, flags=re.S))
+    for m in alias_iter:
         block = m.group(0)
         if 'android.intent.action.MAIN' in block and 'android.intent.category.LAUNCHER' in block:
-            # Insert before </activity>
-            new_block = block.replace('</activity>', auth_filter + '\n        </activity>', 1)
+            new_block = block.replace('</activity-alias>', auth_filter + '\n        </activity-alias>', 1)
             text = text[:m.start()] + new_block + text[m.end():]
             inserted = True
             break
     if not inserted:
-        # Fallback: append a dedicated exported alias activity that forwards via VIEW.
+        # Dedicated exported alias → .GodotApp (works when GodotApp is non-exported).
         alias = '''
-        <!-- Chest of Love Notes: auth callback activity (fallback) -->
+        <!-- Chest of Love Notes: auth callback activity-alias -->
         <activity-alias
             android:name="com.charoitegames.chestoflovenotes.AuthCallbackAlias"
             android:exported="true"
@@ -223,11 +221,7 @@ if 'android:host="auth-callback"' not in text and "android:host='auth-callback'"
 ''' + auth_filter + '''
         </activity-alias>
 '''
-        # Last resort: inject filter before </application> as comment + note — still try activity.
-        if '</activity>' in text:
-            text = text.replace('</activity>', auth_filter + '\n        </activity>', 1)
-        else:
-            text = text.replace('</application>', alias + '\n    </application>', 1)
+        text = text.replace('</application>', alias + '\n    </application>', 1)
 
 path.write_text(text)
 print('Updated', path)

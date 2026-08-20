@@ -145,8 +145,8 @@ jobs:
           test "$(tr -d '[:space:]' < android/signing/EXPECTED_PACKAGE_ID)" = "com.charoitegames.chestoflovenotes"
           test "$(tr -d '[:space:]' < android/signing/EXPECTED_TEST_CERT_SHA256)" = "5fbad9830b2a9827d2d1f7f8a38dafea0ae772793a99c4f4952a6b1d424f863b"
           grep -Fq 'assets/branding/154659_cursor_under4mb.gif' export_presets.cfg
-          grep -Eq '^version/code=73$' export_presets.cfg
-          grep -Eq '^version/name="0.1.73-notifications-relationship-status"$' export_presets.cfg
+          grep -Eq '^version/code=74$' export_presets.cfg
+          grep -Eq '^version/name="0.1.74-auth-recovery-google-signin"$' export_presets.cfg
           grep -Eq '^gradle_build/export_format=0$' export_presets.cfg
           grep -Eq '^architectures/arm64-v8a=true$' export_presets.cfg
           grep -Eq '^architectures/armeabi-v7a=false$' export_presets.cfg

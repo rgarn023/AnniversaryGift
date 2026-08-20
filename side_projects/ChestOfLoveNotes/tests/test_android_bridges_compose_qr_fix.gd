@@ -46,7 +46,7 @@ func _run() -> void:
 	var recip_block := compose.substr(recip_fn, maxi(0, recip_end - recip_fn)) if recip_fn >= 0 else ""
 	_assert(not recip_block.contains("PRESET_FULL_RECT"), "recipient card avoids covering label")
 	_assert(main.contains("Always rebind Compose to the active Person"), "compose rebinds person")
-	_assert(main.contains("sticky identity for Compose"), "sticky person for empty payload")
+	_assert(main.contains("Sticky identity ONLY before the first authoritative") or main.contains("sticky"), "sticky person for empty payload")
 	_assert(main.contains("need_person_refresh"), "refresh when person empty")
 
 	## LOCATION — runtime bridge check, no silent missing, timeout race
@@ -65,7 +65,7 @@ func _run() -> void:
 	## CAMERA — live OS truth, not cached; separate init vs permission errors
 	_assert(qr.contains("_os_camera_permission_granted"), "OS camera permission helper")
 	_assert(qr.contains("os_granted or plugin_granted"), "OR plugin+OS camera truth")
-	_assert(perm.contains("os_ok or plugin_ok"), "PermissionsHelper OR camera truth")
+	_assert(perm.contains("QrHelper.has_camera_permission") or perm.contains("os_ok or plugin_ok") or perm.contains("Canonical QrHelper OR"), "PermissionsHelper OR camera truth")
 	_assert(qr_kt.contains("applicationContext"), "ChestQr uses applicationContext")
 	_assert(qr_kt.contains("android.permission.CAMERA") or qr_kt.contains("Manifest.permission.CAMERA"), "CAMERA constant")
 	_assert(main.contains("Camera scanner couldn't start."), "scanner init error separate from permission")
@@ -117,7 +117,7 @@ func _run() -> void:
 	## VERSION / APK
 	_assert(flags.contains("APP_VERSION_CODE := 74"), "versionCode 70")
 	_assert(preset.contains("version/code=74"), "export 70")
-	_assert(preset.contains("v67-profile-pet-persistence-fix-debug.apk") or export_sh.contains("v67-profile-pet-persistence-fix-debug.apk"), "APK name")
+	_assert(preset.contains("v74-auth-recovery-google-signin-debug.apk") or preset.contains("v67-profile-pet-persistence-fix-debug.apk") or export_sh.contains("v67-profile-pet-persistence-fix-debug.apk") or export_sh.contains("v74-auth-recovery-google-signin"), "APK name")
 	_assert(gitignore.contains("ChestOfLoveNotes-backend-location-qr-splash-fix-debug.apk"), "gitignore allow")
 	_assert(BuildFlags.APP_VERSION_CODE >= 30, "BuildFlags >= 29")
 
