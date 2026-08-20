@@ -1,5 +1,5 @@
 extends SceneTree
-## v74 version + release-gate pins (legacy filename; asserts current).
+## v74 version + release-gate pins.
 
 var _passed := 0
 var _failed := 0

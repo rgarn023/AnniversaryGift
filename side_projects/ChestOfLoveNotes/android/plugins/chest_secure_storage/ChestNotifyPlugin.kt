@@ -36,6 +36,10 @@ class ChestNotifyPlugin(godot: Godot) : GodotPlugin(godot) {
 		const val CH_FOCUS = CH_CHALLENGES
 		private const val PREFS = "coln_notify"
 		private const val KEY_PENDING_DEEPLINK = "pending_deeplink"
+		private const val KEY_PENDING_AUTH_CALLBACK = "pending_auth_callback"
+		/** Custom scheme for Supabase → app auth redirects (password recovery + OAuth). */
+		const val AUTH_SCHEME = "com.charoitegames.chestoflovenotes"
+		const val AUTH_HOST = "auth-callback"
 	}
 
 	override fun getPluginName(): String = PLUGIN_NAME
@@ -68,12 +72,26 @@ class ChestNotifyPlugin(godot: Godot) : GodotPlugin(godot) {
 	override fun onMainCreate(activity: Activity?): View? {
 		val view = super.onMainCreate(activity)
 		captureDeepLink(activity?.intent)
+		captureAuthCallback(activity?.intent)
 		return view
 	}
 
 	override fun onMainResume() {
 		super.onMainResume()
 		captureDeepLink(getActivity()?.intent)
+		captureAuthCallback(getActivity()?.intent)
+	}
+
+	override fun onMainNewIntent(activity: Activity?, intent: Intent?) {
+		super.onMainNewIntent(activity, intent)
+		if (activity != null && intent != null) {
+			try {
+				activity.intent = intent
+			} catch (_: Exception) {
+			}
+		}
+		captureDeepLink(intent)
+		captureAuthCallback(intent)
 	}
 
 	private fun captureDeepLink(intent: Intent?) {
@@ -87,6 +105,30 @@ class ChestNotifyPlugin(godot: Godot) : GodotPlugin(godot) {
 		Log.i(TAG, "captured deeplink")
 		try {
 			intent.removeExtra("coln_deeplink")
+		} catch (_: Exception) {
+		}
+	}
+
+	/**
+	 * Capture Supabase auth redirect URIs (custom scheme).
+	 * Never logs the URI — it may contain access/refresh tokens or auth codes.
+	 */
+	private fun captureAuthCallback(intent: Intent?) {
+		if (intent == null) return
+		val data = intent.data ?: return
+		val scheme = data.scheme?.lowercase() ?: return
+		if (scheme != AUTH_SCHEME) return
+		val host = data.host?.lowercase().orEmpty()
+		if (host.isNotEmpty() && host != AUTH_HOST) return
+		val uri = data.toString()
+		if (uri.isBlank()) return
+		appContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+			.edit()
+			.putString(KEY_PENDING_AUTH_CALLBACK, uri)
+			.apply()
+		Log.i(TAG, "captured auth callback")
+		try {
+			intent.data = null
 		} catch (_: Exception) {
 		}
 	}
@@ -108,6 +150,30 @@ class ChestNotifyPlugin(godot: Godot) : GodotPlugin(godot) {
 			val link = prefs.getString(KEY_PENDING_DEEPLINK, "") ?: ""
 			if (link.isNotEmpty()) {
 				prefs.edit().remove(KEY_PENDING_DEEPLINK).apply()
+			}
+			link
+		} catch (_: Exception) {
+			""
+		}
+	}
+
+	@UsedByGodot
+	fun peek_pending_auth_callback(): String {
+		return try {
+			appContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+				.getString(KEY_PENDING_AUTH_CALLBACK, "") ?: ""
+		} catch (_: Exception) {
+			""
+		}
+	}
+
+	@UsedByGodot
+	fun consume_pending_auth_callback(): String {
+		return try {
+			val prefs = appContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+			val link = prefs.getString(KEY_PENDING_AUTH_CALLBACK, "") ?: ""
+			if (link.isNotEmpty()) {
+				prefs.edit().remove(KEY_PENDING_AUTH_CALLBACK).apply()
 			}
 			link
 		} catch (_: Exception) {

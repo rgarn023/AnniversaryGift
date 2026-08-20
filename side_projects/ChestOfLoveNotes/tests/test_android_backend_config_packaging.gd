@@ -46,8 +46,8 @@ func _run() -> void:
 	_assert(preset.contains("config/backend_config.json"), "export include_filter packs config")
 	_assert(cfg.contains("res://config/backend_config.json"), "runtime RES_PATH matches pack path")
 	_assert(gitignore.contains("config/backend_config.json"), "live config stays gitignored")
-	_assert(flags.contains("0.1.73-notifications-relationship-status"), "version name bumped")
-	_assert(flags.contains("APP_VERSION_CODE := 73"), "version code bumped")
+	_assert(flags.contains("0.1.74-auth-recovery-google-signin"), "version name bumped")
+	_assert(flags.contains("APP_VERSION_CODE := 74"), "version code bumped")
 	_assert(readme.contains("tools/export_android_apk.sh"), "README mandates wrapper")
 	_assert(readme.contains("Do not call `godot --export-debug` directly"), "README forbids raw export")
 	## Do not regress parrot Android resource fix.

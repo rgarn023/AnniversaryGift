@@ -178,7 +178,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-          CI_DIST_DIR: ${{ runner.temp }}/chest-v73-dist
+          CI_DIST_DIR: ${{ runner.temp }}/chest-v74-dist
         run: |
           set -euo pipefail
           chmod +x tools/ci_export_android_artifacts.sh
@@ -202,10 +202,10 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v7
         with:
-          name: ChestOfLoveNotes-v73-APK
+          name: ChestOfLoveNotes-v74-APK
           path: |
-            ${{ runner.temp }}/chest-v73-dist/ChestOfLoveNotes-v73-arm64-release.apk
-            ${{ runner.temp }}/chest-v73-dist/ChestOfLoveNotes-v73-SHA256.txt
+            ${{ runner.temp }}/chest-v74-dist/ChestOfLoveNotes-v74-arm64-release.apk
+            ${{ runner.temp }}/chest-v74-dist/ChestOfLoveNotes-v74-SHA256.txt
           if-no-files-found: error
           retention-days: 30
           compression-level: 0
@@ -214,10 +214,10 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v7
         with:
-          name: ChestOfLoveNotes-v73-AAB
+          name: ChestOfLoveNotes-v74-AAB
           path: |
-            ${{ runner.temp }}/chest-v73-dist/ChestOfLoveNotes-v73.aab
-            ${{ runner.temp }}/chest-v73-dist/ChestOfLoveNotes-v73-SHA256.txt
+            ${{ runner.temp }}/chest-v74-dist/ChestOfLoveNotes-v74.aab
+            ${{ runner.temp }}/chest-v74-dist/ChestOfLoveNotes-v74-SHA256.txt
           if-no-files-found: error
           retention-days: 30
           compression-level: 0

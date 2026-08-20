@@ -114,6 +114,7 @@ func _startup_navigate() -> void:
 			await _enter_app_home()
 		_startup_done = true
 		_log_secure_debug("startup_destination_chest")
+		await _consume_auth_callback()
 		await _consume_notification_deeplink()
 		return
 	## Missing/expired/soft-fail/unconfirmed sessions are silent on the login form.
@@ -125,6 +126,7 @@ func _startup_navigate() -> void:
 	_show_welcome()
 	_startup_done = true
 	_log_secure_debug("startup_destination_login")
+	await _consume_auth_callback()
 	await _consume_notification_deeplink()
 
 
@@ -596,6 +598,40 @@ func _show_auth(sign_up: bool) -> void:
 	spinner.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	submit_row.add_child(spinner)
 
+	if not sign_up:
+		var forgot := Button.new()
+		forgot.text = "Forgot password?"
+		forgot.flat = true
+		forgot.focus_mode = Control.FOCUS_NONE
+		forgot.alignment = HORIZONTAL_ALIGNMENT_CENTER
+		MobileUi.style_button(forgot, 44)
+		forgot.pressed.connect(func() -> void:
+			_show_forgot_password(email.text.strip_edges())
+		)
+		box.add_child(forgot)
+
+	var google_btn := Button.new()
+	var or_row := HBoxContainer.new()
+	or_row.add_theme_constant_override("separation", 8)
+	or_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	var or_left := Label.new()
+	or_left.text = "────────"
+	MobileUi.apply_label(or_left, MobileUi.SIZE_HELPER, MobileUi.COLOR_HELPER)
+	var or_mid := Label.new()
+	or_mid.text = "OR"
+	MobileUi.apply_label(or_mid, MobileUi.SIZE_HELPER, MobileUi.COLOR_HELPER)
+	var or_right := Label.new()
+	or_right.text = "────────"
+	MobileUi.apply_label(or_right, MobileUi.SIZE_HELPER, MobileUi.COLOR_HELPER)
+	or_row.add_child(or_left)
+	or_row.add_child(or_mid)
+	or_row.add_child(or_right)
+	box.add_child(or_row)
+	google_btn.text = "Continue with Google"
+	google_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	MobileUi.style_button(google_btn, MobileUi.TOUCH_CTA_H)
+	box.add_child(google_btn)
+
 	var kb_pad := Control.new()
 	kb_pad.custom_minimum_size = Vector2(0, 0)
 	box.add_child(kb_pad)
@@ -604,6 +640,7 @@ func _show_auth(sign_up: bool) -> void:
 	var set_busy := func(busy: bool) -> void:
 		_auth_busy = busy
 		submit.disabled = busy
+		google_btn.disabled = busy
 		if busy:
 			submit.text = "Creating…" if sign_up else "Signing In…"
 			spinner.visible = true
@@ -660,11 +697,250 @@ func _show_auth(sign_up: bool) -> void:
 				return
 			await _after_verified_sign_in()
 	)
+	google_btn.pressed.connect(func() -> void:
+		if _auth_busy:
+			return
+		set_busy.call(true)
+		status.text = "Opening Google…"
+		status.add_theme_color_override("font_color", MobileUi.COLOR_HELPER)
+		var started: Dictionary = state.auth.begin_google_sign_in()
+		if not bool(started.get("ok", false)):
+			set_busy.call(false)
+			status.add_theme_color_override("font_color", MobileUi.COLOR_DANGER)
+			status.text = str(started.get("error", "Google sign-in unavailable."))
+			return
+		var opened: Dictionary = AuthDeepLinkHelper.open_external_auth_url(str(started.get("url", "")))
+		if not bool(opened.get("ok", false)):
+			set_busy.call(false)
+			state.auth.cancel_oauth()
+			status.add_theme_color_override("font_color", MobileUi.COLOR_DANGER)
+			status.text = str(opened.get("error", "Could not open browser."))
+			return
+		## Browser owns the flow; warm resume + auth callback completes sign-in.
+		status.text = "Complete Google sign-in in your browser, then return here."
+		set_busy.call(false)
+	)
 	if sign_up:
 		box.add_child(_make_button("Already have an account? Sign In", func() -> void: _show_auth(false)))
 	elif state.show_sign_up():
 		box.add_child(_make_button("Need an account? Sign Up", func() -> void: _show_auth(true)))
 	box.add_child(_make_button("Back", _show_welcome))
+
+
+func _show_forgot_password(prefill_email: String = "") -> void:
+	_current_screen = "forgot_password"
+	_clear_screen()
+	var root := _make_screen_root()
+	var scroll := _wire_scroll(ScrollContainer.new())
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	root.add_child(scroll)
+	var card := _make_card()
+	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(card)
+	var box := VBoxContainer.new()
+	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	box.add_theme_constant_override("separation", 14)
+	card.add_child(box)
+	var title := Label.new()
+	title.text = "Reset Password"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	MobileUi.apply_label(title, MobileUi.SIZE_SCREEN_TITLE, MobileUi.COLOR_TITLE)
+	box.add_child(title)
+	var body := Label.new()
+	body.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	body.text = "Enter your account email. If an account exists, we’ll send a reset link."
+	MobileUi.apply_label(body, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY)
+	box.add_child(body)
+	var email := LineEdit.new()
+	email.placeholder_text = "Email"
+	email.text = prefill_email.strip_edges()
+	email.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	MobileUi.style_line_edit(email)
+	box.add_child(email)
+	var status := Label.new()
+	status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	MobileUi.apply_label(status, MobileUi.SIZE_HELPER, MobileUi.COLOR_HELPER)
+	box.add_child(status)
+	var send_btn := Button.new()
+	send_btn.text = "Send Reset Link"
+	send_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	MobileUi.style_button(send_btn, MobileUi.TOUCH_CTA_H)
+	box.add_child(send_btn)
+	var kb_pad := Control.new()
+	kb_pad.custom_minimum_size = Vector2(0, 0)
+	box.add_child(kb_pad)
+	MobileUi.wire_keyboard_avoidance(root, scroll, kb_pad)
+	send_btn.pressed.connect(func() -> void:
+		if _auth_busy:
+			return
+		_auth_busy = true
+		send_btn.disabled = true
+		status.text = ""
+		status.add_theme_color_override("font_color", MobileUi.COLOR_HELPER)
+		if not state.auth.is_valid_email_syntax(email.text):
+			_auth_busy = false
+			send_btn.disabled = false
+			status.add_theme_color_override("font_color", MobileUi.COLOR_DANGER)
+			status.text = "Enter a valid email address."
+			return
+		var result: Dictionary = await state.auth.request_password_reset(email.text)
+		_auth_busy = false
+		send_btn.disabled = false
+		if not bool(result.get("ok", false)):
+			status.add_theme_color_override("font_color", MobileUi.COLOR_DANGER)
+			status.text = str(result.get("error", "Could not send reset email."))
+			return
+		status.add_theme_color_override("font_color", MobileUi.COLOR_HELPER)
+		status.text = str(result.get("message", AuthService.PASSWORD_RESET_GENERIC_MSG))
+	)
+	box.add_child(_make_button("Back to Sign In", func() -> void: _show_auth(false)))
+
+
+func _show_create_new_password() -> void:
+	_current_screen = "create_new_password"
+	_clear_screen()
+	var root := _make_screen_root()
+	var scroll := _wire_scroll(ScrollContainer.new())
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	root.add_child(scroll)
+	var card := _make_card()
+	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(card)
+	var box := VBoxContainer.new()
+	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	box.add_theme_constant_override("separation", 14)
+	card.add_child(box)
+	var title := Label.new()
+	title.text = "Create New Password"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	MobileUi.apply_label(title, MobileUi.SIZE_SCREEN_TITLE, MobileUi.COLOR_TITLE)
+	box.add_child(title)
+	var body := Label.new()
+	body.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	body.text = "Choose a new password for your Chest of Love Notes account."
+	MobileUi.apply_label(body, MobileUi.SIZE_BODY, MobileUi.COLOR_BODY)
+	box.add_child(body)
+	var pw := LineEdit.new()
+	pw.placeholder_text = "New Password"
+	pw.secret = true
+	pw.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	MobileUi.style_line_edit(pw)
+	box.add_child(pw)
+	var pw2 := LineEdit.new()
+	pw2.placeholder_text = "Confirm New Password"
+	pw2.secret = true
+	pw2.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	MobileUi.style_line_edit(pw2)
+	box.add_child(pw2)
+	var eye := Button.new()
+	eye.text = "Show passwords"
+	MobileUi.style_button(eye, 44)
+	eye.pressed.connect(func() -> void:
+		var hide_now := not pw.secret
+		pw.secret = hide_now
+		pw2.secret = hide_now
+		eye.text = "Show passwords" if hide_now else "Hide passwords"
+	)
+	box.add_child(eye)
+	var status := Label.new()
+	status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	MobileUi.apply_label(status, MobileUi.SIZE_HELPER, MobileUi.COLOR_HELPER)
+	box.add_child(status)
+	var save_btn := Button.new()
+	save_btn.text = "Save Password"
+	save_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	MobileUi.style_button(save_btn, MobileUi.TOUCH_CTA_H)
+	box.add_child(save_btn)
+	var kb_pad := Control.new()
+	kb_pad.custom_minimum_size = Vector2(0, 0)
+	box.add_child(kb_pad)
+	MobileUi.wire_keyboard_avoidance(root, scroll, kb_pad)
+	save_btn.pressed.connect(func() -> void:
+		if _auth_busy:
+			return
+		_auth_busy = true
+		save_btn.disabled = true
+		status.text = ""
+		# Never log password values.
+		var result: Dictionary = await state.auth.update_password(pw.text, pw2.text)
+		pw.text = ""
+		pw2.text = ""
+		_auth_busy = false
+		save_btn.disabled = false
+		if not bool(result.get("ok", false)):
+			status.add_theme_color_override("font_color", MobileUi.COLOR_DANGER)
+			status.text = str(result.get("error", "Could not update password."))
+			if bool(result.get("expired", false)):
+				box.add_child(_make_button("Request a New Reset Email", func() -> void: _show_forgot_password("")))
+			return
+		_show_toast("Password updated.")
+		await _after_verified_sign_in()
+	)
+	box.add_child(_make_button("Back", func() -> void: _show_auth(false)))
+
+
+func _show_change_password() -> void:
+	_current_screen = "change_password"
+	_clear_screen()
+	var root := _make_screen_root()
+	var scroll := _wire_scroll(ScrollContainer.new())
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	root.add_child(scroll)
+	var card := _make_card()
+	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(card)
+	var box := VBoxContainer.new()
+	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	box.add_theme_constant_override("separation", 14)
+	card.add_child(box)
+	var title := Label.new()
+	title.text = "Change Password"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	MobileUi.apply_label(title, MobileUi.SIZE_SCREEN_TITLE, MobileUi.COLOR_TITLE)
+	box.add_child(title)
+	var pw := LineEdit.new()
+	pw.placeholder_text = "New Password"
+	pw.secret = true
+	pw.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	MobileUi.style_line_edit(pw)
+	box.add_child(pw)
+	var pw2 := LineEdit.new()
+	pw2.placeholder_text = "Confirm New Password"
+	pw2.secret = true
+	pw2.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	MobileUi.style_line_edit(pw2)
+	box.add_child(pw2)
+	var status := Label.new()
+	status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	MobileUi.apply_label(status, MobileUi.SIZE_HELPER, MobileUi.COLOR_HELPER)
+	box.add_child(status)
+	var save_btn := Button.new()
+	save_btn.text = "Update Password"
+	save_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	MobileUi.style_button(save_btn, MobileUi.TOUCH_CTA_H)
+	box.add_child(save_btn)
+	var kb_pad := Control.new()
+	kb_pad.custom_minimum_size = Vector2(0, 0)
+	box.add_child(kb_pad)
+	MobileUi.wire_keyboard_avoidance(root, scroll, kb_pad)
+	save_btn.pressed.connect(func() -> void:
+		if _auth_busy:
+			return
+		_auth_busy = true
+		save_btn.disabled = true
+		var result: Dictionary = await state.auth.update_password(pw.text, pw2.text)
+		pw.text = ""
+		pw2.text = ""
+		_auth_busy = false
+		save_btn.disabled = false
+		if not bool(result.get("ok", false)):
+			status.add_theme_color_override("font_color", MobileUi.COLOR_DANGER)
+			status.text = str(result.get("error", "Could not update password."))
+			return
+		_show_toast("Password updated.")
+		_show_profile()
+	)
+	box.add_child(_make_button("Back", _show_profile))
 
 
 func _show_check_email() -> void:
@@ -4091,6 +4367,45 @@ func _show_profile() -> void:
 	## Production Profile never mounts the debug Android bridge panel.
 	## Online Diagnostics (7 silent taps on the spacer above) remains debug-only.
 
+	if state.is_online() and state.tokens.has_session():
+		var sec_label := Label.new()
+		sec_label.text = "ACCOUNT & SECURITY"
+		MobileUi.apply_label(sec_label, MobileUi.SIZE_SECTION, MobileUi.COLOR_TITLE)
+		col.add_child(sec_label)
+		col.add_child(_settings_long_value_card("Email", str(state.tokens.user_email if state.tokens.user_email != "" else "—"), false))
+		var methods := Label.new()
+		methods.text = "Sign-in methods"
+		MobileUi.apply_label(methods, MobileUi.SIZE_BODY, MobileUi.COLOR_TITLE)
+		col.add_child(methods)
+		var email_linked := state.auth.has_email_password_provider()
+		var google_linked := state.auth.has_google_provider()
+		col.add_child(_settings_row("Email & Password", _settings_value_label("Linked" if email_linked else "Not linked")))
+		col.add_child(_settings_row("Google", _settings_value_label("Linked" if google_linked else "Not linked")))
+		if email_linked or not google_linked:
+			col.add_child(_make_button("Change Password", _show_change_password, Vector2(0, MobileUi.TOUCH_SECONDARY_H)))
+		if google_linked:
+			col.add_child(_make_button("Google Account Linked", func() -> void:
+				_show_toast("Google is already linked to this account.")
+			, Vector2(0, MobileUi.TOUCH_SECONDARY_H)))
+		else:
+			col.add_child(_make_button("Link Google Account", func() -> void:
+				if _auth_busy:
+					return
+				_auth_busy = true
+				var started: Dictionary = await state.auth.begin_link_google()
+				if not bool(started.get("ok", false)):
+					_auth_busy = false
+					_show_toast(str(started.get("error", "Could not start Google linking.")))
+					return
+				var opened: Dictionary = AuthDeepLinkHelper.open_external_auth_url(str(started.get("url", "")))
+				_auth_busy = false
+				if not bool(opened.get("ok", false)):
+					state.auth.cancel_oauth()
+					_show_toast(str(opened.get("error", "Could not open browser.")))
+					return
+				_show_toast("Complete Google linking in your browser, then return here.")
+			, Vector2(0, MobileUi.TOUCH_SECONDARY_H)))
+
 	col.add_child(_make_button("Sign Out", func() -> void:
 		_clear_reveal_timers()
 		_clear_compose_draft()
@@ -5253,6 +5568,42 @@ func _find_scroll_item_by_id(scroll_id: String) -> Dictionary:
 	return {}
 
 
+func _consume_auth_callback() -> void:
+	## Password recovery / Google OAuth deep-link consumer (cold + warm start).
+	var uri := AuthDeepLinkHelper.consume_pending_auth_callback().strip_edges()
+	if uri.is_empty():
+		return
+	if OS.is_debug_build():
+		print("[COLN-AUTH] %s" % AuthCallbackParser.sanitize_for_log(uri))
+	_show_toast("Completing sign-in…")
+	var result: Dictionary = await state.auth.handle_auth_callback_uri(uri)
+	if bool(result.get("cancelled", false)):
+		_show_toast(str(result.get("error", "Google sign-in was cancelled.")))
+		if not state.tokens.has_session():
+			_show_auth(false)
+		return
+	if bool(result.get("duplicate", false)) or bool(result.get("dead", false)):
+		_show_toast(str(result.get("error", "This sign-in link was already used.")))
+		return
+	if not bool(result.get("ok", false)):
+		_show_toast(str(result.get("error", "Could not complete sign-in.")))
+		if bool(result.get("expired", false)) and str(result.get("flow", "")) == AuthCallbackParser.FLOW_RECOVERY:
+			_show_forgot_password("")
+		elif not state.tokens.has_session():
+			_show_auth(false)
+		return
+	if bool(result.get("needs_password_reset", false)) or str(result.get("flow", "")) == AuthCallbackParser.FLOW_RECOVERY:
+		_show_create_new_password()
+		return
+	## OAuth / link success → same post-login path as email/password.
+	if str(result.get("mode", "")) == "link":
+		_show_toast("Google account linked.")
+		if _current_screen == "profile" or state.tokens.has_session():
+			_show_profile()
+		return
+	await _after_verified_sign_in()
+
+
 func _consume_notification_deeplink() -> void:
 	## Don't steal first-run Permissions Setup; leave pending for next resume/chest.
 	if _current_screen == "permissions_setup" or _current_screen == "profile_setup" or _current_screen == "welcome":
@@ -5334,8 +5685,10 @@ func _notification(what: int) -> void:
 				_show_main_chest()
 			"diagnostics":
 				_show_profile()
-			"profile_setup", "check_email", "auth_signin", "auth_signup":
+			"profile_setup", "check_email", "auth_signin", "auth_signup", "forgot_password", "create_new_password":
 				_show_welcome()
+			"change_password":
+				_show_profile()
 			"main_chest":
 				_show_welcome()
 			_:
@@ -5361,6 +5714,8 @@ func _on_app_resumed() -> void:
 	_refresh_permissions_setup_ui()
 	if _perm_manage_live:
 		_rebuild_permissions_manage_content()
+	## Consume auth callbacks first (recovery / Google), then notification deep links.
+	await _consume_auth_callback()
 	## Consume notification deep links from warm resume / new intent.
 	await _consume_notification_deeplink()
 	## Profile permission rows need a rebuild after Settings return.

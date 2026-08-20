@@ -43,13 +43,13 @@ func _run() -> void:
 
 
 func _test_version() -> void:
-	_assert(BuildFlags.APP_VERSION_CODE == 73, "versionCode 71")
-	_assert(BuildFlags.APP_VERSION_NAME == "0.1.73-notifications-relationship-status", "versionName 71")
+	_assert(BuildFlags.APP_VERSION_CODE == 74, "versionCode 71")
+	_assert(BuildFlags.APP_VERSION_NAME == "0.1.74-auth-recovery-google-signin", "versionName 71")
 	var preset := FileAccess.get_file_as_string("res://export_presets.cfg")
-	_assert(preset.contains("version/code=73"), "export versionCode 71")
-	_assert(preset.contains("0.1.73-notifications-relationship-status"), "export versionName 71")
+	_assert(preset.contains("version/code=74"), "export versionCode 71")
+	_assert(preset.contains("0.1.74-auth-recovery-google-signin"), "export versionName 71")
 	var proj := FileAccess.get_file_as_string("res://project.godot")
-	_assert(proj.contains("0.1.73-notifications-relationship-status"), "project.godot version")
+	_assert(proj.contains("0.1.74-auth-recovery-google-signin"), "project.godot version")
 
 
 func _test_catalog() -> void:
