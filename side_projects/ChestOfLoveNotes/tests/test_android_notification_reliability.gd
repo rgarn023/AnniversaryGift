@@ -61,10 +61,32 @@ func _init() -> void:
 	_assert(helper.contains("notify_connection_request"), "connection trigger preserved")
 	_assert(helper.contains("notify_new_scroll"), "new scroll trigger preserved")
 	_assert(helper.contains("request_permission_contextual"), "contextual permission request")
+	_assert(helper.contains("prepare_contextual_notification"), "prepare_contextual_notification exists")
+	_assert(helper.contains("return false"), "prepare returns false when permission not ready")
 
 	_assert(events.contains("seeded"), "chest event seed avoids historical spam")
 	_assert(events.contains("notify_new_scroll"), "chest events fire new scroll")
 	_assert(events.contains("notify_connection_request"), "chest events fire connection")
+	_assert(events.contains("prepare_contextual_notification"), "chest notifier uses permission preflight")
+
+	## Permission preflight must appear BEFORE _claim for scrolls and requests.
+	var scroll_prep := events.find("prepare_contextual_notification()")
+	var scroll_claim := events.find('_claim("scroll|')
+	_assert(scroll_prep >= 0 and scroll_claim >= 0 and scroll_prep < scroll_claim, "scroll path: prepare before _claim")
+	var req_prep := events.find("prepare_contextual_notification()", scroll_claim)
+	var req_claim := events.find('_claim("request|')
+	_assert(req_prep >= 0 and req_claim >= 0 and req_prep < req_claim, "request path: prepare before _claim")
+	_assert(
+		not events.contains("notify_connection_request(who, rid)\n\t\tNotificationHelper.request_permission_contextual()")
+		and not events.contains("notify_connection_request(who, rid)\n\t\t## Relevant moment"),
+		"old post-notification permission-request ordering removed"
+	)
+	## After connection notify there must be no trailing request_permission_contextual.
+	var conn_notify := events.find("notify_connection_request(")
+	_assert(conn_notify >= 0, "connection notify present")
+	var after_conn := events.substr(conn_notify)
+	_assert(not after_conn.contains("request_permission_contextual"), "no post-connection permission request")
+
 	_assert(main.contains("ChestEventNotifier"), "main wires chest event notifier")
 	_assert(main.contains("Open Notification Settings"), "settings CTA for denied notifications")
 	_assert(perms.contains("open_notification_settings"), "PermissionsHelper notification settings")

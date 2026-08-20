@@ -183,15 +183,33 @@ static func mark_pairing_prompt_known(pairing_id: String) -> void:
 	var c := _prompt_cfg()
 	c.set_value("known", pairing_id, true)
 	c.set_value("prompt", "seeded", true)
+	c.set_value("prompt", "explicit_connection_pending", false)
+	c.save(PROMPT_CFG)
+
+
+static func explicit_connection_pending() -> bool:
+	return bool(_prompt_cfg().get_value("prompt", "explicit_connection_pending", false))
+
+
+static func mark_explicit_connection_pending() -> void:
+	var c := _prompt_cfg()
+	c.set_value("prompt", "explicit_connection_pending", true)
+	c.save(PROMPT_CFG)
+
+
+static func clear_explicit_connection_pending() -> void:
+	var c := _prompt_cfg()
+	c.set_value("prompt", "explicit_connection_pending", false)
 	c.save(PROMPT_CFG)
 
 
 ## Returns true when a new-connection relationship prompt should appear.
-## Existing / long-lived connections are seeded once without prompting.
+## Only an explicit new-connection action (send/accept) arms the prompt.
+## Existing / restored / upgrade pairings are seeded silently — never via connected_at.
 static func should_prompt_for_pairing(
 	pairing_id: String,
 	current_key: String,
-	connected_at_iso: String = ""
+	_connected_at_iso: String = ""
 ) -> bool:
 	if pairing_id.is_empty():
 		return false
@@ -200,23 +218,8 @@ static func should_prompt_for_pairing(
 		return false
 	if pairing_prompt_known(pairing_id):
 		return false
-	if not prompt_seeded():
-		mark_prompt_seeded()
-		## Upgrade / first load with an already-established pair: no popup.
-		## Brand-new accept within the last ~15 minutes may still prompt (sender path).
-		if _connection_is_recent(connected_at_iso):
-			return true
-		mark_pairing_prompt_known(pairing_id)
-		return false
-	return true
-
-
-static func _connection_is_recent(connected_at_iso: String) -> bool:
-	var raw := connected_at_iso.strip_edges()
-	if raw.is_empty():
-		return false
-	var unix := int(Time.get_unix_time_from_datetime_string(raw))
-	if unix <= 0:
-		return false
-	var now_u := int(Time.get_unix_time_from_system())
-	return (now_u - unix) <= 15 * 60
+	if explicit_connection_pending():
+		return true
+	## Unseen existing pairing (upgrade / restore / login): seed known, never prompt.
+	mark_pairing_prompt_known(pairing_id)
+	return false

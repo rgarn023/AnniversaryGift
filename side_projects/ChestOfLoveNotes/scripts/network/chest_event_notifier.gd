@@ -85,6 +85,9 @@ func evaluate_chest(scrolls: Array, requests: Array) -> void:
 		if bool(item.get("is_opened", false)) or bool(item.get("opened", false)):
 			_remember("scroll|%s" % sid)
 			continue
+		## Permission must be ready BEFORE claim — otherwise the first event is lost.
+		if not NotificationHelper.prepare_contextual_notification():
+			continue
 		if not _claim("scroll|%s" % sid):
 			continue
 		var sender: Dictionary = item.get("sender", {}) if typeof(item.get("sender")) == TYPE_DICTIONARY else {}
@@ -101,10 +104,11 @@ func evaluate_chest(scrolls: Array, requests: Array) -> void:
 		var rid := str(req.get("id", ""))
 		if rid.is_empty():
 			continue
+		## Permission must be ready BEFORE claim — otherwise the first event is lost.
+		if not NotificationHelper.prepare_contextual_notification():
+			continue
 		if not _claim("request|%s" % rid):
 			continue
 		var sender2: Dictionary = req.get("sender", {}) if typeof(req.get("sender")) == TYPE_DICTIONARY else {}
 		var who := IdentityHelper.display_name_from_profile(sender2, "Someone")
 		NotificationHelper.notify_connection_request(who, rid)
-		## Relevant moment — contextual permission ask (no-ops if already asked/granted).
-		NotificationHelper.request_permission_contextual()

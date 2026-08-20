@@ -40,7 +40,11 @@ func send_connection_request(opts: Dictionary) -> Dictionary:
 		body["friend_code"] = str(opts.get("friend_code"))
 	if body.is_empty():
 		return {"ok": false, "error": "Connection target required.", "status": 400, "data": {}}
-	return await api.call_edge_function("send-friend-request", body, "POST")
+	var result: Dictionary = await api.call_edge_function("send-friend-request", body, "POST")
+	## Arm relationship prompt only after an explicit successful new-connection action.
+	if bool(result.get("ok", false)):
+		RelationshipLabelHelper.mark_explicit_connection_pending()
+	return result
 
 
 func send_friend_request(recipient_id: String = "", friend_code: String = "") -> Dictionary:
@@ -74,11 +78,15 @@ func send_friend_request_query(query: String) -> Dictionary:
 
 
 func respond_to_friend_request(request_id: String, accept: bool) -> Dictionary:
-	return await api.call_edge_function(
+	var result: Dictionary = await api.call_edge_function(
 		"respond-to-friend-request",
 		{"request_id": request_id, "action": "accept" if accept else "decline"},
 		"POST"
 	)
+	## Accepting is an explicit new-connection action — arm the relationship prompt.
+	if accept and bool(result.get("ok", false)):
+		RelationshipLabelHelper.mark_explicit_connection_pending()
+	return result
 
 
 func disconnect_person() -> Dictionary:

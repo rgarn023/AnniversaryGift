@@ -72,6 +72,23 @@ static func request_permission_contextual(force: bool = false) -> void:
 	ensure_channels()
 
 
+## Preflight before claiming a contextual notification event.
+## Returns true when it is safe to claim + display.
+## On Android without POST_NOTIFICATIONS yet, requests permission and returns false
+## so the event stays eligible for a later refresh after the async grant.
+static func prepare_contextual_notification() -> bool:
+	if OS.get_name() != "Android":
+		return true
+	if has_permission():
+		ensure_channels()
+		return true
+	request_permission_contextual()
+	if has_permission():
+		ensure_channels()
+		return true
+	return false
+
+
 static func open_notification_settings() -> bool:
 	var p = _plugin()
 	if p != null and p.has_method("open_app_notification_settings"):
