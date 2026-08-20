@@ -67,15 +67,22 @@ com.charoitegames.chestoflovenotes://auth-callback
 ```
 
 3. Keep any existing Site URL you already use for web/admin tools.
-4. Optional but recommended: enable email password recovery if not already on (default for email provider).
+4. Password recovery must be enabled for the email provider.
+5. If you use a customized password-recovery email template, make sure it honors Supabase's redirect target (`RedirectTo`) so the recovery flow returns to the app callback above.
 
 ### Identity linking (existing email accounts)
 
-To reduce accidental duplicate accounts when a Google identity matches a verified email:
+Supabase can automatically link certain verified identities that share the same email, but the explicit **Link Google Account** button uses Supabase's manual identity-linking flow.
 
-1. Review Supabase Auth settings for **automatic linking** / **manual linking** for your project version.
-2. Prefer keeping automatic linking of verified same-email identities enabled when available.
-3. The app also exposes **Link Google Account** under Profile → Account & Security for an already signed-in user (uses Supabase identity authorize / authorize fallback).
+For that button to work:
+
+1. Go to the project's **Authentication** configuration/settings.
+2. Enable **Manual identity linking** for the project.
+3. Keep the user signed in to the existing Chest account before tapping **Link Google Account**.
+4. Complete Google OAuth in the browser and return to the app.
+5. Verify Profile → Account & Security shows Google as linked.
+
+The app uses Supabase's authenticated `/user/identities/authorize` flow for explicit linking. It deliberately does **not** fall back to ordinary Google sign-in if manual linking is unavailable, because ordinary sign-in could switch to a different Supabase user UUID instead of safely linking the identity.
 
 The app **never** copies user data between UUIDs or rewrites ownership by email.
 
@@ -102,13 +109,13 @@ If you also create an **Android** OAuth client (optional depending on Google/Sup
 - **Package name:** `com.charoitegames.chestoflovenotes`
 - **SHA-1 / SHA-256:** use the certificate fingerprint of the keystore that signs the installed APK/AAB (same identity as v72/v73/v74).
 
-You can inspect the release cert SHA-256 with:
+You can inspect the test/release candidate cert SHA-256 with:
 
 ```bash
 keytool -list -v -keystore android/signing/chest_test_debug.keystore -alias androiddebugkey
 ```
 
-(Use the production keystore fingerprint for Play Store builds.)
+Use the production/Play signing certificate fingerprint for a Play Store production configuration.
 
 ---
 
@@ -120,7 +127,9 @@ The install script registers an intent filter:
 - Categories: `DEFAULT`, `BROWSABLE`
 - Data: scheme `com.charoitegames.chestoflovenotes`, host `auth-callback`
 
-Cold start and warm start both capture the callback via the ChestNotify Android plugin (`consume_pending_auth_callback`). The URI is consumed once and never logged with tokens.
+Cold start and warm start capture the callback through the ChestNotify Android plugin. The callback is retained in app-private storage until AuthService reaches a terminal success/error; transient network failures keep it available for a retry. Raw callback URLs are never logged.
+
+Google OAuth uses PKCE. The short-lived PKCE verifier/mode are encrypted separately with the existing Android Keystore-backed secure-storage plugin, so the Google browser flow can survive Android killing and recreating the app process. The transient PKCE state is expired and deleted automatically and is separate from the normal Keep Me Signed In session.
 
 ---
 
@@ -129,7 +138,16 @@ Cold start and warm start both capture the callback via the ChestNotify Android 
 - Supabase **URL**
 - Supabase **publishable/anon key**
 - App redirect URI constant
-- PKCE code verifier generated at runtime (not shipped)
+- Code that generates PKCE verifiers at runtime using Godot's cryptographically secure `Crypto.generate_random_bytes()`
+
+## What is generated only at runtime
+
+- PKCE code verifier
+- PKCE challenge
+- authorization code
+- access/refresh session tokens
+
+The PKCE verifier is never shipped in the APK and is never stored as plaintext under `user://`.
 
 ## What must never be committed or embedded
 
@@ -142,11 +160,14 @@ Cold start and warm start both capture the callback via the ChestNotify Android 
 ## Smoke checklist after dashboard config
 
 1. Forgot Password → email arrives → link opens app → Create New Password works.
-2. Continue with Google → browser → returns to app → same session as email login.
-3. Existing email user with matching Google email → lands on **same** Supabase user UUID (no second account).
-4. Profile → Account & Security → providers reflect linked identities.
-5. Sign out → secure session cleared → sign back in.
+2. Continue with Google → browser → returns to app → authenticated Chest session is created.
+3. Start Google sign-in, background the app long enough for Android to recreate it, then complete browser OAuth → callback still succeeds.
+4. Existing email user with matching Google email → verify it lands on the intended existing Supabase user UUID (no second disconnected account).
+5. Signed-in email user → Link Google Account → provider becomes linked without changing the Chest user UUID.
+6. Profile → Account & Security → providers reflect linked identities.
+7. Sign out → secure session cleared → sign back in.
+8. Temporarily lose connectivity as OAuth returns → restore connectivity/resume → pending callback can retry instead of being destroyed before processing.
 
-Until steps above are done:
+Until the Google/Supabase dashboard steps above are done:
 
 **GOOGLE LOGIN REQUIRES DASHBOARD CONFIGURATION**
