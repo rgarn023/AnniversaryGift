@@ -78,20 +78,11 @@ class ChestNotifyPlugin(godot: Godot) : GodotPlugin(godot) {
 
 	override fun onMainResume() {
 		super.onMainResume()
+		// GodotActivity.onNewIntent() replaces Activity.intent before the app resumes,
+		// so reading the current intent here covers OAuth/recovery warm returns without
+		// relying on a non-existent GodotPlugin.onMainNewIntent lifecycle hook.
 		captureDeepLink(getActivity()?.intent)
 		captureAuthCallback(getActivity()?.intent)
-	}
-
-	override fun onMainNewIntent(activity: Activity?, intent: Intent?) {
-		super.onMainNewIntent(activity, intent)
-		if (activity != null && intent != null) {
-			try {
-				activity.intent = intent
-			} catch (_: Exception) {
-			}
-		}
-		captureDeepLink(intent)
-		captureAuthCallback(intent)
 	}
 
 	private fun captureDeepLink(intent: Intent?) {
