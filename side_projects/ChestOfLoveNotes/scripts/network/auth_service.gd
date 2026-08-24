@@ -188,7 +188,7 @@ func begin_google_sign_in() -> Dictionary:
 	var challenge := _code_challenge_s256(_oauth_code_verifier)
 	var redirect_enc := AUTH_REDIRECT_URI.uri_encode()
 	var url := (
-		"%s/auth/v1/authorize?provider=google&redirect_to=%s&code_challenge=%s&code_challenge_method=S256"
+		"%s/auth/v1/authorize?provider=google&redirect_to=%s&code_challenge=%s&code_challenge_method=s256"
 		% [config.supabase_url.rstrip("/"), redirect_enc, challenge.uri_encode()]
 	)
 	return {
@@ -219,19 +219,38 @@ func begin_link_google() -> Dictionary:
 	var challenge := _code_challenge_s256(_oauth_code_verifier)
 	var redirect_enc := AUTH_REDIRECT_URI.uri_encode()
 	var url := (
-		"%s/auth/v1/user/identities/authorize?provider=google&redirect_to=%s&code_challenge=%s&code_challenge_method=S256&skip_http_redirect=true"
+		"%s/auth/v1/user/identities/authorize?provider=google&redirect_to=%s&code_challenge=%s&code_challenge_method=s256&skip_http_redirect=true"
 		% [config.supabase_url.rstrip("/"), redirect_enc, challenge.uri_encode()]
 	)
-	var result: Dictionary = await api.request(url, "GET", {}, true, "", false)
+	## Supabase's official linkIdentity clients use the signed-in user's bearer
+	## for this endpoint. Allow one refresh/retry if that bearer expired between
+	## opening Account & Security and tapping Link Google Account.
+	var result: Dictionary = await api.request(url, "GET", {}, true, "", true)
 	if not bool(result.get("ok", false)):
 		var status := int(result.get("status", 0))
+		var safe_error := str(result.get("error", "")).strip_edges()
 		cancel_oauth()
 		if status == 0:
 			return {"ok": false, "error": "No internet connection. Check your network and try again."}
+		if status == 401 or status == 403:
+			return {
+				"ok": false,
+				"error": "Your sign-in session expired. Sign in again, then retry Link Google Account.",
+				"status": status,
+			}
+		var lowered := safe_error.to_lower()
+		if lowered.contains("manual") and lowered.contains("link"):
+			return {
+				"ok": false,
+				"error": "Google account linking is unavailable. Enable manual identity linking in Supabase Auth settings and try again.",
+				"setup_required": true,
+				"status": status,
+			}
+		if safe_error.is_empty():
+			safe_error = "Request failed (%d)." % status
 		return {
 			"ok": false,
-			"error": "Google account linking is unavailable. Enable manual identity linking in Supabase Auth settings and try again.",
-			"setup_required": true,
+			"error": "Could not start Google account linking: %s" % safe_error,
 			"status": status,
 		}
 	var data: Dictionary = result.data if typeof(result.get("data")) == TYPE_DICTIONARY else {}
@@ -242,7 +261,7 @@ func begin_link_google() -> Dictionary:
 		cancel_oauth()
 		return {
 			"ok": false,
-			"error": "Google account linking is not enabled for this Supabase project.",
+			"error": "Supabase did not return a Google linking URL. Verify the Google provider is enabled and try again.",
 			"setup_required": true,
 		}
 	return {"ok": true, "url": link_url, "redirect_uri": AUTH_REDIRECT_URI, "mode": "link", "error": ""}
@@ -502,7 +521,7 @@ func refresh_session() -> Dictionary:
 			# Always replace with newly returned refresh token when present (rotation).
 			if new_refresh.is_empty():
 				new_refresh = used_refresh
-			tokens.set_session(
+			okens.set_session(
 				access,
 				new_refresh,
 				int(Time.get_unix_time_from_system()) + int(data.get("expires_in", 3600))
