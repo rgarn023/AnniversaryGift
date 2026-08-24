@@ -188,8 +188,11 @@ static func store_oauth_state_json(json_string: String) -> bool:
 		_test_oauth_iv = Marshalls.utf8_to_base64("oauth-iv-12b")
 		return true
 	var p := _plugin()
-	if p == null or not p.has_method("secure_store_oauth_state"):
+	if p == null:
 		return false
+	## Do not gate Android plugin methods with Object.has_method(). Godot's Android
+	## singleton proxy may expose @UsedByGodot calls without reporting them through
+	## has_method(), which previously caused a false "secure storage unavailable" error.
 	return bool(p.call("secure_store_oauth_state", json_string))
 
 
@@ -204,7 +207,7 @@ static func load_oauth_state_json() -> String:
 			return ""
 		return str(raw)
 	var p := _plugin()
-	if p == null or not p.has_method("secure_load_oauth_state"):
+	if p == null:
 		return ""
 	return str(p.call("secure_load_oauth_state"))
 
@@ -214,7 +217,7 @@ static func delete_oauth_state() -> bool:
 		_clear_test_oauth_backend()
 		return true
 	var p := _plugin()
-	if p == null or not p.has_method("secure_delete_oauth_state"):
+	if p == null:
 		return true
 	return bool(p.call("secure_delete_oauth_state"))
 
@@ -223,7 +226,7 @@ static func has_oauth_state() -> bool:
 	if _test_backend_enabled:
 		return not _test_oauth_ciphertext.is_empty() and not _test_oauth_iv.is_empty()
 	var p := _plugin()
-	if p == null or not p.has_method("secure_has_oauth_state"):
+	if p == null:
 		return false
 	return bool(p.call("secure_has_oauth_state"))
 
