@@ -13,15 +13,17 @@ static func _plugin():
 
 
 static func available() -> bool:
-	var p = _plugin()
-	return p != null and p.has_method("consume_pending_auth_callback")
+	## Android plugin singletons can expose @UsedByGodot methods even when
+	## Object.has_method() does not report them reliably. Presence of the v74
+	## plugin singleton is the capability check; this APK ships both sides together.
+	return _plugin() != null
 
 
 static func peek_pending_auth_callback() -> String:
 	var p = _plugin()
-	if p != null and p.has_method("peek_pending_auth_callback"):
-		return str(p.peek_pending_auth_callback())
-	return ""
+	if p == null:
+		return ""
+	return str(p.call("peek_pending_auth_callback"))
 
 
 static func consume_pending_auth_callback() -> String:
@@ -29,16 +31,16 @@ static func consume_pending_auth_callback() -> String:
 	## AuthService clears the callback only after terminal success/failure so a
 	## process/network interruption cannot lose a still-usable PKCE callback.
 	var p = _plugin()
-	if p != null and p.has_method("consume_pending_auth_callback"):
-		return str(p.consume_pending_auth_callback())
-	return ""
+	if p == null:
+		return ""
+	return str(p.call("consume_pending_auth_callback"))
 
 
 static func clear_pending_auth_callback() -> bool:
 	var p = _plugin()
-	if p != null and p.has_method("clear_pending_auth_callback"):
-		return bool(p.clear_pending_auth_callback())
-	return true
+	if p == null:
+		return true
+	return bool(p.call("clear_pending_auth_callback"))
 
 
 static func open_external_auth_url(url: String) -> Dictionary:
