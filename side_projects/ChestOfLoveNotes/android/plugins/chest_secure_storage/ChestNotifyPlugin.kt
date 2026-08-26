@@ -194,10 +194,8 @@ class ChestNotifyPlugin(godot: Godot) : GodotPlugin(godot) {
 			val intent = Intent(Intent.ACTION_VIEW, uri).apply {
 				addCategory(Intent.CATEGORY_BROWSABLE)
 			}
-			if (intent.resolveActivity(act.packageManager) == null) {
-				Log.w(TAG, "open_external_auth_url: no browser handler")
-				return false
-			}
+			// Do not preflight with resolveActivity(): Android package-visibility rules
+			// can hide browsers from queries even though ACTION_VIEW launches correctly.
 			act.startActivity(intent)
 			true
 		} catch (e: Exception) {
