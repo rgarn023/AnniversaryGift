@@ -9,6 +9,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.util.Log
 import android.view.View
@@ -176,6 +177,31 @@ class ChestNotifyPlugin(godot: Godot) : GodotPlugin(godot) {
 				.remove(KEY_PENDING_AUTH_CALLBACK)
 				.commit()
 		} catch (_: Exception) {
+			false
+		}
+	}
+
+	/** Open OAuth/recovery URLs with Android's native browser intent. */
+	@UsedByGodot
+	fun open_external_auth_url(url: String): Boolean {
+		return try {
+			val trimmed = url.trim()
+			if (trimmed.isEmpty()) return false
+			val uri = Uri.parse(trimmed)
+			val scheme = uri.scheme?.lowercase().orEmpty()
+			if (scheme != "https" && scheme != "http") return false
+			val act = getActivity() ?: return false
+			val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+				addCategory(Intent.CATEGORY_BROWSABLE)
+			}
+			if (intent.resolveActivity(act.packageManager) == null) {
+				Log.w(TAG, "open_external_auth_url: no browser handler")
+				return false
+			}
+			act.startActivity(intent)
+			true
+		} catch (e: Exception) {
+			Log.w(TAG, "open_external_auth_url failed: ${e.javaClass.simpleName}")
 			false
 		}
 	}
