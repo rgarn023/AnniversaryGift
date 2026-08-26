@@ -16,6 +16,44 @@ func setup(p_scroll: ScrollContainer, p_pad: Control) -> void:
 	set_process(true)
 
 
+func _exit_tree() -> void:
+	## Auth screens own this helper. A successful email/password sign-in used to
+	## destroy the form while its infinite spinner Tween was still running. That
+	## stale SceneTree Tween could survive into the first Chest paint and leave
+	## the transition visually dim/stalled until the app was restarted.
+	set_process(false)
+	if pad != null and is_instance_valid(pad):
+		pad.custom_minimum_size.y = 0.0
+	_cleanup_auth_transition_if_needed()
+
+
+func _cleanup_auth_transition_if_needed() -> void:
+	## Keep this helper generic for normal screens, but when it is leaving the
+	## root Main auth form we can safely retire the auth-only spinner reference.
+	## We intentionally key off the live Tween reference: non-auth keyboard
+	## screens do not have one, so their navigation remains untouched.
+	var node: Node = get_parent()
+	while node != null:
+		var script: Script = node.get_script() as Script
+		if script != null and script.resource_path == "res://scripts/main.gd":
+			var auth_tween: Variant = node.get("_auth_spinner_tween")
+			if auth_tween == null:
+				return
+			if auth_tween is Tween and (auth_tween as Tween).is_valid():
+				(auth_tween as Tween).kill()
+			node.set("_auth_spinner_tween", null)
+			## _begin_nav_transition() intentionally fades ScreenHost from zero.
+			## If teardown lands between that zeroing and the fade Tween, guarantee
+			## one fully-visible frame so Android cannot be stranded at partial alpha.
+			var screen_host: Variant = node.get("_screen_host")
+			if screen_host is Control and is_instance_valid(screen_host):
+				var tint: Color = (screen_host as Control).modulate
+				tint.a = 1.0
+				(screen_host as Control).modulate = tint
+			return
+		node = node.get_parent()
+
+
 func _process(_delta: float) -> void:
 	if scroll == null or pad == null or not is_instance_valid(scroll) or not is_instance_valid(pad):
 		return
