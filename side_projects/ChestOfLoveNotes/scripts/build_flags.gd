@@ -19,5 +19,5 @@ const SHOW_ONBOARDING_BANNER := false
 const DEV_CHEST_SCROLL_PREVIEW := false
 ## Debug/test builds may offer "Send to Myself (Test)" using the real send path.
 const DEBUG_SELF_SEND := true
-const APP_VERSION_NAME := "0.1.74-auth-recovery-google-signin"
-const APP_VERSION_CODE := 74
+const APP_VERSION_NAME := "0.1.75-auth-hotfix-diagnostic"
+const APP_VERSION_CODE := 75
