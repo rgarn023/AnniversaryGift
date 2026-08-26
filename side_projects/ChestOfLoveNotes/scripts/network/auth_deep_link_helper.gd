@@ -59,11 +59,14 @@ static func open_external_auth_url(url: String) -> Dictionary:
 		var android_runtime = Engine.get_singleton("AndroidRuntime")
 		if android_runtime == null:
 			return {"ok": false, "error": "Android runtime is unavailable. Restart the app and try again."}
+		var java_wrapper = Engine.get_singleton("JavaClassWrapper")
+		if java_wrapper == null:
+			return {"ok": false, "error": "Android Java bridge is unavailable. Restart the app and try again."}
 		var activity = android_runtime.getActivity()
 		if activity == null:
 			return {"ok": false, "error": "Android activity is unavailable. Restart the app and try again."}
-		var Intent = JavaClassWrapper.wrap("android.content.Intent")
-		var Uri = JavaClassWrapper.wrap("android.net.Uri")
+		var Intent = java_wrapper.wrap("android.content.Intent")
+		var Uri = java_wrapper.wrap("android.net.Uri")
 		if Intent == null or Uri == null:
 			return {"ok": false, "error": "Android browser support could not be initialized."}
 		var intent = Intent.Intent()
