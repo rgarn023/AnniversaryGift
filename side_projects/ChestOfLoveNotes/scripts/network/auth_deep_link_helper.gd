@@ -23,7 +23,8 @@ static func peek_pending_auth_callback() -> String:
 	var p = _plugin()
 	if p == null:
 		return ""
-	return str(p.call("peek_pending_auth_callback"))
+	var value: Variant = p.call("peek_pending_auth_callback")
+	return "" if value == null else str(value)
 
 
 static func consume_pending_auth_callback() -> String:
@@ -33,32 +34,45 @@ static func consume_pending_auth_callback() -> String:
 	var p = _plugin()
 	if p == null:
 		return ""
-	return str(p.call("consume_pending_auth_callback"))
+	var value: Variant = p.call("consume_pending_auth_callback")
+	return "" if value == null else str(value)
 
 
 static func clear_pending_auth_callback() -> bool:
 	var p = _plugin()
 	if p == null:
 		return true
-	return bool(p.call("clear_pending_auth_callback"))
+	var value: Variant = p.call("clear_pending_auth_callback")
+	return value != null and bool(value)
 
 
 static func open_external_auth_url(url: String) -> Dictionary:
-	## Prefer Android's native ACTION_VIEW intent. OS.shell_open() can report OK
-	## on some Godot Android builds without actually foregrounding a browser.
+	## Godot 4.7 includes AndroidRuntime + JavaClassWrapper specifically for
+	## direct access to Android APIs. Prefer that path over a custom JNI method.
 	var u := url.strip_edges()
 	if u.is_empty():
-		return {"ok": false, "error": "Missing sign-in URL."}
+		return {"ok": false, "error": "Missing Google sign-in URL."}
 	if not (u.begins_with("https://") or u.begins_with("http://")):
-		return {"ok": false, "error": "Invalid sign-in URL."}
+		return {"ok": false, "error": "Invalid Google sign-in URL."}
+
 	if OS.get_name() == "Android":
-		var p = _plugin()
-		if p == null:
-			return {"ok": false, "error": "Android browser launcher is unavailable. Restart the app and try again."}
-		var opened := bool(p.call("open_external_auth_url", u))
-		if not opened:
-			return {"ok": false, "error": "Could not open a browser for Google sign-in."}
+		var android_runtime = Engine.get_singleton("AndroidRuntime")
+		if android_runtime == null:
+			return {"ok": false, "error": "Android runtime is unavailable. Restart the app and try again."}
+		var activity = android_runtime.getActivity()
+		if activity == null:
+			return {"ok": false, "error": "Android activity is unavailable. Restart the app and try again."}
+		var Intent = JavaClassWrapper.wrap("android.content.Intent")
+		var Uri = JavaClassWrapper.wrap("android.net.Uri")
+		if Intent == null or Uri == null:
+			return {"ok": false, "error": "Android browser support could not be initialized."}
+		var intent = Intent.Intent()
+		intent.setAction(Intent.ACTION_VIEW)
+		intent.setData(Uri.parse(u))
+		intent.addCategory(Intent.CATEGORY_BROWSABLE)
+		activity.startActivity(intent)
 		return {"ok": true, "error": ""}
+
 	var err := OS.shell_open(u)
 	if err != OK:
 		return {"ok": false, "error": "Could not open the browser for Google sign-in."}
