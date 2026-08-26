@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Wire ChestSecureStorage (+ Location/Media/Focus/Notify/Activity/Schedule) into the Godot Android Gradle export template.
+# Wire ChestSecureStorage (+ Location/Media/Focus/Notify/AuthCallback/Activity/Schedule) into the Godot Android Gradle export template.
 # Safe to re-run. Does not modify Anniversary Gift.
 set -euo pipefail
 
@@ -25,6 +25,7 @@ cp -f "$PLUGIN_DIR/ChestFocusPlugin.kt" "$JAVA_DST/ChestFocusPlugin.kt"
 cp -f "$PLUGIN_DIR/ChestNotifyPlugin.kt" "$JAVA_DST/ChestNotifyPlugin.kt"
 cp -f "$PLUGIN_DIR/ChestQrPlugin.kt" "$JAVA_DST/ChestQrPlugin.kt"
 cp -f "$PLUGIN_DIR/QrScanActivity.kt" "$JAVA_DST/QrScanActivity.kt"
+cp -f "$PLUGIN_DIR/AuthCallbackActivity.kt" "$JAVA_DST/AuthCallbackActivity.kt"
 cp -f "$PLUGIN_DIR/ActivityLockService.kt" "$JAVA_DST/ActivityLockService.kt"
 cp -f "$PLUGIN_DIR/ScheduledNotifyReceiver.kt" "$JAVA_DST/ScheduledNotifyReceiver.kt"
 cp -f "$PLUGIN_DIR/GeofenceReceiver.kt" "$JAVA_DST/GeofenceReceiver.kt"
@@ -110,7 +111,10 @@ for name, cls, comment in plugins:
             text,
         )
 
-# Service + boot receiver (idempotent insert before </application>)
+# Native service / receiver / activity declarations (idempotent insert before </application>).
+# OAuth callbacks deliberately use a real Activity, not Godot's launcher alias:
+# the launcher alias is generated/rewritten late in export and v77 proved that a
+# filter injected there was absent from the final APK/AAB.
 service_block = '''
         <!-- Chest of Love Notes: Activity Lock foreground location service -->
         <service
@@ -134,6 +138,23 @@ service_block = '''
             android:exported="false"
             android:screenOrientation="portrait"
             android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen" />
+        <!-- Chest of Love Notes: Supabase recovery + Google OAuth callback -->
+        <activity
+            android:name="com.charoitegames.chestoflovenotes.securestorage.AuthCallbackActivity"
+            android:exported="true"
+            android:noHistory="true"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTop"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="com.charoitegames.chestoflovenotes"
+                    android:host="auth-callback" />
+            </intent-filter>
+        </activity>
         <!-- Chest of Love Notes: opt-in Location Lock geofence -->
         <receiver
             android:name="com.charoitegames.chestoflovenotes.securestorage.GeofenceReceiver"
@@ -155,6 +176,26 @@ else:
             android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen" />
 '''
         text = text.replace('</application>', qr_act + '\n    </application>', 1)
+    if 'AuthCallbackActivity' not in text:
+        auth_act = '''
+        <activity
+            android:name="com.charoitegames.chestoflovenotes.securestorage.AuthCallbackActivity"
+            android:exported="true"
+            android:noHistory="true"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTop"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="com.charoitegames.chestoflovenotes"
+                    android:host="auth-callback" />
+            </intent-filter>
+        </activity>
+'''
+        text = text.replace('</application>', auth_act + '\n    </application>', 1)
     if 'GeofenceReceiver' not in text:
         geo_rx = '''
         <receiver
@@ -185,43 +226,6 @@ for perm, extra in (
             f'    <uses-permission android:name="{perm}"{extra} />\n</manifest>',
             1,
         )
-
-# Auth callback deep link — GodotApp is often android:exported=false with a launcher
-# activity-alias. Prefer an exported alias targeting .GodotApp for VIEW/BROWSABLE.
-auth_filter = '''
-            <!-- Chest of Love Notes: Supabase auth callback (recovery + Google OAuth) -->
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data
-                    android:scheme="com.charoitegames.chestoflovenotes"
-                    android:host="auth-callback" />
-            </intent-filter>
-'''
-if 'android:host="auth-callback"' not in text and "android:host='auth-callback'" not in text:
-    inserted = False
-    # Prefer launcher activity-alias (.GodotAppLauncher) when present.
-    alias_iter = list(re.finditer(r'<activity-alias\b[^>]*>.*?</activity-alias>', text, flags=re.S))
-    for m in alias_iter:
-        block = m.group(0)
-        if 'android.intent.action.MAIN' in block and 'android.intent.category.LAUNCHER' in block:
-            new_block = block.replace('</activity-alias>', auth_filter + '\n        </activity-alias>', 1)
-            text = text[:m.start()] + new_block + text[m.end():]
-            inserted = True
-            break
-    if not inserted:
-        # Dedicated exported alias → .GodotApp (works when GodotApp is non-exported).
-        alias = '''
-        <!-- Chest of Love Notes: auth callback activity-alias -->
-        <activity-alias
-            android:name="com.charoitegames.chestoflovenotes.AuthCallbackAlias"
-            android:exported="true"
-            android:targetActivity=".GodotApp">
-''' + auth_filter + '''
-        </activity-alias>
-'''
-        text = text.replace('</application>', alias + '\n    </application>', 1)
 
 path.write_text(text)
 print('Updated', path)
