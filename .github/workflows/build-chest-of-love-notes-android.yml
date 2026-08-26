@@ -144,8 +144,8 @@ jobs:
           test "$(tr -d '[:space:]' < android/signing/EXPECTED_PACKAGE_ID)" = "com.charoitegames.chestoflovenotes"
           test "$(tr -d '[:space:]' < android/signing/EXPECTED_TEST_CERT_SHA256)" = "5fbad9830b2a9827d2d1f7f8a38dafea0ae772793a99c4f4952a6b1d424f863b"
           grep -Fq 'assets/branding/154659_cursor_under4mb.gif' export_presets.cfg
-          grep -Eq '^version/code=76$' export_presets.cfg
-          grep -Eq '^version/name="0.1.76-auth-compile-hotfix"$' export_presets.cfg
+          grep -Eq '^version/code=77$' export_presets.cfg
+          grep -Eq '^version/name="0.1.77-post-login-transition-fix"$' export_presets.cfg
           grep -Eq '^gradle_build/export_format=0$' export_presets.cfg
           grep -Eq '^architectures/arm64-v8a=true$' export_presets.cfg
           grep -Eq '^architectures/armeabi-v7a=false$' export_presets.cfg
@@ -198,7 +198,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-          CI_DIST_DIR: ${{ runner.temp }}/chest-v76-dist
+          CI_DIST_DIR: ${{ runner.temp }}/chest-v77-dist
         run: |
           set -euo pipefail
           chmod +x tools/ci_export_android_artifacts.sh tools/ci_export_android_artifacts_strict.sh
@@ -215,16 +215,16 @@ jobs:
           grep -Eq '^architectures/armeabi-v7a=false$' export_presets.cfg
           grep -Eq '^architectures/arm64-v8a=true$' export_presets.cfg
           grep -Fq 'assets/branding/154659_cursor_under4mb.gif' export_presets.cfg
-          git diff --exit-code -- export_presets.cfg android/signing/LAST_RELEASED_VERSION_CODE scripts/network/auth_service.gd scripts/network/api_client.gd
+          git diff --exit-code -- export_presets.cfg android/signing/LAST_RELEASED_VERSION_CODE scripts/network/auth_service.gd scripts/network/api_client.gd scripts/ui/keyboard_avoidance.gd
 
       - name: Upload APK artifact
         if: success()
         uses: actions/upload-artifact@v7
         with:
-          name: ChestOfLoveNotes-v76-APK
+          name: ChestOfLoveNotes-v77-APK
           path: |
-            ${{ runner.temp }}/chest-v76-dist/ChestOfLoveNotes-v76-arm64-release.apk
-            ${{ runner.temp }}/chest-v76-dist/ChestOfLoveNotes-v76-SHA256.txt
+            ${{ runner.temp }}/chest-v77-dist/ChestOfLoveNotes-v77-arm64-release.apk
+            ${{ runner.temp }}/chest-v77-dist/ChestOfLoveNotes-v77-SHA256.txt
           if-no-files-found: error
           retention-days: 30
           compression-level: 0
@@ -233,10 +233,10 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v7
         with:
-          name: ChestOfLoveNotes-v76-AAB
+          name: ChestOfLoveNotes-v77-AAB
           path: |
-            ${{ runner.temp }}/chest-v76-dist/ChestOfLoveNotes-v76.aab
-            ${{ runner.temp }}/chest-v76-dist/ChestOfLoveNotes-v76-SHA256.txt
+            ${{ runner.temp }}/chest-v77-dist/ChestOfLoveNotes-v77.aab
+            ${{ runner.temp }}/chest-v77-dist/ChestOfLoveNotes-v77-SHA256.txt
           if-no-files-found: error
           retention-days: 30
           compression-level: 0
