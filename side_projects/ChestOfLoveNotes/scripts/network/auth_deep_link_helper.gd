@@ -44,12 +44,21 @@ static func clear_pending_auth_callback() -> bool:
 
 
 static func open_external_auth_url(url: String) -> Dictionary:
-	## Opens the system browser / Custom Tab target via OS.shell_open.
+	## Prefer Android's native ACTION_VIEW intent. OS.shell_open() can report OK
+	## on some Godot Android builds without actually foregrounding a browser.
 	var u := url.strip_edges()
 	if u.is_empty():
 		return {"ok": false, "error": "Missing sign-in URL."}
 	if not (u.begins_with("https://") or u.begins_with("http://")):
 		return {"ok": false, "error": "Invalid sign-in URL."}
+	if OS.get_name() == "Android":
+		var p = _plugin()
+		if p == null:
+			return {"ok": false, "error": "Android browser launcher is unavailable. Restart the app and try again."}
+		var opened := bool(p.call("open_external_auth_url", u))
+		if not opened:
+			return {"ok": false, "error": "Could not open a browser for Google sign-in."}
+		return {"ok": true, "error": ""}
 	var err := OS.shell_open(u)
 	if err != OK:
 		return {"ok": false, "error": "Could not open the browser for Google sign-in."}
