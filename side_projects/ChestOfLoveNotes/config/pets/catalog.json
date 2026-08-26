@@ -1,0 +1,22 @@
+{
+  "version": 2,
+  "pets": [
+    {
+      "id": "parrot",
+      "display_name": "Parrot",
+      "unlock_type": "FREE",
+      "price_type": "FREE",
+      "default_unlocked": false,
+      "available_in_store": true,
+      "description": "A cheerful beach companion ready to hop beside your chest.",
+      "asset_root": "res://assets/pets/parrot/",
+      "enabled": true,
+      "behavior": {
+        "supports_idle": true,
+        "supports_roam": true,
+        "supports_chest_interaction": true,
+        "supports_tap_reaction": true
+      }
+    }
+  ]
+}

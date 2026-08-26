@@ -1,0 +1,250 @@
+{
+  "verdict": "PASS_FOR_GODOT_INTEGRATION",
+  "pass": "late_open_regen_v1",
+  "branch": "cursor/mobile-production-polish-caa0",
+  "references_accepted_early_mid": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8
+  ],
+  "late_frames_regenerated": [
+    9,
+    10,
+    11,
+    12
+  ],
+  "chest_08_regenerated": false,
+  "production_canvas": {
+    "width": 512,
+    "height": 512,
+    "base_anchor": [
+      256,
+      420
+    ]
+  },
+  "method": {
+    "body_lock_source": "aligned accepted frame #08",
+    "lids_09_10": "incoming master sheet lids, hinge-registered to locked body",
+    "lids_11_12": "AI-regenerated lids (extra headroom), hinge-registered to locked body",
+    "mid_body_width_limit_px": 4
+  },
+  "mid_body_widths_late": {
+    "9": 234,
+    "10": 234,
+    "11": 234,
+    "12": 234
+  },
+  "mid_body_dw_vs0_late": {
+    "9": -3,
+    "10": -3,
+    "11": -3,
+    "12": -3
+  },
+  "top_clipping_eliminated": true,
+  "late_geometry_matches_early_mid": true,
+  "full_sequence_00_12_passes": true,
+  "layers_derived_from": "chest_frames/chest_12_fully_open.png",
+  "layers": {
+    "chest_open_back": "layers/chest_open_back.png",
+    "chest_open_front_rim": "layers/chest_open_front_rim.png"
+  },
+  "production_files_created": [
+    "chest_00_closed.png",
+    "chest_01_open_08.png",
+    "chest_02_open_17.png",
+    "chest_03_open_25.png",
+    "chest_04_open_33.png",
+    "chest_05_open_42.png",
+    "chest_06_open_50.png",
+    "chest_07_open_58.png",
+    "chest_08_open_67.png",
+    "chest_09_open_75.png",
+    "chest_10_open_83.png",
+    "chest_11_open_92.png",
+    "chest_12_fully_open.png"
+  ],
+  "metrics": [
+    {
+      "mid_w": 237,
+      "mid_dw_vs0": 0,
+      "planted_base_y": 420,
+      "base_y_drift": 0,
+      "body_cx_canvas": 255.5,
+      "body_cx_drift": 0.0,
+      "top_hits": 0,
+      "top_y": 212,
+      "index": 0,
+      "accepted": true,
+      "reject_reason": null
+    },
+    {
+      "mid_w": 239,
+      "mid_dw_vs0": 2,
+      "planted_base_y": 419,
+      "base_y_drift": -1,
+      "body_cx_canvas": 257.0,
+      "body_cx_drift": 1.5,
+      "top_hits": 0,
+      "top_y": 212,
+      "index": 1,
+      "accepted": true,
+      "reject_reason": null
+    },
+    {
+      "mid_w": 239,
+      "mid_dw_vs0": 2,
+      "planted_base_y": 420,
+      "base_y_drift": 0,
+      "body_cx_canvas": 256.5,
+      "body_cx_drift": 1.0,
+      "top_hits": 0,
+      "top_y": 213,
+      "index": 2,
+      "accepted": true,
+      "reject_reason": null
+    },
+    {
+      "mid_w": 240,
+      "mid_dw_vs0": 3,
+      "planted_base_y": 419,
+      "base_y_drift": -1,
+      "body_cx_canvas": 256.5,
+      "body_cx_drift": 1.0,
+      "top_hits": 0,
+      "top_y": 209,
+      "index": 3,
+      "accepted": true,
+      "reject_reason": null
+    },
+    {
+      "mid_w": 240,
+      "mid_dw_vs0": 3,
+      "planted_base_y": 420,
+      "base_y_drift": 0,
+      "body_cx_canvas": 255.5,
+      "body_cx_drift": 0.0,
+      "top_hits": 0,
+      "top_y": 202,
+      "index": 4,
+      "accepted": true,
+      "reject_reason": null
+    },
+    {
+      "mid_w": 241,
+      "mid_dw_vs0": 4,
+      "planted_base_y": 419,
+      "base_y_drift": -1,
+      "body_cx_canvas": 255.5,
+      "body_cx_drift": 0.0,
+      "top_hits": 0,
+      "top_y": 196,
+      "index": 5,
+      "accepted": true,
+      "reject_reason": null
+    },
+    {
+      "mid_w": 240,
+      "mid_dw_vs0": 3,
+      "planted_base_y": 419,
+      "base_y_drift": -1,
+      "body_cx_canvas": 255.5,
+      "body_cx_drift": 0.0,
+      "top_hits": 0,
+      "top_y": 191,
+      "index": 6,
+      "accepted": true,
+      "reject_reason": null
+    },
+    {
+      "mid_w": 238,
+      "mid_dw_vs0": 1,
+      "planted_base_y": 420,
+      "base_y_drift": 0,
+      "body_cx_canvas": 256.0,
+      "body_cx_drift": 0.5,
+      "top_hits": 0,
+      "top_y": 184,
+      "index": 7,
+      "accepted": true,
+      "reject_reason": null
+    },
+    {
+      "mid_w": 234,
+      "mid_dw_vs0": -3,
+      "planted_base_y": 420,
+      "base_y_drift": 0,
+      "body_cx_canvas": 255.5,
+      "body_cx_drift": 0.0,
+      "top_hits": 0,
+      "top_y": 181,
+      "index": 8,
+      "accepted": true,
+      "reject_reason": null
+    },
+    {
+      "mid_w": 234,
+      "mid_dw_vs0": -3,
+      "planted_base_y": 420,
+      "base_y_drift": 0,
+      "body_cx_canvas": 255.5,
+      "body_cx_drift": 0.0,
+      "top_hits": 0,
+      "top_y": 180,
+      "index": 9,
+      "accepted": true,
+      "reject_reason": null
+    },
+    {
+      "mid_w": 234,
+      "mid_dw_vs0": -3,
+      "planted_base_y": 420,
+      "base_y_drift": 0,
+      "body_cx_canvas": 255.5,
+      "body_cx_drift": 0.0,
+      "top_hits": 0,
+      "top_y": 175,
+      "index": 10,
+      "accepted": true,
+      "reject_reason": null
+    },
+    {
+      "mid_w": 234,
+      "mid_dw_vs0": -3,
+      "planted_base_y": 420,
+      "base_y_drift": 0,
+      "body_cx_canvas": 255.5,
+      "body_cx_drift": 0.0,
+      "top_hits": 0,
+      "top_y": 147,
+      "index": 11,
+      "accepted": true,
+      "reject_reason": null
+    },
+    {
+      "mid_w": 234,
+      "mid_dw_vs0": -3,
+      "planted_base_y": 420,
+      "base_y_drift": 0,
+      "body_cx_canvas": 255.5,
+      "body_cx_drift": 0.0,
+      "top_hits": 0,
+      "top_y": 145,
+      "index": 12,
+      "accepted": true,
+      "reject_reason": null
+    }
+  ],
+  "rejected": [],
+  "notes": {
+    "godot_integration": false,
+    "apk": false,
+    "scroll_occlusion_validated": true,
+    "scroll_production_path_unchanged": "assets/chest/animation_v2/scroll/love_scroll.png"
+  }
+}

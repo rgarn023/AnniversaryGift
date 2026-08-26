@@ -21,7 +21,7 @@ env:
 
 jobs:
   build-android:
-    name: Build v72 APK + AAB
+    name: Build APK + AAB
     runs-on: ubuntu-latest
     timeout-minutes: 180
 
@@ -145,8 +145,8 @@ jobs:
           test "$(tr -d '[:space:]' < android/signing/EXPECTED_PACKAGE_ID)" = "com.charoitegames.chestoflovenotes"
           test "$(tr -d '[:space:]' < android/signing/EXPECTED_TEST_CERT_SHA256)" = "5fbad9830b2a9827d2d1f7f8a38dafea0ae772793a99c4f4952a6b1d424f863b"
           grep -Fq 'assets/branding/154659_cursor_under4mb.gif' export_presets.cfg
-          grep -Eq '^version/code=72$' export_presets.cfg
-          grep -Eq '^version/name="0.1.72-apk-signing-pipeline-fix"$' export_presets.cfg
+          grep -Eq '^version/code=73$' export_presets.cfg
+          grep -Eq '^version/name="0.1.73-notifications-relationship-status"$' export_presets.cfg
           grep -Eq '^gradle_build/export_format=0$' export_presets.cfg
           grep -Eq '^architectures/arm64-v8a=true$' export_presets.cfg
           grep -Eq '^architectures/armeabi-v7a=false$' export_presets.cfg
@@ -172,18 +172,18 @@ jobs:
           fi
           echo "Supabase public config secrets are present (values not printed)."
 
-      - name: Build signed v72 APK + AAB
+      - name: Build signed APK + AAB
         shell: bash
         working-directory: ${{ env.PROJECT_DIR }}
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-          CI_DIST_DIR: ${{ runner.temp }}/chest-v72-dist
+          CI_DIST_DIR: ${{ runner.temp }}/chest-v73-dist
         run: |
           set -euo pipefail
-          chmod +x tools/ci_export_android_v72_artifacts.sh
+          chmod +x tools/ci_export_android_artifacts.sh
           mkdir -p "$CI_DIST_DIR"
-          tools/ci_export_android_v72_artifacts.sh
+          tools/ci_export_android_artifacts.sh
 
       - name: Confirm tracked sources unchanged
         shell: bash
@@ -202,10 +202,10 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v7
         with:
-          name: ChestOfLoveNotes-v72-APK
+          name: ChestOfLoveNotes-v73-APK
           path: |
-            ${{ runner.temp }}/chest-v72-dist/ChestOfLoveNotes-v72-arm64-release.apk
-            ${{ runner.temp }}/chest-v72-dist/ChestOfLoveNotes-v72-SHA256.txt
+            ${{ runner.temp }}/chest-v73-dist/ChestOfLoveNotes-v73-arm64-release.apk
+            ${{ runner.temp }}/chest-v73-dist/ChestOfLoveNotes-v73-SHA256.txt
           if-no-files-found: error
           retention-days: 30
           compression-level: 0
@@ -214,10 +214,10 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v7
         with:
-          name: ChestOfLoveNotes-v72-AAB
+          name: ChestOfLoveNotes-v73-AAB
           path: |
-            ${{ runner.temp }}/chest-v72-dist/ChestOfLoveNotes-v72.aab
-            ${{ runner.temp }}/chest-v72-dist/ChestOfLoveNotes-v72-SHA256.txt
+            ${{ runner.temp }}/chest-v73-dist/ChestOfLoveNotes-v73.aab
+            ${{ runner.temp }}/chest-v73-dist/ChestOfLoveNotes-v73-SHA256.txt
           if-no-files-found: error
           retention-days: 30
           compression-level: 0

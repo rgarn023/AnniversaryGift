@@ -1,0 +1,166 @@
+extends SceneTree
+## Phase 1A pet architecture tests — catalog, ownership, persistence, actor load.
+## Updated for Phase 1B-1: runtime may spawn invisibly; visuals still off.
+
+var _passed: int = 0
+var _failed: int = 0
+
+
+func _init() -> void:
+	call_deferred("_run")
+
+
+func _assert(cond: bool, label: String) -> void:
+	if cond:
+		_passed += 1
+		print("PASS: ", label)
+	else:
+		_failed += 1
+		print("FAIL: ", label)
+
+
+func _run() -> void:
+	print("=== Pet system Phase 1A scaffold (compat) ===")
+	_test_catalog()
+	_test_manager_defaults_and_persistence()
+	_test_pet_actor_scene()
+	_test_chest_spawn_wiring_phase1b1()
+	_test_asset_folders_and_docs()
+	_test_regression_untouched()
+	print("=== Results: %d passed, %d failed ===" % [_passed, _failed])
+	quit(0 if _failed == 0 else 1)
+
+
+func _test_catalog() -> void:
+	var catalog := PetCatalog.new()
+	_assert(catalog.load_catalog(), "catalog JSON loads")
+	_assert(catalog.has_pet("parrot"), "catalog contains parrot")
+	_assert(catalog.all_ids().size() == 1, "catalog has exactly one pet")
+	var def := catalog.get_definition("parrot")
+	_assert(def != null, "parrot definition present")
+	_assert(def.display_name == "Parrot", "display name Parrot")
+	_assert(def.is_free(), "parrot unlock FREE")
+	_assert(def.unlock_type == PetDefinition.UNLOCK_FREE, "unlock_type FREE const")
+	_assert(not def.default_unlocked, "parrot NOT default_unlocked (store acquisition)")
+	_assert(def.available_in_store, "parrot available_in_store")
+	_assert(def.enabled, "parrot enabled")
+	_assert(def.asset_root.begins_with("res://assets/pets/parrot"), "asset_root set")
+	_assert(catalog.default_unlocked_ids().is_empty(), "default unlocked empty")
+	var raw := FileAccess.get_file_as_string("res://config/pets/catalog.json")
+	_assert(not raw.contains("sku"), "catalog has no billing SKUs")
+	_assert(not raw.contains("PAID"), "catalog has no paid pets yet")
+
+
+func _test_manager_defaults_and_persistence() -> void:
+	## Isolate persistence path side effects under user:// for this test run.
+	var wipe := ConfigFile.new()
+	wipe.save(PetManager.PERSIST_PATH)
+	var mgr := PetManager.new()
+	mgr.bootstrap()
+	_assert(not mgr.is_owned("parrot"), "parrot NOT owned by default")
+	_assert(mgr.owned_pet_ids.is_empty(), "owned list empty clean")
+	_assert(mgr.active_pet_id.is_empty(), "active empty clean")
+	_assert(not mgr.should_spawn_on_chest(), "CHEST spawn off until claim+enable")
+	## Grant via claim path then enable.
+	mgr.grant_pet_from_claim("parrot", true)
+	_assert(mgr.is_owned("parrot"), "owned after claim grant")
+	_assert(not mgr.should_spawn_on_chest(), "still Off after claim")
+	mgr.select_profile_pet("parrot")
+	_assert(mgr.should_spawn_on_chest(), "spawn after enable")
+	_assert(mgr.get_active_definition() != null, "active definition resolves")
+	_assert(mgr.get_active_definition().is_free(), "active pet is FREE")
+	var host := Node2D.new()
+	get_root().add_child(host)
+	var spawned := mgr.spawn_active_pet(host)
+	_assert(spawned != null, "spawn_active_pet returns actor when owned+enabled")
+	_assert(spawned.visible == true and spawned.modulate.a == 1.0, "spawned actor visible (1B-2C)")
+	mgr.despawn_active_pet()
+	host.queue_free()
+
+	## Persistence round-trip: change active, reload.
+	_assert(mgr.set_active_pet("parrot"), "set_active parrot ok")
+	var mgr2 := PetManager.new()
+	mgr2.bootstrap()
+	_assert(mgr2.is_owned("parrot"), "persisted ownership reload")
+	_assert(mgr2.active_pet_id == "parrot", "persisted active pet reload")
+
+	## AppState wires PetManager without auto-own.
+	var wipe2 := ConfigFile.new()
+	wipe2.save(PetManager.PERSIST_PATH)
+	var state := AppState.new()
+	state.bootstrap()
+	_assert(state.pets != null, "AppState has pets manager")
+	_assert(not state.pets.is_owned("parrot"), "AppState bootstrap does not auto-own")
+	_assert(not state.pets.should_spawn_on_chest(), "AppState pets do not spawn unowned")
+
+
+func _test_pet_actor_scene() -> void:
+	_assert(ResourceLoader.exists("res://scenes/pets/PetActor.tscn"), "PetActor.tscn exists")
+	_assert(ResourceLoader.exists("res://scripts/pets/pet_actor.gd"), "pet_actor.gd exists")
+	_assert(ResourceLoader.exists("res://scripts/pets/pet_state.gd"), "pet_state.gd exists")
+	_assert(ResourceLoader.exists("res://scripts/pets/pet_definition.gd"), "pet_definition.gd exists")
+	_assert(ResourceLoader.exists("res://scripts/pets/pet_catalog.gd"), "pet_catalog.gd exists")
+	_assert(ResourceLoader.exists("res://scripts/pets/pet_manager.gd"), "pet_manager.gd exists")
+	_assert(ResourceLoader.exists("res://scripts/pets/pet_runtime_config.gd"), "pet_runtime_config.gd exists")
+	_assert(ResourceLoader.exists("res://scripts/pets/pet_safe_area.gd"), "pet_safe_area.gd exists")
+	var scene := load("res://scenes/pets/PetActor.tscn") as PackedScene
+	_assert(scene != null, "PetActor PackedScene loads")
+	var actor := scene.instantiate() as PetActor
+	_assert(actor != null, "PetActor instantiates")
+	get_root().add_child(actor)
+	var def := PetDefinition.new()
+	def.id = "parrot"
+	def.display_name = "Parrot"
+	def.unlock_type = PetDefinition.UNLOCK_FREE
+	actor.setup_from_definition(def)
+	_assert(actor.pet_id == "parrot", "actor pet_id set")
+	_assert(actor.state == PetState.Kind.IDLE, "actor starts IDLE")
+	_assert(actor.visible == true and actor.modulate.a == 1.0, "actor visually presented (1B-2C)")
+	actor.transition_to(PetState.Kind.ROAM)
+	_assert(actor.state == PetState.Kind.ROAM, "actor state machine accepts ROAM")
+	actor.queue_free()
+
+
+func _test_chest_spawn_wiring_phase1b1() -> void:
+	var main := FileAccess.get_file_as_string("res://scripts/main.gd")
+	_assert(main.contains("spawn_active_pet") or main.contains("_mount_pet_runtime") or main.contains("_mount_invisible_pet_runtime"), "main mounts pet runtime")
+	_assert(not main.contains("PetCollectionScreen") and not main.contains("open_pet_collection"), "no Pet Collection UI string")
+	_assert(main.contains("Pet Store") or main.contains("PET_STORE") or main.contains("_show_pet_store"), "Pet Store present")
+	var mgr_src := FileAccess.get_file_as_string("res://scripts/pets/pet_manager.gd")
+	_assert(mgr_src.contains("PET_RUNTIME_ENABLED"), "runtime flag referenced")
+	_assert(not mgr_src.contains("BillingClient"), "no BillingClient")
+	_assert(not mgr_src.contains("sku"), "no purchase SKUs in PetManager")
+	var cfg_src := FileAccess.get_file_as_string("res://scripts/pets/pet_runtime_config.gd")
+	_assert(cfg_src.contains("PET_RUNTIME_ENABLED := true"), "runtime enabled")
+	_assert(cfg_src.contains("PET_VISUALS_ENABLED := true"), "visuals enabled (1B-2C)")
+
+
+func _test_asset_folders_and_docs() -> void:
+	_assert(DirAccess.open("res://assets/pets/parrot/idle") != null, "parrot idle dir")
+	_assert(DirAccess.open("res://assets/pets/parrot/move") != null, "parrot move dir")
+	_assert(DirAccess.open("res://assets/pets/parrot/chest_interaction") != null, "parrot chest_interaction dir")
+	_assert(DirAccess.open("res://assets/pets/parrot/tap_reaction") != null, "parrot tap_reaction dir")
+	_assert(DirAccess.open("res://assets/pets/parrot/source") != null, "parrot source dir")
+	_assert(FileAccess.file_exists("res://assets/pets/parrot/PARROT_SPEC.md"), "PARROT_SPEC.md")
+	_assert(FileAccess.file_exists("res://docs/PET_SYSTEM_PLAN.md"), "PET_SYSTEM_PLAN.md")
+	_assert(FileAccess.file_exists("res://docs/PET_SAFE_AREA.md"), "PET_SAFE_AREA.md")
+	_assert(FileAccess.file_exists("res://docs/KNOWN_GOOD_PRE_PET_BASELINE.md"), "KNOWN_GOOD_PRE_PET_BASELINE.md")
+
+
+func _test_regression_untouched() -> void:
+	## Spot-check locked systems remain present; pet work must not strip them.
+	var chest := FileAccess.get_file_as_string("res://scripts/chest/treasure_chest.gd")
+	var env := FileAccess.get_file_as_string("res://scripts/chest/chest_environment.gd")
+	var main := FileAccess.get_file_as_string("res://scripts/main.gd")
+	var flags := FileAccess.get_file_as_string("res://scripts/build_flags.gd")
+	_assert(chest.contains("CHEST_FRAME_COUNT := 13"), "13-frame open intact")
+	_assert(chest.contains("REVEAL_FRAME_COUNT := 8"), "baked reveal intact")
+	_assert(chest.contains("_play_baked_scroll_reveal"), "baked reveal method intact")
+	_assert(env.contains("CHEST_GROUND_Y := 0.888"), "chest ground intact")
+	_assert(env.contains("default_beach"), "beach env intact")
+	_assert(env.contains("WATER_TOP_FRAC"), "water band intact")
+	_assert(main.contains("YOUR CHEST"), "YOUR CHEST hierarchy intact")
+	_assert(main.contains("ChestEnvironment.CHEST_GROUND_Y"), "main chest plant intact")
+	_assert(main.contains("disconnect_my_person") or FileAccess.get_file_as_string("res://scripts/network/friend_service.gd").contains("disconnect_my_person"), "disconnect path present")
+	_assert(flags.contains("APP_VERSION_CODE := 73"), "versionCode 70")
+	_assert(flags.contains("0.1.73-notifications-relationship-status"), "versionName 70")

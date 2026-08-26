@@ -1,0 +1,114 @@
+[
+  {
+    "file": "scroll_00.png",
+    "src_index": 0,
+    "label": "closed",
+    "crop_h": 241,
+    "base_cx": 239.0,
+    "base_y": 403.0,
+    "visual_cx": 192.3540361911571,
+    "visual_cy": 321.6911421269037,
+    "lower_body_w": 183.0,
+    "canvas": [
+      384,
+      496
+    ],
+    "canvas_top_hits": 0
+  },
+  {
+    "file": "scroll_01.png",
+    "src_index": 15,
+    "label": "open_ready",
+    "crop_h": 199,
+    "base_cx": 223.0,
+    "base_y": 403.0,
+    "visual_cx": 191.8575379789854,
+    "visual_cy": 310.9399177945534,
+    "lower_body_w": 183.0,
+    "canvas": [
+      384,
+      496
+    ],
+    "canvas_top_hits": 0
+  },
+  {
+    "file": "scroll_02.png",
+    "src_index": "rise_dy6",
+    "label": "scroll_peek",
+    "crop_h": 0,
+    "base_cx": 218.0,
+    "base_y": 403.0,
+    "visual_cx": 191.63214455557676,
+    "visual_cy": 311.842016834247,
+    "lower_body_w": 183.0,
+    "canvas": [
+      384,
+      496
+    ],
+    "canvas_top_hits": 0
+  },
+  {
+    "file": "scroll_03.png",
+    "src_index": "rise_dy-16",
+    "label": "scroll_partial",
+    "crop_h": 0,
+    "base_cx": 218.0,
+    "base_y": 403.0,
+    "visual_cx": 191.63214455557676,
+    "visual_cy": 311.842016834247,
+    "lower_body_w": 183.0,
+    "canvas": [
+      384,
+      496
+    ],
+    "canvas_top_hits": 0
+  },
+  {
+    "file": "scroll_04.png",
+    "src_index": "rise_dy-36",
+    "label": "scroll_rising",
+    "crop_h": 0,
+    "base_cx": 218.0,
+    "base_y": 403.0,
+    "visual_cx": 191.63214455557676,
+    "visual_cy": 311.842016834247,
+    "lower_body_w": 183.0,
+    "canvas": [
+      384,
+      496
+    ],
+    "canvas_top_hits": 0
+  },
+  {
+    "file": "scroll_05.png",
+    "src_index": "rise_dy-54",
+    "label": "scroll_halfway",
+    "crop_h": 0,
+    "base_cx": 218.0,
+    "base_y": 403.0,
+    "visual_cx": 191.6321407096936,
+    "visual_cy": 311.8419876873097,
+    "lower_body_w": 183.0,
+    "canvas": [
+      384,
+      496
+    ],
+    "canvas_top_hits": 0
+  },
+  {
+    "file": "scroll_06.png",
+    "src_index": "rise_dy-78",
+    "label": "scroll_fully",
+    "crop_h": 0,
+    "base_cx": 218.0,
+    "base_y": 403.0,
+    "visual_cx": 191.4915005972756,
+    "visual_cy": 311.1836087406273,
+    "lower_body_w": 183.0,
+    "canvas": [
+      384,
+      496
+    ],
+    "canvas_top_hits": 0
+  }
+]

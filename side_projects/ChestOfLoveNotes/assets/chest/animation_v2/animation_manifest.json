@@ -1,0 +1,356 @@
+{
+  "package": "animation_v2",
+  "pass": "late_open_regen_v1_asset_preparation_only",
+  "godot_integration": false,
+  "incoming_new_art": {
+    "status": "late_open_regen_passed_production_packaged",
+    "verdict": "PASS FOR GODOT INTEGRATION",
+    "report": "notes/LATE_OPEN_REGEN_PASS.md",
+    "audit_json": "notes/late_open_regen_audit.json",
+    "production_assets_replaced": true,
+    "late_frames_regenerated": [
+      9,
+      10,
+      11,
+      12
+    ],
+    "chest_08_regenerated": false
+  },
+  "source_files": [
+    {
+      "path": "assets/chest/animation_v2/incoming_new_art/new_chest_opening_master_sheet.png",
+      "dimensions": [
+        1536,
+        1024
+      ],
+      "grid": "4x4",
+      "cell": [
+        384,
+        256
+      ],
+      "role": "accepted early/mid frames #00-#08; late #09-#12 regenerated"
+    }
+  ],
+  "production_canvas": {
+    "width": 512,
+    "height": 512
+  },
+  "base_anchor_target": {
+    "x": 256,
+    "y": 420
+  },
+  "visual_center_target": {
+    "x": 256,
+    "y": "alpha_weighted_per_frame"
+  },
+  "chest_frames": [
+    {
+      "file": "chest_frames/chest_00_closed.png",
+      "label": "closed",
+      "lid_open_pct": 0,
+      "src": "incoming_new_art",
+      "base_anchor": {
+        "x": 256.0,
+        "y": 420.0
+      },
+      "mid_w": 237,
+      "mid_dw_vs0": 0,
+      "planted_base_y": 420,
+      "visible_bbox_xyxy": [
+        131,
+        211,
+        380,
+        421
+      ],
+      "canvas_top_hits": 0
+    },
+    {
+      "file": "chest_frames/chest_01_open_08.png",
+      "label": "open_08",
+      "lid_open_pct": 8,
+      "src": "incoming_new_art",
+      "base_anchor": {
+        "x": 256.0,
+        "y": 420.0
+      },
+      "mid_w": 239,
+      "mid_dw_vs0": 2,
+      "planted_base_y": 419,
+      "visible_bbox_xyxy": [
+        132,
+        211,
+        382,
+        421
+      ],
+      "canvas_top_hits": 0
+    },
+    {
+      "file": "chest_frames/chest_02_open_17.png",
+      "label": "open_17",
+      "lid_open_pct": 17,
+      "src": "incoming_new_art",
+      "base_anchor": {
+        "x": 256.0,
+        "y": 420.0
+      },
+      "mid_w": 239,
+      "mid_dw_vs0": 2,
+      "planted_base_y": 420,
+      "visible_bbox_xyxy": [
+        131,
+        212,
+        451,
+        423
+      ],
+      "canvas_top_hits": 0
+    },
+    {
+      "file": "chest_frames/chest_03_open_25.png",
+      "label": "open_25",
+      "lid_open_pct": 25,
+      "src": "incoming_new_art",
+      "base_anchor": {
+        "x": 256.0,
+        "y": 420.0
+      },
+      "mid_w": 240,
+      "mid_dw_vs0": 3,
+      "planted_base_y": 419,
+      "visible_bbox_xyxy": [
+        131,
+        208,
+        382,
+        421
+      ],
+      "canvas_top_hits": 0
+    },
+    {
+      "file": "chest_frames/chest_04_open_33.png",
+      "label": "open_33",
+      "lid_open_pct": 33,
+      "src": "incoming_new_art",
+      "base_anchor": {
+        "x": 256.0,
+        "y": 420.0
+      },
+      "mid_w": 240,
+      "mid_dw_vs0": 3,
+      "planted_base_y": 420,
+      "visible_bbox_xyxy": [
+        130,
+        201,
+        381,
+        421
+      ],
+      "canvas_top_hits": 0
+    },
+    {
+      "file": "chest_frames/chest_05_open_42.png",
+      "label": "open_42",
+      "lid_open_pct": 42,
+      "src": "incoming_new_art",
+      "base_anchor": {
+        "x": 256.0,
+        "y": 420.0
+      },
+      "mid_w": 241,
+      "mid_dw_vs0": 4,
+      "planted_base_y": 419,
+      "visible_bbox_xyxy": [
+        130,
+        194,
+        381,
+        421
+      ],
+      "canvas_top_hits": 0
+    },
+    {
+      "file": "chest_frames/chest_06_open_50.png",
+      "label": "open_50",
+      "lid_open_pct": 50,
+      "src": "incoming_new_art",
+      "base_anchor": {
+        "x": 256.0,
+        "y": 420.0
+      },
+      "mid_w": 240,
+      "mid_dw_vs0": 3,
+      "planted_base_y": 419,
+      "visible_bbox_xyxy": [
+        130,
+        190,
+        449,
+        435
+      ],
+      "canvas_top_hits": 0
+    },
+    {
+      "file": "chest_frames/chest_07_open_58.png",
+      "label": "open_58",
+      "lid_open_pct": 58,
+      "src": "incoming_new_art",
+      "base_anchor": {
+        "x": 256.0,
+        "y": 420.0
+      },
+      "mid_w": 238,
+      "mid_dw_vs0": 1,
+      "planted_base_y": 420,
+      "visible_bbox_xyxy": [
+        130,
+        183,
+        381,
+        435
+      ],
+      "canvas_top_hits": 0
+    },
+    {
+      "file": "chest_frames/chest_08_open_67.png",
+      "label": "open_67",
+      "lid_open_pct": 67,
+      "src": "incoming_new_art",
+      "base_anchor": {
+        "x": 256.0,
+        "y": 420.0
+      },
+      "mid_w": 234,
+      "mid_dw_vs0": -3,
+      "planted_base_y": 420,
+      "visible_bbox_xyxy": [
+        127,
+        180,
+        441,
+        427
+      ],
+      "canvas_top_hits": 0
+    },
+    {
+      "file": "chest_frames/chest_09_open_75.png",
+      "label": "open_75",
+      "lid_open_pct": 75,
+      "src": "incoming_new_art+late_open_regen",
+      "base_anchor": {
+        "x": 256.0,
+        "y": 420.0
+      },
+      "mid_w": 234,
+      "mid_dw_vs0": -3,
+      "planted_base_y": 420,
+      "visible_bbox_xyxy": [
+        128,
+        178,
+        441,
+        427
+      ],
+      "canvas_top_hits": 0
+    },
+    {
+      "file": "chest_frames/chest_10_open_83.png",
+      "label": "open_83",
+      "lid_open_pct": 83,
+      "src": "incoming_new_art+late_open_regen",
+      "base_anchor": {
+        "x": 256.0,
+        "y": 420.0
+      },
+      "mid_w": 234,
+      "mid_dw_vs0": -3,
+      "planted_base_y": 420,
+      "visible_bbox_xyxy": [
+        126,
+        174,
+        441,
+        427
+      ],
+      "canvas_top_hits": 0
+    },
+    {
+      "file": "chest_frames/chest_11_open_92.png",
+      "label": "open_92",
+      "lid_open_pct": 92,
+      "src": "incoming_new_art+late_open_regen",
+      "base_anchor": {
+        "x": 256.0,
+        "y": 420.0
+      },
+      "mid_w": 234,
+      "mid_dw_vs0": -3,
+      "planted_base_y": 420,
+      "visible_bbox_xyxy": [
+        121,
+        147,
+        441,
+        427
+      ],
+      "canvas_top_hits": 0
+    },
+    {
+      "file": "chest_frames/chest_12_fully_open.png",
+      "label": "fully_open",
+      "lid_open_pct": 100,
+      "src": "incoming_new_art+late_open_regen",
+      "base_anchor": {
+        "x": 256.0,
+        "y": 420.0
+      },
+      "mid_w": 234,
+      "mid_dw_vs0": -3,
+      "planted_base_y": 420,
+      "visible_bbox_xyxy": [
+        117,
+        144,
+        441,
+        427
+      ],
+      "canvas_top_hits": 0
+    }
+  ],
+  "missing_lid_open_percentages": [],
+  "smooth_8_to_11_frame_sequence_possible": true,
+  "scroll": {
+    "path": "scroll/love_scroll.png",
+    "output_size": [
+      56,
+      132
+    ],
+    "contains_chest_pixels": false,
+    "baked_glow": false,
+    "note": "Existing production scroll candidate; occlusion validated against new layers; not replaced in this pass"
+  },
+  "layers": {
+    "chest_open_back": "layers/chest_open_back.png",
+    "chest_open_front_rim": "layers/chest_open_front_rim.png",
+    "dimensions": [
+      512,
+      512
+    ],
+    "derived_from": "chest_frames/chest_12_fully_open.png"
+  },
+  "intended_future_godot_layer_order": [
+    "beach",
+    "open chest/back (chest_open_back.png)",
+    "scroll (love_scroll.png)",
+    "front rim (chest_open_front_rim.png)",
+    "glow/particles",
+    "UI"
+  ],
+  "audit": {
+    "candidates_inspected": 13,
+    "accepted_production_frames": 13,
+    "late_mid_body_widths": {
+      "9": 234,
+      "10": 234,
+      "11": 234,
+      "12": 234
+    },
+    "late_mid_body_dw_vs0": {
+      "9": -3,
+      "10": -3,
+      "11": -3,
+      "12": -3
+    },
+    "top_clipping_eliminated": true,
+    "full_sequence_00_12_passes": true,
+    "verdict": "PASS_FOR_GODOT_INTEGRATION"
+  }
+}

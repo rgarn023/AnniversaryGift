@@ -1,0 +1,78 @@
+# Godot
+.godot/
+*.translation
+export_credentials.cfg
+
+# Secrets / local backend config
+config/backend_config.json
+supabase/.env
+secrets/
+*.pem
+key.properties
+*.keystore
+*.jks
+# Project-stable Android *test* signing identity (required for update-compatible APKs).
+!android/signing/chest_test_debug.keystore
+
+# Build
+build/*.aab
+build/*.idsig
+*.aab
+*.apk
+!build/ChestOfLoveNotes-debug.apk
+!build/ChestOfLoveNotes-private-online-debug.apk
+!build/ChestOfLoveNotes-private-onboarding-debug.apk
+!build/ChestOfLoveNotes-mobile-compose-debug.apk
+!build/ChestOfLoveNotes-secure-session-debug.apk
+!build/ChestOfLoveNotes-mobile-accessibility-session-chest-debug.apk
+!build/ChestOfLoveNotes-backend-config-fixed-debug.apk
+!build/ChestOfLoveNotes-mobile-native-complete-fix-debug.apk
+!build/ChestOfLoveNotes-mobile-correction-complete-debug.apk
+!build/ChestOfLoveNotes-targeted-fixes-debug.apk
+!build/ChestOfLoveNotes-profile-compose-sent-chest-fixes-debug.apk
+!build/ChestOfLoveNotes-location-performance-fixes-debug.apk
+!build/ChestOfLoveNotes-chest-location-lock-debug.apk
+!build/ChestOfLoveNotes-location-lock-online-debug.apk
+!build/ChestOfLoveNotes-preview-radius-attachments-debug.apk
+!build/ChestOfLoveNotes-send-map-preview-picker-fixes-debug.apk
+!build/ChestOfLoveNotes-preview-activity-focus-notifications-debug.apk
+!build/ChestOfLoveNotes-map-preview-selfsend-background-fixes-debug.apk
+!build/ChestOfLoveNotes-time-location-map-preview-selfsend-fixes-debug.apk
+!build/ChestOfLoveNotes-map-currentlocation-schedule-selfsend-fixes-debug.apk
+!build/ChestOfLoveNotes-my-person-qr-notifications-debug.apk
+
+# Android Gradle template
+android/build/
+android/build/.gradle/
+android/build/build/
+android/build/local.properties
+android/build/.cxx/
+
+# OS / editor
+.DS_Store
+*.swp
+*~
+.idea/
+.vscode/
+!build/ChestOfLoveNotes-permissions-map-chest-notification-performance-debug.apk
+!build/ChestOfLoveNotes-android-permissions-fix-debug.apk
+!build/ChestOfLoveNotes-current-location-person-repair-debug.apk
+!build/ChestOfLoveNotes-current-location-qr-camera-fix-debug.apk
+!build/ChestOfLoveNotes-android-bridges-compose-qr-fix-debug.apk
+!build/ChestOfLoveNotes-backend-location-qr-splash-fix-debug.apk
+!build/ChestOfLoveNotes-native-qr-location-delete-fix-debug.apk
+!build/ChestOfLoveNotes-splash-timing-chest-animation-fix-debug.apk
+!build/ChestOfLoveNotes-game-quality-chest-disconnect-fix-debug.apk
+!build/ChestOfLoveNotes-permanent-disconnect-fix-debug.apk
+!build/ChestOfLoveNotes-backend-disconnect-fix-debug.apk
+!build/ChestOfLoveNotes-seamless-game-quality-chest-debug.apk
+# Generated parrot contact sheets (tooling output; not runtime)
+assets/pets/parrot/source/contact_sheets/
+
+# Derived splash frames from approved GIF (source GIF is tracked when present)
+# NOTE: fantasy-sheet-chest-debug.apk stays ignored under *.apk (do not force-add; GitHub 100MB limit)
+!assets/branding/splash_frames/
+!assets/branding/splash_frames/**
+!assets/branding/splash_still.png
+!assets/branding/splash_frames_meta.json
+!assets/branding/154659_cursor_under4mb.gif

@@ -1,0 +1,252 @@
+{
+  "version": 1,
+  "pet_id": "parrot",
+  "phase": "1B-2C",
+  "visuals_enabled": true,
+  "artwork_ready": true,
+  "status": "ARTWORK_READY",
+  "approved_master_path": "assets/pets/parrot/source/parrot_master.png",
+  "approved_master_sha256": "89e28ad50111f8c6ebf1e5abbea29934b3df9bd79060e38bc8c5e3e3d382e0e2",
+  "approved_master_status": "LOCKED",
+  "approved_master_measured": {
+    "canvas": [128, 128],
+    "mode": "RGBA",
+    "facing": "right",
+    "bbox_alpha_gt0": {
+      "left": 24,
+      "top": 28,
+      "right": 99,
+      "bottom": 115
+    },
+    "visible_width_px": 76,
+    "visible_height_px": 88,
+    "bottom_baseline": 115,
+    "notes": "Bottom baseline is 1px above authored ground_anchor_y=116 — harmless; do not alter master."
+  },
+  "frame_canvas_width": 128,
+  "frame_canvas_height": 128,
+  "ground_anchor_x": 64,
+  "ground_anchor_y": 116,
+  "frame_center_x": 64,
+  "frame_center_y": 64,
+  "baseline_y": 116,
+  "max_ground_contact_drift_px": 2,
+  "max_hop_lift_inside_frame_px": 16,
+  "visible_target_bounds": {
+    "min_x": 28,
+    "min_y": 20,
+    "max_x": 100,
+    "max_y": 116,
+    "approx_body_width_px": 72,
+    "approx_body_height_px": 88,
+    "notes": "Keep solid parrot silhouette inside these bounds. Feet contact the baseline at ground_anchor_y."
+  },
+  "default_facing": "right",
+  "flip_policy": "author_right_runtime_flip_h_for_left",
+  "recommended_runtime_scale": 0.72,
+  "chest_reference": {
+    "design_viewport": [390, 844],
+    "chest_host_size": [252, 326],
+    "chest_draw_size_approx": [252, 252],
+    "chest_opaque_silhouette_height_approx_px": 140,
+    "visible_chest_height_for_ratio_px": 252,
+    "proposed_parrot_visible_height_px": 64,
+    "parrot_to_chest_draw_height_ratio": 0.254,
+    "notes": "Ratio uses chest runtime draw square (~252px). Opaque alpha-bbox height is ~140px; 64px parrot is ~46% of that silhouette but ~25% of the draw square — companion-sized, not mascot-sized."
+  },
+  "file_requirements": {
+    "format": "PNG",
+    "color_mode": "RGBA",
+    "transparent_background": true,
+    "no_jpeg": true,
+    "no_baked_beach": true,
+    "no_baked_shadow_unless_decided": true,
+    "no_ui": true,
+    "no_chest": true,
+    "no_text": true
+  },
+  "shadow": {
+    "strategy": "runtime_soft_ellipse",
+    "authored_shadow_asset": false,
+    "render_now": true,
+    "notes": "Small subtle ellipse under pet; may scale slightly during hop. Match restrained chest contact-shadow tone. Enabled in Phase 1B-2C."
+  },
+  "tap_hitbox": {
+    "derived_from": "master_visible_bbox_76x88",
+    "pad_px": 10,
+    "canvas_size_px": [96, 108],
+    "notes": "Tight finger hitbox in canvas space; PetVisual scale applies. Must not steal nearby chest taps."
+  },
+  "asset_root": "res://assets/pets/parrot/",
+  "flight_artwork_ready": false,
+  "flight_enabled": false,
+  "animations": [
+    {
+      "name": "idle",
+      "folder": "idle",
+      "filename_pattern": "parrot_idle_{index:02d}.png",
+      "filename_examples": [
+        "parrot_idle_00.png",
+        "parrot_idle_01.png",
+        "parrot_idle_02.png",
+        "parrot_idle_03.png",
+        "parrot_idle_04.png"
+      ],
+      "expected_frame_count": 5,
+      "fps": 5,
+      "frame_duration_sec": 0.2,
+      "loop": true,
+      "flip_for_left": true,
+      "status": "artwork_ready",
+      "intent": "Subtle breathing, blink, tiny head movement",
+      "notes": "Production idle frames 00-04 authored from LOCKED master; ground anchor preserved; visuals still disabled."
+    },
+    {
+      "name": "move",
+      "folder": "move",
+      "filename_pattern": "parrot_move_{index:02d}.png",
+      "filename_examples": [
+        "parrot_move_00.png",
+        "parrot_move_01.png",
+        "parrot_move_02.png",
+        "parrot_move_03.png",
+        "parrot_move_04.png",
+        "parrot_move_05.png",
+        "parrot_move_06.png"
+      ],
+      "expected_frame_count": 7,
+      "fps": 10,
+      "frame_duration_sec": 0.1,
+      "loop": true,
+      "flip_for_left": true,
+      "status": "artwork_ready",
+      "intent": "Small beach hop/waddle; body may lift inside frame; ground anchor stays fixed",
+      "notes": "Production move frames 00-06 authored from LOCKED master (foot-anchored hop/waddle); ground contact frames lock feet; peak hop ≤16px inside frame; visuals still disabled."
+    },
+    {
+      "name": "chest_interaction",
+      "folder": "chest_interaction",
+      "filename_pattern": "parrot_chest_{index:02d}.png",
+      "filename_examples": [
+        "parrot_chest_00.png",
+        "parrot_chest_01.png",
+        "parrot_chest_02.png",
+        "parrot_chest_03.png",
+        "parrot_chest_04.png",
+        "parrot_chest_05.png",
+        "parrot_chest_06.png",
+        "parrot_chest_07.png"
+      ],
+      "expected_frame_count": 8,
+      "fps": 10,
+      "frame_duration_sec": 0.1,
+      "loop": false,
+      "flip_for_left": true,
+      "status": "artwork_ready",
+      "intent": "Affectionate nuzzle/rub or friendly beside-chest interaction, then return to neutral",
+      "notes": "Production chest_interaction frames 00-07 authored from LOCKED master (foot-locked lean/nuzzle/rub; no hop; no whole-sprite travel; chest not baked); visuals still disabled."
+    },
+    {
+      "name": "tap_reaction",
+      "folder": "tap_reaction",
+      "filename_pattern": "parrot_tap_{index:02d}.png",
+      "filename_examples": [
+        "parrot_tap_00.png",
+        "parrot_tap_01.png",
+        "parrot_tap_02.png",
+        "parrot_tap_03.png",
+        "parrot_tap_04.png"
+      ],
+      "expected_frame_count": 5,
+      "fps": 10,
+      "frame_duration_sec": 0.1,
+      "loop": false,
+      "flip_for_left": true,
+      "status": "artwork_ready",
+      "intent": "Quick cheerful surprise/reaction, then return to idle",
+      "notes": "Production tap_reaction frames 00-04 authored from LOCKED master (foot-locked head perk / eye widen / small wing flutter + body pop; no hop; no canvas travel); visuals still disabled."
+    },
+    {
+      "name": "takeoff",
+      "folder": "takeoff",
+      "filename_pattern": "parrot_takeoff_{index:02d}.png",
+      "filename_examples": [
+        "parrot_takeoff_00.png",
+        "parrot_takeoff_01.png",
+        "parrot_takeoff_02.png",
+        "parrot_takeoff_03.png",
+        "parrot_takeoff_04.png",
+        "parrot_takeoff_05.png"
+      ],
+      "expected_frame_count": 6,
+      "fps": 10,
+      "frame_duration_sec": 0.1,
+      "loop": false,
+      "flip_for_left": true,
+      "status": "awaiting_artwork",
+      "intent": "Leave sand with a short upward wing beat; play once into FLY",
+      "notes": "CONTRACT ONLY — do not fabricate PNGs. PET_FLIGHT_ENABLED=false until approved."
+    },
+    {
+      "name": "fly",
+      "folder": "fly",
+      "filename_pattern": "parrot_fly_{index:02d}.png",
+      "filename_examples": [
+        "parrot_fly_00.png",
+        "parrot_fly_01.png",
+        "parrot_fly_02.png",
+        "parrot_fly_03.png",
+        "parrot_fly_04.png",
+        "parrot_fly_05.png",
+        "parrot_fly_06.png"
+      ],
+      "expected_frame_count": 7,
+      "fps": 12,
+      "frame_duration_sec": 0.0833,
+      "loop": true,
+      "flip_for_left": true,
+      "status": "awaiting_artwork",
+      "intent": "Looping cruise / wing flap while traversing the safe flight zone",
+      "notes": "CONTRACT ONLY — do not fabricate PNGs. Never reuse ground move frames as fake flight."
+    },
+    {
+      "name": "land",
+      "folder": "land",
+      "filename_pattern": "parrot_land_{index:02d}.png",
+      "filename_examples": [
+        "parrot_land_00.png",
+        "parrot_land_01.png",
+        "parrot_land_02.png",
+        "parrot_land_03.png",
+        "parrot_land_04.png",
+        "parrot_land_05.png"
+      ],
+      "expected_frame_count": 6,
+      "fps": 10,
+      "frame_duration_sec": 0.1,
+      "loop": false,
+      "flip_for_left": true,
+      "status": "awaiting_artwork",
+      "intent": "Descend to a safe sand point and settle into idle",
+      "notes": "CONTRACT ONLY — do not fabricate PNGs. Landing target must be valid sand outside chest exclusion."
+    }
+  ],
+  "state_mapping": {
+    "IDLE": "idle",
+    "ROAM": "move",
+    "CHEST_INTERACTION": "chest_interaction",
+    "TAP_REACTION": "tap_reaction",
+    "TAKEOFF": "takeoff",
+    "FLY": "fly",
+    "LAND": "land"
+  },
+  "transition_rules": {
+    "idle": "loops while IDLE",
+    "move": "loops while ROAM / moving",
+    "chest_interaction": "plays once at interaction point, then returns to idle",
+    "tap_reaction": "plays once, then returns to idle or prior allowed state",
+    "takeoff": "plays once from sand into FLY (future; gated by PET_FLIGHT_ENABLED + flight art)",
+    "fly": "loops while FLY through safe flight zone (future)",
+    "land": "plays once onto safe sand, then returns to idle (future)"
+  }
+}

@@ -1,0 +1,34 @@
+[
+  {
+    "file": "empty_00.png",
+    "src_index": 0,
+    "label": "closed",
+    "crop_h": 241,
+    "base_cx": 239.0,
+    "base_y": 403.0,
+    "visual_cx": 192.3540361911571,
+    "visual_cy": 321.6911421269037,
+    "lower_body_w": 183.0,
+    "canvas": [
+      384,
+      496
+    ],
+    "canvas_top_hits": 0
+  },
+  {
+    "file": "empty_01.png",
+    "src_index": 15,
+    "label": "fully_open",
+    "crop_h": 199,
+    "base_cx": 223.0,
+    "base_y": 403.0,
+    "visual_cx": 191.8575379789854,
+    "visual_cy": 310.9399177945534,
+    "lower_body_w": 183.0,
+    "canvas": [
+      384,
+      496
+    ],
+    "canvas_top_hits": 0
+  }
+]
