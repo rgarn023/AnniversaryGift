@@ -521,7 +521,7 @@ func refresh_session() -> Dictionary:
 			# Always replace with newly returned refresh token when present (rotation).
 			if new_refresh.is_empty():
 				new_refresh = used_refresh
-			okens.set_session(
+			tokens.set_session(
 				access,
 				new_refresh,
 				int(Time.get_unix_time_from_system()) + int(data.get("expires_in", 3600))
