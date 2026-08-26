@@ -103,7 +103,6 @@ jobs:
             unzip -qo "${RUNNER_TEMP}/downloads/cmdline-tools.zip" -d "${RUNNER_TEMP}/cmdline-tools-unpack"
             rm -rf "$ANDROID_HOME/cmdline-tools/latest"
             mkdir -p "$ANDROID_HOME/cmdline-tools"
-            # Zip contains a top-level "cmdline-tools" directory.
             mv "${RUNNER_TEMP}/cmdline-tools-unpack/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"
           fi
 
@@ -145,14 +144,14 @@ jobs:
           test "$(tr -d '[:space:]' < android/signing/EXPECTED_PACKAGE_ID)" = "com.charoitegames.chestoflovenotes"
           test "$(tr -d '[:space:]' < android/signing/EXPECTED_TEST_CERT_SHA256)" = "5fbad9830b2a9827d2d1f7f8a38dafea0ae772793a99c4f4952a6b1d424f863b"
           grep -Fq 'assets/branding/154659_cursor_under4mb.gif' export_presets.cfg
-          grep -Eq '^version/code=74$' export_presets.cfg
-          grep -Eq '^version/name="0.1.74-auth-recovery-google-signin"$' export_presets.cfg
+          grep -Eq '^version/code=75$' export_presets.cfg
+          grep -Eq '^version/name="0.1.75-auth-hotfix-diagnostic"$' export_presets.cfg
           grep -Eq '^gradle_build/export_format=0$' export_presets.cfg
           grep -Eq '^architectures/arm64-v8a=true$' export_presets.cfg
           grep -Eq '^architectures/armeabi-v7a=false$' export_presets.cfg
           echo "Pre-build pins OK"
 
-      - name: Require Supabase public config secrets
+      - name: Require and verify Supabase public config
         shell: bash
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -164,13 +163,34 @@ jobs:
           ERROR: Missing required GitHub Actions repository secrets for backend packaging:
             - SUPABASE_URL
             - SUPABASE_ANON_KEY
-
-          Add them under: Repository → Settings → Secrets and variables → Actions
-          Do not commit these values. The workflow uses only the public URL + anon/publishable key.
           EOF
             exit 1
           fi
-          echo "Supabase public config secrets are present (values not printed)."
+
+          EXPECTED_URL="https://djisgcpvzyqimguqyyun.supabase.co"
+          if [[ "${SUPABASE_URL%/}" != "$EXPECTED_URL" ]]; then
+            echo "ERROR: SUPABASE_URL does not point to the connected Chest project." >&2
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          import base64, json, os, sys
+          key = os.environ["SUPABASE_ANON_KEY"].strip()
+          if key.startswith("sb_publishable_"):
+              print("Supabase URL verified; modern publishable key format detected.")
+              sys.exit(0)
+          parts = key.split(".")
+          if len(parts) != 3:
+              raise SystemExit("ERROR: SUPABASE_ANON_KEY is neither a publishable key nor a valid JWT-shaped anon key.")
+          try:
+              raw = parts[1] + "=" * (-len(parts[1]) % 4)
+              payload = json.loads(base64.urlsafe_b64decode(raw.encode()).decode())
+          except Exception:
+              raise SystemExit("ERROR: Could not validate the Supabase anon key metadata.")
+          if payload.get("ref") != "djisgcpvzyqimguqyyun" or payload.get("role") != "anon":
+              raise SystemExit("ERROR: SUPABASE_ANON_KEY belongs to a different project or role.")
+          print("Supabase project URL/key metadata verified (secret value not printed).")
+          PY
 
       - name: Build signed APK + AAB
         shell: bash
@@ -178,7 +198,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-          CI_DIST_DIR: ${{ runner.temp }}/chest-v74-dist
+          CI_DIST_DIR: ${{ runner.temp }}/chest-v75-dist
         run: |
           set -euo pipefail
           chmod +x tools/ci_export_android_artifacts.sh
@@ -195,17 +215,16 @@ jobs:
           grep -Eq '^architectures/armeabi-v7a=false$' export_presets.cfg
           grep -Eq '^architectures/arm64-v8a=true$' export_presets.cfg
           grep -Fq 'assets/branding/154659_cursor_under4mb.gif' export_presets.cfg
-          # No dirty tracked export/signing pins after CI temp edits.
           git diff --exit-code -- export_presets.cfg android/signing/LAST_RELEASED_VERSION_CODE
 
       - name: Upload APK artifact
         if: success()
         uses: actions/upload-artifact@v7
         with:
-          name: ChestOfLoveNotes-v74-APK
+          name: ChestOfLoveNotes-v75-APK
           path: |
-            ${{ runner.temp }}/chest-v74-dist/ChestOfLoveNotes-v74-arm64-release.apk
-            ${{ runner.temp }}/chest-v74-dist/ChestOfLoveNotes-v74-SHA256.txt
+            ${{ runner.temp }}/chest-v75-dist/ChestOfLoveNotes-v75-arm64-release.apk
+            ${{ runner.temp }}/chest-v75-dist/ChestOfLoveNotes-v75-SHA256.txt
           if-no-files-found: error
           retention-days: 30
           compression-level: 0
@@ -214,10 +233,10 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v7
         with:
-          name: ChestOfLoveNotes-v74-AAB
+          name: ChestOfLoveNotes-v75-AAB
           path: |
-            ${{ runner.temp }}/chest-v74-dist/ChestOfLoveNotes-v74.aab
-            ${{ runner.temp }}/chest-v74-dist/ChestOfLoveNotes-v74-SHA256.txt
+            ${{ runner.temp }}/chest-v75-dist/ChestOfLoveNotes-v75.aab
+            ${{ runner.temp }}/chest-v75-dist/ChestOfLoveNotes-v75-SHA256.txt
           if-no-files-found: error
           retention-days: 30
           compression-level: 0
