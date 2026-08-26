@@ -63,12 +63,16 @@ static func request_permission_contextual(force: bool = false) -> void:
 	if not force and _was_permission_asked():
 		return
 	_mark_permission_asked()
-	## Godot native dialog path (declared in export_presets post_notifications).
-	if OS.has_method("request_permission"):
-		OS.request_permission("android.permission.POST_NOTIFICATIONS")
+	## Use exactly one Android runtime-permission path. Calling both Godot's
+	## OS.request_permission and ChestNotify.requestPermissions back-to-back can
+	## race Activity focus/lifecycle and leave the freshly signed-in UI dimmed.
+	## Prefer the plugin because it explicitly marshals onto Android's UI thread;
+	## fall back to Godot only when the plugin request bridge is unavailable.
 	var p = _plugin()
 	if p != null and p.has_method("request_notification_permission"):
 		p.request_notification_permission()
+	elif OS.has_method("request_permission"):
+		OS.request_permission("android.permission.POST_NOTIFICATIONS")
 	ensure_channels()
 
 
