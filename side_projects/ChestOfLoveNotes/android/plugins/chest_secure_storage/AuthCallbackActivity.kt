@@ -58,7 +58,15 @@ class AuthCallbackActivity : Activity() {
                 addCategory(Intent.CATEGORY_LAUNCHER)
                 setPackage(packageName)
             }
-        launch.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        // NOT FLAG_ACTIVITY_CLEAR_TOP. The Godot launcher (GodotAppLauncher) is an
+        // activity-alias with launchMode=standard — CI reports this on every build —
+        // so CLEAR_TOP tears the activity down and recreates it, restarting the app
+        // and replaying the splash on return from Google. getLaunchIntentForPackage
+        // already carries FLAG_ACTIVITY_NEW_TASK, and MAIN/LAUNCHER + NEW_TASK is
+        // Android's "resume the existing task" path, which is what we want: the app
+        // comes back as the user left it and the warm-resume consumer picks the
+        // callback up.
+        launch.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
         try {
             startActivity(launch)
         } catch (_: Exception) {
