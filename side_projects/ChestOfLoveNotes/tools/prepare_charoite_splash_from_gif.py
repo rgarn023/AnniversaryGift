@@ -48,11 +48,26 @@ def main() -> int:
         old.unlink()
 
     n = getattr(img, "n_frames", 1)
+
+    # The approved splash composites to fully opaque frames, but writing them as
+    # RGBA stored a constant 255 channel for every pixel of every frame — a
+    # quarter of the splash's runtime texture memory spent on nothing. Drop the
+    # channel when (and only when) nothing in the animation actually uses it.
+    # Pixels are still preserved exactly; this changes storage, not appearance.
+    uses_alpha = False
+    for i in range(n):
+        img.seek(i)
+        if img.convert("RGBA").getchannel("A").getextrema()[0] != 255:
+            uses_alpha = True
+            break
+    frame_mode = "RGBA" if uses_alpha else "RGB"
+    print(f"frame storage: {frame_mode} (animation {'uses' if uses_alpha else 'has no'} transparency)")
+
     durations_ms: list[int] = []
     for i in range(n):
         img.seek(i)
-        frame = img.convert("RGBA")
-        # Preserve pixels as-is (no resize/recolor). PNG is lossless for RGBA frames.
+        frame = img.convert("RGBA").convert(frame_mode) if frame_mode == "RGB" else img.convert("RGBA")
+        # Preserve pixels as-is (no resize/recolor). PNG is lossless either way.
         out = FRAMES_DIR / f"frame_{i:04d}.png"
         frame.save(out, format="PNG", optimize=True)
         dur = int(img.info.get("duration", 100) or 100)
