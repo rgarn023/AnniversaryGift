@@ -22,6 +22,7 @@ var _pending_restore: Dictionary = {}
 ## Ignore APPLICATION_RESUMED / FOCUS_IN until cold-start navigation completes.
 ## Resume revalidation previously raced restore and wiped a valid session.
 var _startup_done: bool = false
+var _auth_callback_inflight: bool = false
 ## FOCUS_IN + RESUMED can both fire; coalesce into one resume pass.
 var _resume_inflight: bool = false
 var _last_chest_counts: Dictionary = {"unread": 0, "locked": 0, "requests": 0, "pet_gifts": 0}
@@ -5592,9 +5593,22 @@ func _find_scroll_item_by_id(scroll_id: String) -> Dictionary:
 
 func _consume_auth_callback() -> void:
 	## Password recovery / Google OAuth deep-link consumer (cold + warm start).
+	## A resume firing just after _startup_done can otherwise race the startup
+	## consumer onto the same URI; the second caller would be rejected as a
+	## duplicate and toast an error over a sign-in that is actually succeeding.
+	if _auth_callback_inflight:
+		return
 	var uri := AuthDeepLinkHelper.consume_pending_auth_callback().strip_edges()
 	if uri.is_empty():
 		return
+	## The flag is cleared in exactly one place, so no early return inside
+	## _process_auth_callback() can strand it and block later callbacks.
+	_auth_callback_inflight = true
+	await _process_auth_callback(uri)
+	_auth_callback_inflight = false
+
+
+func _process_auth_callback(uri: String) -> void:
 	if OS.is_debug_build():
 		print("[COLN-AUTH] %s" % AuthCallbackParser.sanitize_for_log(uri))
 	_show_toast("Completing sign-in…")

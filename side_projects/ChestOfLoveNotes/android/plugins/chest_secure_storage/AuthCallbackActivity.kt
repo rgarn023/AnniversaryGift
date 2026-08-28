@@ -49,10 +49,20 @@ class AuthCallbackActivity : Activity() {
             .putString(KEY_PENDING_AUTH_CALLBACK, uri.toString())
             .commit()
 
+        // The callback is already committed, so the sign-in completes on the next
+        // app open even if none of the launches below succeed. Still, try hard to
+        // bring the app forward now: leaving the user parked in the browser looks
+        // like a failed sign-in.
         val launch = packageManager.getLaunchIntentForPackage(packageName)
-        if (launch != null) {
-            launch.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            ?: Intent(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_LAUNCHER)
+                setPackage(packageName)
+            }
+        launch.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        try {
             startActivity(launch)
+        } catch (_: Exception) {
+            // No resolvable launcher entry; the pending callback still stands.
         }
         finish()
     }

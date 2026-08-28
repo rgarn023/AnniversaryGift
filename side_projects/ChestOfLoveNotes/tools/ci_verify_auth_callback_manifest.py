@@ -48,7 +48,10 @@ class Node:
 # `A: android:exported(0x01010010)=(type 0x12)0xffffffff`.
 _ELEMENT = re.compile(r"^(\s*)E: ([^ ]+)")
 _ATTR = re.compile(r'^\s*A: (?:android:)?([A-Za-z0-9_]+)(?:\(0x[0-9a-f]+\))?=(.*)$')
-_TYPED = re.compile(r"^\(type 0x[0-9a-f]+\)(0x[0-9a-f]+)")
+_TYPED = re.compile(r"^\(type (0x[0-9a-f]+)\)(0x[0-9a-f]+)")
+
+# aapt attribute type codes: 0x12 is boolean, 0x10/0x11 are decimal/hex ints.
+_TYPE_BOOLEAN = 0x12
 
 
 def _attr_value(raw: str) -> str:
@@ -63,8 +66,15 @@ def _attr_value(raw: str) -> str:
             return raw[1:end]
     m = _TYPED.match(raw)
     if m:
-        # aapt renders booleans as 0xffffffff (true) / 0x0 (false).
-        return "true" if int(m.group(1), 16) != 0 else "false"
+        type_code, value = int(m.group(1), 16), int(m.group(2), 16)
+        if type_code == _TYPE_BOOLEAN:
+            # aapt renders booleans as 0xffffffff (true) / 0x0 (false).
+            return "true" if value else "false"
+        # Ints (launchMode and friends) must keep their value, not collapse to a
+        # truthiness flag. Signed 32-bit, so wrap values above the positive range.
+        if value >= 0x80000000:
+            value -= 0x100000000
+        return str(value)
     return raw
 
 
@@ -135,6 +145,34 @@ def verify(root: Node, label: str) -> None:
     raise SystemExit(f"ERROR: {label} manifest callback route invalid: {'; '.join(reasons)}")
 
 
+# AuthCallbackActivity sends FLAG_ACTIVITY_CLEAR_TOP to bring the app forward.
+# Against a "standard" launcher that tears down and recreates the Godot activity
+# (a full app restart on return from Google) instead of resuming it, so report
+# what the export template actually produced. Informational only: the callback
+# still completes via the cold-start consumer either way.
+_LAUNCH_MODES = {"0": "standard", "1": "singleTop", "2": "singleTask", "3": "singleInstance"}
+
+
+def report_launcher(root: Node, label: str) -> None:
+    for tag in ("activity", "activity-alias"):
+        for node in root.find_all(tag):
+            for filt in node.find_all("intent-filter"):
+                actions = {n.attrs.get("name") for n in filt.find_all("action")}
+                cats = {n.attrs.get("name") for n in filt.find_all("category")}
+                if "android.intent.action.MAIN" not in actions:
+                    continue
+                if "android.intent.category.LAUNCHER" not in cats:
+                    continue
+                raw = node.attrs.get("launchMode", "0")
+                mode = _LAUNCH_MODES.get(raw, "unknown(%s)" % raw)
+                warn = "" if mode in ("singleTop", "singleTask", "singleInstance") else \
+                    "  <-- CLEAR_TOP will recreate this activity (app restarts on auth return)"
+                print("LAUNCHER_INFO (%s): %s <%s> launchMode=%s%s"
+                      % (label, node.attrs.get("name", "?"), tag, mode, warn))
+                return
+    print("LAUNCHER_INFO (%s): no MAIN/LAUNCHER entry found" % label)
+
+
 def main() -> None:
     if len(sys.argv) != 4:
         raise SystemExit("usage: ci_verify_auth_callback_manifest.py <aapt|xml> <file> <label>")
@@ -143,6 +181,7 @@ def main() -> None:
         text = handle.read()
     root = parse_aapt_tree(text) if mode == "aapt" else parse_xml(text)
     verify(root, label)
+    report_launcher(root, label)
 
 
 if __name__ == "__main__":
