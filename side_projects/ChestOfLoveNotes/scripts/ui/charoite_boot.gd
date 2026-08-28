@@ -201,10 +201,13 @@ func _play() -> void:
 		if visible_elapsed >= MIN_VISIBLE_SEC and _app_ready:
 			break
 		await get_tree().process_frame
-	_anim_playing = false
+	## Keep the mark animating through the fade so it dissolves mid-motion
+	## instead of freezing on one frame and then disappearing.
 	var fade_out := create_tween()
 	fade_out.tween_property(_logo, "modulate:a", 0.0, FADE_OUT_SEC).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
 	await fade_out.finished
+	_anim_playing = false
+	set_process(false)
 	_done = true
 	finished.emit()
 

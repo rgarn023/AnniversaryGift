@@ -1,5 +1,5 @@
 extends SceneTree
-## v73 version + release-gate pins.
+## v74 version + release-gate pins (legacy filename; asserts current).
 
 var _passed := 0
 var _failed := 0
@@ -24,19 +24,19 @@ func _init() -> void:
 	if FileAccess.file_exists("res://../../.github/workflows/build-chest-of-love-notes-android.yml"):
 		wf = FileAccess.get_file_as_string("res://../../.github/workflows/build-chest-of-love-notes-android.yml")
 
-	_assert(BuildFlags.APP_VERSION_CODE == 73, "BuildFlags versionCode 73")
-	_assert(BuildFlags.APP_VERSION_NAME == "0.1.73-notifications-relationship-status", "BuildFlags versionName")
-	_assert(flags.contains("APP_VERSION_CODE := 73"), "flags source 73")
-	_assert(preset.contains("version/code=73"), "export versionCode 73")
-	_assert(preset.contains("0.1.73-notifications-relationship-status"), "export versionName")
+	_assert(BuildFlags.APP_VERSION_CODE == 74, "BuildFlags versionCode 74")
+	_assert(BuildFlags.APP_VERSION_NAME == "0.1.74-auth-recovery-google-signin", "BuildFlags versionName")
+	_assert(flags.contains("APP_VERSION_CODE := 74"), "flags source 74")
+	_assert(preset.contains("version/code=74"), "export versionCode 74")
+	_assert(preset.contains("0.1.74-auth-recovery-google-signin"), "export versionName")
 	_assert(preset.contains("154659_cursor_under4mb.gif"), "splash GIF excluded")
-	_assert(proj.contains("0.1.73-notifications-relationship-status"), "project.godot version")
+	_assert(proj.contains("0.1.74-auth-recovery-google-signin"), "project.godot version")
 	_assert(gate == "72", "LAST_RELEASED_VERSION_CODE remains 72")
 	_assert(ci.contains('APK_NAME="ChestOfLoveNotes-v${VERSION_CODE}-arm64-release.apk"'), "CI APK name uses VERSION_CODE")
 	_assert(ci.contains("GATE_PIN"), "CI version-aware gate")
 	_assert(not ci.contains('APK_NAME="ChestOfLoveNotes-v72-arm64-release.apk"'), "CI not hard-pinned to v72 APK name")
 	if not wf.is_empty():
-		_assert(wf.contains("ChestOfLoveNotes-v73-APK"), "workflow APK artifact name")
+		_assert(wf.contains("ChestOfLoveNotes-v74-APK"), "workflow APK artifact name")
 		_assert(wf.contains("tools/ci_export_android_artifacts.sh"), "workflow uses version-aware script")
 		_assert(wf.contains('LAST_RELEASED_VERSION_CODE)" = "72"'), "workflow keeps gate at 72")
 

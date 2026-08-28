@@ -9,6 +9,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.util.Log
 import android.view.View
@@ -36,6 +37,10 @@ class ChestNotifyPlugin(godot: Godot) : GodotPlugin(godot) {
 		const val CH_FOCUS = CH_CHALLENGES
 		private const val PREFS = "coln_notify"
 		private const val KEY_PENDING_DEEPLINK = "pending_deeplink"
+		private const val KEY_PENDING_AUTH_CALLBACK = "pending_auth_callback"
+		/** Custom scheme for Supabase → app auth redirects (password recovery + OAuth). */
+		const val AUTH_SCHEME = "com.charoitegames.chestoflovenotes"
+		const val AUTH_HOST = "auth-callback"
 	}
 
 	override fun getPluginName(): String = PLUGIN_NAME
@@ -68,12 +73,17 @@ class ChestNotifyPlugin(godot: Godot) : GodotPlugin(godot) {
 	override fun onMainCreate(activity: Activity?): View? {
 		val view = super.onMainCreate(activity)
 		captureDeepLink(activity?.intent)
+		captureAuthCallback(activity?.intent)
 		return view
 	}
 
 	override fun onMainResume() {
 		super.onMainResume()
+		// GodotActivity.onNewIntent() replaces Activity.intent before the app resumes,
+		// so reading the current intent here covers OAuth/recovery warm returns without
+		// relying on a non-existent GodotPlugin.onMainNewIntent lifecycle hook.
 		captureDeepLink(getActivity()?.intent)
+		captureAuthCallback(getActivity()?.intent)
 	}
 
 	private fun captureDeepLink(intent: Intent?) {
@@ -87,6 +97,30 @@ class ChestNotifyPlugin(godot: Godot) : GodotPlugin(godot) {
 		Log.i(TAG, "captured deeplink")
 		try {
 			intent.removeExtra("coln_deeplink")
+		} catch (_: Exception) {
+		}
+	}
+
+	/**
+	 * Capture Supabase auth redirect URIs (custom scheme).
+	 * Never logs the URI — it may contain access/refresh tokens or auth codes.
+	 */
+	private fun captureAuthCallback(intent: Intent?) {
+		if (intent == null) return
+		val data = intent.data ?: return
+		val scheme = data.scheme?.lowercase() ?: return
+		if (scheme != AUTH_SCHEME) return
+		val host = data.host?.lowercase().orEmpty()
+		if (host != AUTH_HOST) return
+		val uri = data.toString()
+		if (uri.isBlank()) return
+		appContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+			.edit()
+			.putString(KEY_PENDING_AUTH_CALLBACK, uri)
+			.apply()
+		Log.i(TAG, "captured auth callback")
+		try {
+			intent.data = null
 		} catch (_: Exception) {
 		}
 	}
@@ -112,6 +146,61 @@ class ChestNotifyPlugin(godot: Godot) : GodotPlugin(godot) {
 			link
 		} catch (_: Exception) {
 			""
+		}
+	}
+
+	@UsedByGodot
+	fun peek_pending_auth_callback(): String {
+		return try {
+			appContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+				.getString(KEY_PENDING_AUTH_CALLBACK, "") ?: ""
+		} catch (_: Exception) {
+			""
+		}
+	}
+
+	@UsedByGodot
+	fun consume_pending_auth_callback(): String {
+		/**
+		 * Compatibility name used by GDScript. Deliberately non-destructive:
+		 * AuthService clears only after terminal processing, so a process/network
+		 * interruption cannot lose a still-usable PKCE callback.
+		 */
+		return peek_pending_auth_callback()
+	}
+
+	@UsedByGodot
+	fun clear_pending_auth_callback(): Boolean {
+		return try {
+			appContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+				.edit()
+				.remove(KEY_PENDING_AUTH_CALLBACK)
+				.commit()
+		} catch (_: Exception) {
+			false
+		}
+	}
+
+	/** Open OAuth/recovery URLs with Android's native browser intent. */
+	@UsedByGodot
+	fun open_external_auth_url(url: String): Boolean {
+		return try {
+			val trimmed = url.trim()
+			if (trimmed.isEmpty()) return false
+			val uri = Uri.parse(trimmed)
+			val scheme = uri.scheme?.lowercase().orEmpty()
+			if (scheme != "https" && scheme != "http") return false
+			val act = getActivity() ?: return false
+			val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+				addCategory(Intent.CATEGORY_BROWSABLE)
+			}
+			// Do not preflight with resolveActivity(): Android package-visibility rules
+			// can hide browsers from queries even though ACTION_VIEW launches correctly.
+			act.startActivity(intent)
+			true
+		} catch (e: Exception) {
+			Log.w(TAG, "open_external_auth_url failed: ${e.javaClass.simpleName}")
+			false
 		}
 	}
 

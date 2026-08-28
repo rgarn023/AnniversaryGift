@@ -162,5 +162,5 @@ func _test_regression_untouched() -> void:
 	_assert(main.contains("YOUR CHEST"), "YOUR CHEST hierarchy intact")
 	_assert(main.contains("ChestEnvironment.CHEST_GROUND_Y"), "main chest plant intact")
 	_assert(main.contains("disconnect_my_person") or FileAccess.get_file_as_string("res://scripts/network/friend_service.gd").contains("disconnect_my_person"), "disconnect path present")
-	_assert(flags.contains("APP_VERSION_CODE := 73"), "versionCode 70")
-	_assert(flags.contains("0.1.73-notifications-relationship-status"), "versionName 70")
+	_assert(flags.contains("APP_VERSION_CODE := 74"), "versionCode 70")
+	_assert(flags.contains("0.1.74-auth-recovery-google-signin"), "versionName 70")

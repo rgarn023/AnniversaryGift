@@ -68,11 +68,11 @@ func _make_actor(seed: int = 42, vp: Vector2 = Vector2(390, 844)) -> PetActor:
 
 
 func _test_version() -> void:
-	_assert(BuildFlags.APP_VERSION_CODE == 73, "versionCode 70")
-	_assert(BuildFlags.APP_VERSION_NAME == "0.1.73-notifications-relationship-status", "versionName 70")
+	_assert(BuildFlags.APP_VERSION_CODE == 74, "versionCode 70")
+	_assert(BuildFlags.APP_VERSION_NAME == "0.1.74-auth-recovery-google-signin", "versionName 70")
 	var preset := FileAccess.get_file_as_string("res://export_presets.cfg")
-	_assert(preset.contains("version/code=73"), "export versionCode 70")
-	_assert(preset.contains("0.1.73-notifications-relationship-status"), "export versionName 70")
+	_assert(preset.contains("version/code=74"), "export versionCode 70")
+	_assert(preset.contains("0.1.74-auth-recovery-google-signin"), "export versionName 70")
 
 
 func _test_profile_pet_persistence() -> void:

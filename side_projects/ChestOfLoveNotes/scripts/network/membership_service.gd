@@ -20,6 +20,15 @@ func _init(p_api: ApiClient, p_tokens: SecureTokenService) -> void:
 	tokens = p_tokens
 
 
+func _safe_error(value: Variant, fallback: String) -> String:
+	if value == null:
+		return fallback
+	var text := str(value).strip_edges()
+	if text.is_empty() or text == "<null>":
+		return fallback
+	return text
+
+
 func clear() -> void:
 	is_member = false
 	role = ""
@@ -48,7 +57,7 @@ func _claim_membership_inner() -> Dictionary:
 	var result: Dictionary = await api.call_edge_function("claim-private-membership", {}, "POST")
 	if not bool(result.get("ok", false)):
 		var status_code := int(result.get("status", 0))
-		var err := str(result.get("error", "Membership claim failed."))
+		var err := _safe_error(result.get("error", null), "Membership claim failed.")
 		var forbidden := status_code == 403 or err.to_lower().contains("not invited") or err.to_lower().contains("not approved") or err.to_lower().contains("allowlist")
 		if forbidden:
 			clear()
@@ -72,7 +81,7 @@ func refresh_membership_row() -> Dictionary:
 	var q := "select=user_id,role,status&user_id=eq.%s" % tokens.user_id
 	var result: Dictionary = await api.rest_get("private_app_members", q)
 	if not bool(result.get("ok", false)):
-		return {"ok": false, "error": str(result.get("error", "Could not load membership."))}
+		return {"ok": false, "error": _safe_error(result.get("error", null), "Could not load membership.")}
 	var rows: Array = result.data if typeof(result.get("data")) == TYPE_ARRAY else []
 	if rows.is_empty():
 		is_member = false

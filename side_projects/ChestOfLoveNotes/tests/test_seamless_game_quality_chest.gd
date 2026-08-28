@@ -224,9 +224,9 @@ func _run() -> void:
 	_assert(FileAccess.file_exists("res://assets/art/chest/chest_warm_spill.png"), "warm spill asset")
 	_assert(FileAccess.file_exists("res://assets/art/background/environments/default_beach.png"), "default beach environment art")
 
-	_assert(flags.contains("APP_VERSION_CODE := 73"), "versionCode 63")
-	_assert(preset.contains("version/code=73"), "export 70")
-	_assert(preset.contains("0.1.73-notifications-relationship-status"), "version name")
+	_assert(flags.contains("APP_VERSION_CODE := 74"), "versionCode 63")
+	_assert(preset.contains("version/code=74"), "export 70")
+	_assert(preset.contains("0.1.74-auth-recovery-google-signin"), "version name")
 	_assert(preset.contains("v63-parrot-visible-fix-debug.apk"), "APK name")
 	_assert(gitignore.contains("*.apk"), "apks ignored by default")
 	_assert(export_sh.contains("ChestOfLoveNotes") and export_sh.contains("debug.apk"), "export script present")

@@ -27,8 +27,9 @@ func load_config() -> bool:
 		var result := _load_from_path(str(path))
 		if bool(result.get("ok", false)):
 			return true
-		var err := str(result.get("error", ""))
-		if not err.is_empty():
+		var err_v: Variant = result.get("error", "")
+		var err := "" if err_v == null else str(err_v).strip_edges()
+		if not err.is_empty() and err != "<null>":
 			last_read_error = err
 	load_error = last_read_error
 	return false
@@ -47,14 +48,21 @@ func _load_from_path(path: String) -> Dictionary:
 	if typeof(parsed) != TYPE_DICTIONARY:
 		return {"ok": false, "error": "Backend config JSON is invalid."}
 	var data: Dictionary = parsed
-	var url := str(data.get("supabase_url", "")).strip_edges()
-	var key := str(data.get("supabase_publishable_key", "")).strip_edges()
-	var env := str(data.get("environment", "development")).strip_edges()
-	if url.is_empty() or url.contains("YOUR_SUPABASE"):
+	var url_v: Variant = data.get("supabase_url", null)
+	var key_v: Variant = data.get("supabase_publishable_key", null)
+	var env_v: Variant = data.get("environment", "development")
+	if url_v == null or key_v == null:
+		return {"ok": false, "error": "Backend config is missing its Supabase URL or publishable key."}
+	var url := str(url_v).strip_edges()
+	var key := str(key_v).strip_edges()
+	var env := "development" if env_v == null else str(env_v).strip_edges()
+	if url.is_empty() or url == "<null>" or url.contains("YOUR_SUPABASE"):
 		return {"ok": false, "error": "Supabase URL is not configured."}
-	if key.is_empty() or key.contains("YOUR_SUPABASE"):
+	if key.is_empty() or key == "<null>" or key.contains("YOUR_SUPABASE"):
 		return {"ok": false, "error": "Supabase publishable key is not configured."}
-	supabase_url = url
+	if not url.begins_with("https://") or not url.contains(".supabase.co"):
+		return {"ok": false, "error": "Supabase URL is invalid."}
+	supabase_url = url.rstrip("/")
 	supabase_publishable_key = key
 	environment = env if not env.is_empty() else "development"
 	loaded = true
@@ -63,4 +71,10 @@ func _load_from_path(path: String) -> Dictionary:
 
 
 func is_configured() -> bool:
-	return loaded and not supabase_url.is_empty() and not supabase_publishable_key.is_empty()
+	return (
+		loaded
+		and not supabase_url.is_empty()
+		and supabase_url != "<null>"
+		and not supabase_publishable_key.is_empty()
+		and supabase_publishable_key != "<null>"
+	)

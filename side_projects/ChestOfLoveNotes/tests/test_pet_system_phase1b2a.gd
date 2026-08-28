@@ -204,5 +204,5 @@ func _test_no_placeholder_and_regression() -> void:
 	_assert(chest.contains("CHEST_FRAME_COUNT := 13"), "chest open intact")
 	_assert(chest.contains("REVEAL_FRAME_COUNT := 8"), "baked reveal intact")
 	_assert(env.contains("CHEST_GROUND_Y := 0.888"), "ground intact")
-	_assert(flags.contains("APP_VERSION_CODE := 73"), "version 63")
+	_assert(flags.contains("APP_VERSION_CODE := 74"), "version 63")
 	_assert(plan.contains("Still no Pet Collection") or plan.contains("no Pet Collection"), "no Pet Collection ship yet")

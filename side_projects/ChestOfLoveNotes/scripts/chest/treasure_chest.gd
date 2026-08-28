@@ -154,6 +154,53 @@ const OPEN_POSE_WEIGHTS := [
 	1.20, ## 12 fully open
 ]
 ## Exact approved filenames in order.
+## Smooth playback sequence (v79). Contains all 13 approved poses BYTE-IDENTICAL
+## at every third slot, plus 2 motion-compensated in-betweens per gap, so the
+## open runs at 37 fps instead of 13 fps without re-authoring the approved art.
+## CHEST_FRAME_COUNT below still describes the approved pose count — that set is
+## unchanged and is what the frozen-art guards assert.
+const CHEST_SMOOTH_FRAMES_DIR := ANIM_V2 + "chest_frames_smooth/"
+const CHEST_SMOOTH_FRAME_COUNT := 37
+const CHEST_SMOOTH_FRAME_FILES := [
+	"s00_00_closed.png",
+	"s01_tween.png",
+	"s02_tween.png",
+	"s03_01_open_08.png",
+	"s04_tween.png",
+	"s05_tween.png",
+	"s06_02_open_17.png",
+	"s07_tween.png",
+	"s08_tween.png",
+	"s09_03_open_25.png",
+	"s10_tween.png",
+	"s11_tween.png",
+	"s12_04_open_33.png",
+	"s13_tween.png",
+	"s14_tween.png",
+	"s15_05_open_42.png",
+	"s16_tween.png",
+	"s17_tween.png",
+	"s18_06_open_50.png",
+	"s19_tween.png",
+	"s20_tween.png",
+	"s21_07_open_58.png",
+	"s22_tween.png",
+	"s23_tween.png",
+	"s24_08_open_67.png",
+	"s25_tween.png",
+	"s26_tween.png",
+	"s27_09_open_75.png",
+	"s28_tween.png",
+	"s29_tween.png",
+	"s30_10_open_83.png",
+	"s31_tween.png",
+	"s32_tween.png",
+	"s33_11_open_92.png",
+	"s34_tween.png",
+	"s35_tween.png",
+	"s36_12_fully_open.png",
+]
+
 const CHEST_FRAME_FILES := [
 	"chest_00_closed.png",
 	"chest_01_open_08.png",
@@ -241,6 +288,7 @@ static var _preloaded: bool = false
 static var _sprite_frames_empty: SpriteFrames = null
 static var _sprite_frames_scroll: SpriteFrames = null
 static var _open_weight_ends: PackedFloat32Array = PackedFloat32Array()
+static var _using_smooth_frames: bool = false
 
 
 static func preload_assets() -> void:
@@ -259,13 +307,28 @@ static func preload_assets() -> void:
 	_load_cached(CONTACT_SHADOW)
 	_load_cached(WARM_SPILL)
 	_open_weight_ends = _build_open_weight_ends()
-	_sprite_frames_empty = _build_sprite_frames("empty_open", _chest_cache, 13.0)
+	## fps == frame count keeps the sequence exactly 1.0 s whichever set loaded
+	## (13 frames @ 13 fps, 37 @ 37 fps) — playback gets finer, not slower.
+	_sprite_frames_empty = _build_sprite_frames(
+		"empty_open", _chest_cache, maxf(1.0, float(_chest_cache.size()))
+	)
 	_sprite_frames_scroll = _build_sprite_frames("baked_reveal", _reveal_cache, 16.0)
 	_preloaded = true
 
 
 static func _load_chest_sequence() -> Array:
+	## Play the smooth sequence; fall back to the approved 13 if it is absent.
 	var out: Array = []
+	for fname in CHEST_SMOOTH_FRAME_FILES:
+		var tex: Texture2D = _load_cached(CHEST_SMOOTH_FRAMES_DIR + String(fname))
+		if tex == null:
+			out.clear()
+			break
+		out.append(tex)
+	if not out.is_empty():
+		_using_smooth_frames = true
+		return out
+	_using_smooth_frames = false
 	for fname in CHEST_FRAME_FILES:
 		out.append(_load_cached(CHEST_FRAMES_DIR + String(fname)))
 	return out
@@ -278,15 +341,36 @@ static func _load_reveal_sequence() -> Array:
 	return out
 
 
+static func _playback_pose_weights() -> Array:
+	## One weight per PLAYBACK slot. The smooth sequence renders each approved
+	## pose as 3 slots (pose + 2 in-betweens), so each pose's approved display
+	## weight is split evenly across its slots. Total is unchanged, so the
+	## approved timing envelope — slow start, fast middle, eased finish — is
+	## preserved exactly; only the sampling gets finer.
+	if not _using_smooth_frames:
+		return OPEN_POSE_WEIGHTS
+	var sub := 3
+	var out: Array = []
+	for i in range(OPEN_POSE_WEIGHTS.size()):
+		if i == OPEN_POSE_WEIGHTS.size() - 1:
+			out.append(float(OPEN_POSE_WEIGHTS[i]))   ## final pose has no tweens after it
+		else:
+			var part := float(OPEN_POSE_WEIGHTS[i]) / float(sub)
+			for _j in range(sub):
+				out.append(part)
+	return out
+
+
 static func _build_open_weight_ends() -> PackedFloat32Array:
+	var weights := _playback_pose_weights()
 	var ends := PackedFloat32Array()
-	ends.resize(OPEN_POSE_WEIGHTS.size())
+	ends.resize(weights.size())
 	var total := 0.0
-	for w in OPEN_POSE_WEIGHTS:
+	for w in weights:
 		total += float(w)
 	var acc := 0.0
-	for i in range(OPEN_POSE_WEIGHTS.size()):
-		acc += float(OPEN_POSE_WEIGHTS[i]) / total
+	for i in range(weights.size()):
+		acc += float(weights[i]) / total
 		ends[i] = acc
 	if ends.size() > 0:
 		ends[ends.size() - 1] = 1.0
