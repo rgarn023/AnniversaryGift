@@ -502,6 +502,17 @@ func _enter_demo() -> void:
 	await _enter_app_home()
 
 
+## Dictionary.get() returns a stored null rather than the default, and str(null)
+## renders as the literal "<null>" — which is what the login screen once showed.
+## Auth status text always routes through here so that can never reach a Label.
+func _auth_msg(source: Dictionary, key: String, fallback: String) -> String:
+	var raw: Variant = source.get(key)
+	if raw == null:
+		return fallback
+	var text := str(raw).strip_edges()
+	return fallback if text.is_empty() else text
+
+
 func _show_auth(sign_up: bool) -> void:
 	if sign_up and not state.show_sign_up():
 		_show_toast("Sign Up is unavailable in this build.")
@@ -612,17 +623,28 @@ func _show_auth(sign_up: bool) -> void:
 
 	var google_btn := Button.new()
 	var or_row := HBoxContainer.new()
-	or_row.add_theme_constant_override("separation", 8)
+	or_row.add_theme_constant_override("separation", 12)
 	or_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	var or_left := Label.new()
-	or_left.text = "────────"
-	MobileUi.apply_label(or_left, MobileUi.SIZE_HELPER, MobileUi.COLOR_HELPER)
+	## Box-drawing glyphs sat on the font baseline, which left the rules riding
+	## below the "OR" and made the divider look broken. Draw real hairlines and
+	## centre them against the label instead.
+	var or_left := ColorRect.new()
+	or_left.color = Color(MobileUi.COLOR_HELPER, 0.45)
+	or_left.custom_minimum_size = Vector2(0, 1)
+	or_left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	or_left.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	or_left.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var or_mid := Label.new()
 	or_mid.text = "OR"
+	or_mid.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	or_mid.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	MobileUi.apply_label(or_mid, MobileUi.SIZE_HELPER, MobileUi.COLOR_HELPER)
-	var or_right := Label.new()
-	or_right.text = "────────"
-	MobileUi.apply_label(or_right, MobileUi.SIZE_HELPER, MobileUi.COLOR_HELPER)
+	var or_right := ColorRect.new()
+	or_right.color = or_left.color
+	or_right.custom_minimum_size = or_left.custom_minimum_size
+	or_right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	or_right.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	or_right.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	or_row.add_child(or_left)
 	or_row.add_child(or_mid)
 	or_row.add_child(or_right)
@@ -674,7 +696,7 @@ func _show_auth(sign_up: bool) -> void:
 			if not bool(result.get("ok", false)):
 				set_busy.call(false)
 				status.add_theme_color_override("font_color", MobileUi.COLOR_DANGER)
-				status.text = str(result.get("error", "Sign up failed."))
+				status.text = _auth_msg(result, "error", "Sign up failed.")
 				return
 			if bool(result.get("needs_confirmation", true)):
 				state.pending_confirm_email = email.text.strip_edges().to_lower()
@@ -689,11 +711,11 @@ func _show_auth(sign_up: bool) -> void:
 				status.add_theme_color_override("font_color", MobileUi.COLOR_DANGER)
 				## Only show confirmation UI when the backend explicitly requires it.
 				if bool(result.get("needs_confirmation", false)):
-					status.text = str(result.get("error", "Please confirm your email before signing in."))
+					status.text = _auth_msg(result, "error", "Please confirm your email before signing in.")
 					state.pending_confirm_email = email.text.strip_edges().to_lower()
 					box.add_child(_make_button("Go to Check Your Email", _show_check_email))
 				else:
-					status.text = str(result.get("error", "Sign in failed."))
+					status.text = _auth_msg(result, "error", "Sign in failed.")
 				return
 			await _after_verified_sign_in()
 	)
@@ -707,14 +729,14 @@ func _show_auth(sign_up: bool) -> void:
 		if not bool(started.get("ok", false)):
 			set_busy.call(false)
 			status.add_theme_color_override("font_color", MobileUi.COLOR_DANGER)
-			status.text = str(started.get("error", "Google sign-in unavailable."))
+			status.text = _auth_msg(started, "error", "Google sign-in unavailable.")
 			return
 		var opened: Dictionary = AuthDeepLinkHelper.open_external_auth_url(str(started.get("url", "")))
 		if not bool(opened.get("ok", false)):
 			set_busy.call(false)
 			state.auth.cancel_oauth()
 			status.add_theme_color_override("font_color", MobileUi.COLOR_DANGER)
-			status.text = str(opened.get("error", "Could not open browser."))
+			status.text = _auth_msg(opened, "error", "Could not open browser.")
 			return
 		## Browser owns the flow; warm resume + auth callback completes sign-in.
 		status.text = "Complete Google sign-in in your browser, then return here."
@@ -788,7 +810,7 @@ func _show_forgot_password(prefill_email: String = "") -> void:
 		send_btn.disabled = false
 		if not bool(result.get("ok", false)):
 			status.add_theme_color_override("font_color", MobileUi.COLOR_DANGER)
-			status.text = str(result.get("error", "Could not send reset email."))
+			status.text = _auth_msg(result, "error", "Could not send reset email.")
 			return
 		status.add_theme_color_override("font_color", MobileUi.COLOR_HELPER)
 		status.text = str(result.get("message", AuthService.PASSWORD_RESET_GENERIC_MSG))
@@ -869,7 +891,7 @@ func _show_create_new_password() -> void:
 		save_btn.disabled = false
 		if not bool(result.get("ok", false)):
 			status.add_theme_color_override("font_color", MobileUi.COLOR_DANGER)
-			status.text = str(result.get("error", "Could not update password."))
+			status.text = _auth_msg(result, "error", "Could not update password.")
 			if bool(result.get("expired", false)):
 				box.add_child(_make_button("Request a New Reset Email", func() -> void: _show_forgot_password("")))
 			return
@@ -935,7 +957,7 @@ func _show_change_password() -> void:
 		save_btn.disabled = false
 		if not bool(result.get("ok", false)):
 			status.add_theme_color_override("font_color", MobileUi.COLOR_DANGER)
-			status.text = str(result.get("error", "Could not update password."))
+			status.text = _auth_msg(result, "error", "Could not update password.")
 			return
 		_show_toast("Password updated.")
 		_show_profile()
@@ -979,7 +1001,7 @@ func _show_check_email() -> void:
 		if bool(result.get("ok", false)):
 			status.text = "Confirmation email resent. Please wait before trying again."
 		else:
-			status.text = str(result.get("error", "Could not resend."))
+			status.text = _auth_msg(result, "error", "Could not resend.")
 	))
 	box.add_child(_make_button("Back to Welcome", _show_welcome))
 
@@ -996,7 +1018,7 @@ func _after_verified_sign_in() -> void:
 		return
 	var claim: Dictionary = await state.membership.claim_membership()
 	if not bool(claim.get("ok", false)):
-		var msg := str(claim.get("error", "This is a private app, and this account is not approved."))
+		var msg := _auth_msg(claim, "error", "This is a private app, and this account is not approved.")
 		if bool(claim.get("forbidden", false)):
 			msg = "This is a private app, and this account is not approved."
 		await state.sign_out_full()
@@ -1010,7 +1032,7 @@ func _after_verified_sign_in() -> void:
 		var status := int(state.api.last_http_status)
 		if status == 401 or status == 403:
 			await state.sign_out_full()
-			_show_toast(str(profile_result.get("error", "Could not load profile.")))
+			_show_toast(_auth_msg(profile_result, "error", "Could not load profile."))
 			_show_welcome()
 			return
 		## Soft fail: keep session; use cache / optimistic enter — never false Create Profile.
@@ -4395,13 +4417,13 @@ func _show_profile() -> void:
 				var started: Dictionary = await state.auth.begin_link_google()
 				if not bool(started.get("ok", false)):
 					_auth_busy = false
-					_show_toast(str(started.get("error", "Could not start Google linking.")))
+					_show_toast(_auth_msg(started, "error", "Could not start Google linking."))
 					return
 				var opened: Dictionary = AuthDeepLinkHelper.open_external_auth_url(str(started.get("url", "")))
 				_auth_busy = false
 				if not bool(opened.get("ok", false)):
 					state.auth.cancel_oauth()
-					_show_toast(str(opened.get("error", "Could not open browser.")))
+					_show_toast(_auth_msg(opened, "error", "Could not open browser."))
 					return
 				_show_toast("Complete Google linking in your browser, then return here.")
 			, Vector2(0, MobileUi.TOUCH_SECONDARY_H)))
@@ -5578,15 +5600,15 @@ func _consume_auth_callback() -> void:
 	_show_toast("Completing sign-in…")
 	var result: Dictionary = await state.auth.handle_auth_callback_uri(uri)
 	if bool(result.get("cancelled", false)):
-		_show_toast(str(result.get("error", "Google sign-in was cancelled.")))
+		_show_toast(_auth_msg(result, "error", "Google sign-in was cancelled."))
 		if not state.tokens.has_session():
 			_show_auth(false)
 		return
 	if bool(result.get("duplicate", false)) or bool(result.get("dead", false)):
-		_show_toast(str(result.get("error", "This sign-in link was already used.")))
+		_show_toast(_auth_msg(result, "error", "This sign-in link was already used."))
 		return
 	if not bool(result.get("ok", false)):
-		_show_toast(str(result.get("error", "Could not complete sign-in.")))
+		_show_toast(_auth_msg(result, "error", "Could not complete sign-in."))
 		if bool(result.get("expired", false)) and str(result.get("flow", "")) == AuthCallbackParser.FLOW_RECOVERY:
 			_show_forgot_password("")
 		elif not state.tokens.has_session():

@@ -13,10 +13,11 @@
 #      Supabase Auth only needs the apikey header for unauthenticated requests;
 #      retain the legacy anon-JWT bearer only when the public key is JWT-shaped.
 #
-# Finally, it verifies the FINAL APK and AAB manifests contain the dedicated
-# exported AuthCallbackActivity + exact VIEW/BROWSABLE custom-scheme route. This
-# prevents a repeat of v77, where source manifest injection appeared successful
-# but the callback intent filter was absent from the packaged app.
+# Finally, it verifies structurally that the FINAL APK and AAB manifests each
+# declare the dedicated exported AuthCallbackActivity owning the exact
+# VIEW/DEFAULT/BROWSABLE custom-scheme route. This prevents a repeat of v77,
+# where source manifest injection appeared successful but the callback intent
+# filter was absent from the packaged app.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -98,59 +99,19 @@ AAB_MANIFEST="$(mktemp)"
 "$AAPT" dump xmltree "$APK" AndroidManifest.xml > "$APK_MANIFEST"
 java -jar "$BUNDLETOOL_JAR" dump manifest --bundle="$AAB" > "$AAB_MANIFEST"
 
-# The APK check is intentionally simple/global; the structured AAB check below
-# proves the VIEW/BROWSABLE/data filter belongs to AuthCallbackActivity itself.
-for needle in \
-  'com.charoitegames.chestoflovenotes.securestorage.AuthCallbackActivity' \
-  'android.intent.action.VIEW' \
-  'android.intent.category.BROWSABLE' \
-  'com.charoitegames.chestoflovenotes' \
-  'auth-callback'; do
-  if ! grep -Fq "$needle" "$APK_MANIFEST"; then
-    echo "ERROR: final APK manifest missing auth callback marker: $needle" >&2
+# Both packaged manifests are checked structurally: the VIEW/DEFAULT/BROWSABLE
+# filter and its scheme/host must belong to AuthCallbackActivity itself. A
+# global string search is not enough — a manifest that re-homes the filter onto
+# another activity (the v77 class of failure) still contains every marker.
+verify_manifest() {
+  if ! python3 tools/ci_verify_auth_callback_manifest.py "$1" "$2" "$3"; then
     rm -f "$APK_MANIFEST" "$AAB_MANIFEST"
     exit 1
   fi
-done
+}
 
-python3 - "$AAB_MANIFEST" <<'PY'
-import sys
-import xml.etree.ElementTree as ET
-
-path = sys.argv[1]
-root = ET.parse(path).getroot()
-android = '{http://schemas.android.com/apk/res/android}'
-want = 'com.charoitegames.chestoflovenotes.securestorage.AuthCallbackActivity'
-activity = None
-for node in root.findall('.//activity'):
-    if node.get(android + 'name') == want:
-        activity = node
-        break
-if activity is None:
-    raise SystemExit('AAB manifest missing AuthCallbackActivity')
-if activity.get(android + 'exported') != 'true':
-    raise SystemExit('AuthCallbackActivity is not exported=true')
-
-matched = False
-for filt in activity.findall('intent-filter'):
-    actions = {n.get(android + 'name') for n in filt.findall('action')}
-    cats = {n.get(android + 'name') for n in filt.findall('category')}
-    for data in filt.findall('data'):
-        if (
-            'android.intent.action.VIEW' in actions
-            and 'android.intent.category.DEFAULT' in cats
-            and 'android.intent.category.BROWSABLE' in cats
-            and data.get(android + 'scheme') == 'com.charoitegames.chestoflovenotes'
-            and data.get(android + 'host') == 'auth-callback'
-        ):
-            matched = True
-            break
-    if matched:
-        break
-if not matched:
-    raise SystemExit('AuthCallbackActivity missing exact VIEW/DEFAULT/BROWSABLE callback filter')
-print('STRICT_AUTH_CALLBACK_OK: final AAB contains exact exported auth callback Activity/filter')
-PY
+verify_manifest aapt "$APK_MANIFEST" "final APK"
+verify_manifest xml "$AAB_MANIFEST" "final AAB"
 rm -f "$APK_MANIFEST" "$AAB_MANIFEST"
 
 echo "STRICT_EXPORT_OK: no Godot script errors; packaged auth callback route verified"

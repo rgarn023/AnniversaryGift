@@ -151,6 +151,8 @@ jobs:
           grep -Eq '^architectures/armeabi-v7a=false$' export_presets.cfg
           test -f android/plugins/chest_secure_storage/AuthCallbackActivity.kt
           grep -Fq 'AuthCallbackActivity' android/plugins/chest_secure_storage/install_into_android_build.sh
+          test -f tools/ci_verify_auth_callback_manifest.py
+          grep -Fq 'ci_verify_auth_callback_manifest.py' tools/ci_export_android_artifacts_strict.sh
           echo "Pre-build pins OK"
 
       - name: Require and verify Supabase public config
@@ -203,7 +205,8 @@ jobs:
           CI_DIST_DIR: ${{ runner.temp }}/chest-v78-dist
         run: |
           set -euo pipefail
-          chmod +x tools/ci_export_android_artifacts.sh tools/ci_export_android_artifacts_strict.sh
+          chmod +x tools/ci_export_android_artifacts.sh tools/ci_export_android_artifacts_strict.sh \
+            tools/ci_verify_auth_callback_manifest.py
           mkdir -p "$CI_DIST_DIR"
           tools/ci_export_android_artifacts_strict.sh
 
@@ -217,7 +220,7 @@ jobs:
           grep -Eq '^architectures/armeabi-v7a=false$' export_presets.cfg
           grep -Eq '^architectures/arm64-v8a=true$' export_presets.cfg
           grep -Fq 'assets/branding/154659_cursor_under4mb.gif' export_presets.cfg
-          git diff --exit-code -- export_presets.cfg android/signing/LAST_RELEASED_VERSION_CODE scripts/network/auth_service.gd scripts/network/api_client.gd scripts/ui/keyboard_avoidance.gd android/plugins/chest_secure_storage/AuthCallbackActivity.kt android/plugins/chest_secure_storage/install_into_android_build.sh
+          git diff --exit-code -- export_presets.cfg android/signing/LAST_RELEASED_VERSION_CODE scripts/network/auth_service.gd scripts/network/api_client.gd scripts/ui/keyboard_avoidance.gd android/plugins/chest_secure_storage/AuthCallbackActivity.kt android/plugins/chest_secure_storage/install_into_android_build.sh tools/ci_verify_auth_callback_manifest.py tools/ci_export_android_artifacts_strict.sh
 
       - name: Upload APK artifact
         if: success()
